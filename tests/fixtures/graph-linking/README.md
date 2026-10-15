@@ -1,14 +1,14 @@
 # Fixture: concept linking
 
 A synthetic LogSeq graph for exercising `skills/logseq-skills/skills/concept-linking.md`
-and its gate, the `logseq_check_links` tool (`rust/src/tools/check_links/`).
+and its gate, the `logseq_check_links` tool (`src/tools/check_links/`).
 
 Every name, page and event here is invented. Nothing in this fixture comes from a real graph,
 which is what allows it to live in a public repository.
 
 ```
 pages/       13 pages, each engineered for one rule
-pages.txt    the page names, as the `name` of each `logseq_find_pages` entry (`rust/tests/check_links_fixture.rs` builds its stub graph from it). `Priya Raghavan` is not listed: it is an alias, so the tool returns it as `{ name: "Priya", aliases: ["Priya Raghavan"] }` (#171)
+pages.txt    the page names, as the `name` of each `logseq_find_pages` entry (`tests/check_links_fixture.rs` builds its stub graph from it). `Priya Raghavan` is not listed: it is an alias, so the tool returns it as `{ name: "Priya", aliases: ["Priya Raghavan"] }` (#171)
 journals/    2024_03_11.md  the unlinked input
 expected/    2024_03_11.md  the only correct result
 negative/    deliberate defects the gate must reject
@@ -118,8 +118,8 @@ the note's does not. `unresolved-only.md` isolates check 3 by keeping the prose 
 
 ## Running
 
-`rust/tests/check_links_fixture.rs` runs `logseq_check_links` over this fixture against a stub LogSeq built from
-`pages.txt` (plus the one alias the pages declare, `Priya Raghavan`), in `cd rust && cargo test --locked --test check_links_fixture`.
+`tests/check_links_fixture.rs` runs `logseq_check_links` over this fixture against a stub LogSeq built from
+`pages.txt` (plus the one alias the pages declare, `Priya Raghavan`), in `cargo test --locked --test check_links_fixture`.
 It passes `expected/` and fails each negative case on the checks in the table above. It also covers the bare variant: its
 expected result passes the gate, no page in the overlaid graph other than `Devon` mentions him, and its `expected/` differs
 from the base one in the `Devon` ref alone, so the two cannot drift apart. A negative case that starts to pass fails the test.

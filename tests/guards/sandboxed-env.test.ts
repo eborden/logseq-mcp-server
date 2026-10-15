@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PARITY_NOW_MS, PARITY_TZ, sandboxedEnv } from '../../scripts/lib/sandboxed-env.js';
 
-/** The environment the Node tooling runs the server in (scripts/lib/sandboxed-env.ts). The parity test's is in Rust (rust/tests/parity_harness.rs). */
+/** The environment the Node tooling runs the server in (scripts/lib/sandboxed-env.ts). The parity test's is in Rust (tests/parity_harness.rs). */
 describe('sandboxedEnv', () => {
   it('gives the server a sandboxed home, so a server that ignores LOGSEQ_MCP_CONFIG finds no fallback config', () => {
     const env = sandboxedEnv('/tmp/logseq-x/config.json', '/tmp/logseq-x/home');

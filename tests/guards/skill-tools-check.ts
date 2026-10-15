@@ -178,15 +178,15 @@ export type DocOptions = {
   bareContexts: Readonly<Record<string, string>>;
   /**
    * The tool directory paths of the docs (#520). Off when absent (the skills guard passes none). A path that starts
-   * `rust/src/tools/` (or `src/tools/`) must name what exists under the tools directory, and so must every `name/`
-   * entry in the file-map row of rust/README.md. A rename of a tool's directory then fails on the doc that still says
+   * `src/tools/` must name what exists under the tools directory, and so must every `name/`
+   * entry in the file-map row of docs/architecture.md. A rename of a tool's directory then fails on the doc that still says
    * the old one, unless that line carries the history comment naming the old directory.
    */
   toolPaths?: ToolPathOptions;
 };
 
 export type ToolPathOptions = {
-  /** What `rel`, a path relative to rust/src/tools (`get_page/outline`, `get_page/mod.rs`), is on disk, or null. */
+  /** What `rel`, a path relative to src/tools (`get_page/outline`, `get_page/mod.rs`), is on disk, or null. */
   kindOf: (rel: string) => 'dir' | 'file' | null;
   /** The file-map row: the doc it is in and the text its line starts with. Its `name/` entries are directory names. */
   fileMap: { path: string; rowStart: string };
@@ -195,9 +195,9 @@ export type ToolPathOptions = {
 const markerPattern = (keyword: string): RegExp =>
   new RegExp(`<!--\\s*${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}((?:\\s+[A-Za-z0-9_]+)*)\\s*-->`);
 
-// `rust/src/tools/<path>` or, inside rust/README.md, `src/tools/<path>`. The path runs to the first character a path does
+// `src/tools/<path>`. The path runs to the first character a path does
 // not hold, so a placeholder (`<name>`) or a backtick ends it, and a sentence's closing dot is cut off after the match.
-const TOOLS_PATH = /(?<![A-Za-z0-9_./-])(?:rust\/)?src\/tools\/([A-Za-z0-9_./-]*)/g;
+const TOOLS_PATH = /(?<![A-Za-z0-9_./-])src\/tools\/([A-Za-z0-9_./-]*)/g;
 // A code span that is only a directory name with its slash, `get_page/` or `get_page/outline/`: an entry of the file map.
 const DIR_ENTRY = /`([a-z0-9_]+(?:\/[a-z0-9_]+)*)\/`/g;
 
@@ -231,7 +231,7 @@ function missingToolPaths(
         // Only a directory whose name is in FORMER_TOOL_NAMES can be excused by a history comment. A file has no such
         // name, and a directory the list does not know is not excused: '' matches no name in a comment.
         name: wantsFile || !former.has(parts[i]) ? '' : parts[i],
-        message: `${file}:${line}: "${written}" names the ${what} rust/src/tools/${rel}${what === 'directory' ? '/' : ''}, which does not exist`,
+        message: `${file}:${line}: "${written}" names the ${what} src/tools/${rel}${what === 'directory' ? '/' : ''}, which does not exist`,
       });
       return;
     }

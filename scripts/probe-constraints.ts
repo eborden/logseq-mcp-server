@@ -525,7 +525,7 @@ async function probeFindPagesNull(
 // find_pages nests aliases and matches page properties from getAllPages (#171, #490)
 //
 // `find_pages` reads `alias` (ids of the linked pages) and `file` off each
-// `getAllPages` entity, in `nestAliases` (rust/src/tools/find_pages/mod.rs), and
+// `getAllPages` entity, in `nestAliases` (src/tools/find_pages/mod.rs), and
 // `properties` for its `property` and `value` filter. If a LogSeq upgrade
 // dropped or renamed a key, nothing would fail: every alias would stay a
 // top-level page, as before #171, and the property filter would find no page;

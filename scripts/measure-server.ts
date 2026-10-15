@@ -3,7 +3,7 @@
  * TypeScript one was retired.
  *
  *   --server rust      the default, and the only value
- *   --rust-binary <p>  the binary (default rust/target/release/logseq-mcp-server)
+ *   --rust-binary <p>  the binary (default target/release/logseq-mcp-server)
  *
  * The Rust binary talks to LogSeq itself, so its calls are counted by a small forwarding proxy
  * on the loopback interface: the binary gets a temporary config that holds the same token and
@@ -32,7 +32,7 @@ export interface ServerChoice {
   rest: string[];
 }
 
-const DEFAULT_BINARY = 'rust/target/release/logseq-mcp-server';
+const DEFAULT_BINARY = 'target/release/logseq-mcp-server';
 
 /** Parses `--server` and `--rust-binary`; everything else (a page name) is left in `rest`. */
 export function parseServerFlags(argv: string[]): ServerChoice {

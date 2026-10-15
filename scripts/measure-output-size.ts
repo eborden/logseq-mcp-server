@@ -12,7 +12,7 @@
  *
  * Usage: npx tsx scripts/measure-output-size.ts [--server rust] [--rust-binary <path>] [pageName]
  * `--server rust` (the default and only value since the TypeScript server was retired, #356) runs the Rust
- * binary over MCP stdio (default rust/target/release/logseq-mcp-server); the setup queries that pick the
+ * binary over MCP stdio (default target/release/logseq-mcp-server); the setup queries that pick the
  * subject go straight to LogSeq. With no LOGSEQ_MCP_CONFIG it reads the real graph on purpose.
  * Requires LogSeq running with the HTTP API enabled. Read-only.
  */

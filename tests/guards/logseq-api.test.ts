@@ -17,7 +17,7 @@ import {
 
 /**
  * scripts/lib/logseq-api.ts is the small client the repo's tooling uses (the fixture check, the probe, the measure
- * scripts, the per-worktree instance). The server's own client is rust/src/client.rs, which has its own tests.
+ * scripts, the per-worktree instance). The server's own client is src/client.rs, which has its own tests.
  */
 
 const TOKEN = 'secret-token-for-tests';

@@ -1,7 +1,7 @@
 // Per-tool latency and LogSeq call counts of the Rust server (#353; the comparison with the Node server was
 // dropped with the TypeScript server, #356).
 //
-//   cd rust && cargo build --release --locked       # the Rust server; the script does not build it
+//   cargo build --release --locked       # the Rust server; the script does not build it
 //   npx tsx scripts/measure-latency.ts [--iterations 30] [--warmup 3] [--rust-binary <path>]
 //
 // The server runs over MCP stdio against a stub LogSeq (scripts/lib/stub-logseq.ts)
@@ -44,7 +44,7 @@ function parseOptions(argv: string[]): Options {
   const options: Options = {
     iterations: 30,
     warmup: 3,
-    rustBinary: join(REPO_ROOT, 'rust', 'target', 'release', process.platform === 'win32' ? 'logseq-mcp-server.exe' : 'logseq-mcp-server')
+    rustBinary: join(REPO_ROOT, 'target', 'release', process.platform === 'win32' ? 'logseq-mcp-server.exe' : 'logseq-mcp-server')
   };
   for (let i = 0; i < argv.length; i += 2) {
     const value = argv[i + 1];
@@ -61,7 +61,7 @@ function parseOptions(argv: string[]): Options {
 
 // ---- the cases
 
-/** The parity case with this name (rust/tests/data/parity), and the recorded result for it. */
+/** The parity case with this name (tests/data/parity), and the recorded result for it. */
 async function parityCase(name: string): Promise<{ case: ParityCase; expected: ToolResult }> {
   const found = loadParityCase(name);
   return { case: found, expected: found.expected };
@@ -290,7 +290,7 @@ async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
   if (process.platform === 'win32') throw new Error('this script is for macOS or Linux');
   await stat(options.rustBinary).catch(() => {
-    throw new Error(`no Rust binary at ${options.rustBinary}; build it with: cd rust && cargo build --release --locked`);
+    throw new Error(`no Rust binary at ${options.rustBinary}; build it with: cargo build --release --locked`);
   });
 
   const cases = await buildCases();

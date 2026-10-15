@@ -105,7 +105,7 @@ case "$os/$arch" in
   Darwin/x86_64) target='x86_64-apple-darwin' ;;
   Linux/x86_64 | Linux/amd64) target='x86_64-unknown-linux-musl' ;;
   MINGW* | MSYS* | CYGWIN* | Windows*)
-    die "Windows has no release binary yet (it is deferred, see ADR-0035). Build the server from a clone with 'cd rust && cargo build --release --locked'."
+    die "Windows has no release binary yet (it is deferred, see ADR-0035). Build the server from a clone with 'cargo build --release --locked'."
     ;;
   *)
     die "there is no release binary for this platform ($os $arch). Supported: macOS (arm64, x86_64) and Linux x86_64."

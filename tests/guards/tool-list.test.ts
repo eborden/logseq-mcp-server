@@ -15,7 +15,7 @@ import {
  * Guardrails on the `tools/list` payload (#39, part of #13, kept by #356).
  *
  * Every session pays for this payload in context, so growth should be a deliberate choice. The recorded list,
- * rust/tests/data/parity/tool-list.json, is the contract: the parity test (rust/tests/parity.rs) holds the Rust
+ * tests/data/parity/tool-list.json, is the contract: the parity test (tests/parity.rs) holds the Rust
  * server's `tools/list` to it by meaning (ADR-0031), and these checks hold the recorded list to the rules that outlived the TypeScript
  * server it was recorded from (`tests/rust-guards/tool-list-live.test.ts` holds the live list to the budget and the cap):
  *   1. a size budget on the whole serialized tool list (ADR-0016),
@@ -26,7 +26,7 @@ import {
  */
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
-const TOOL_LIST_FILE = new URL('../../rust/tests/data/parity/tool-list.json', import.meta.url);
+const TOOL_LIST_FILE = new URL('../../tests/data/parity/tool-list.json', import.meta.url);
 type RecordedTool = {
   name: string;
   title?: string;
@@ -140,7 +140,7 @@ describe('tools/list guardrails', () => {
     });
 
     it('lists, in PARAM_ALIASES, exactly the aliases the Rust tools read', () => {
-      const toolsDir = join(ROOT, 'rust', 'src', 'tools');
+      const toolsDir = join(ROOT, 'src', 'tools');
       const found: Record<string, { canonical: string; aliases: string[] }> = {};
       for (const dir of readdirSync(toolsDir).filter(entry => statSync(join(toolsDir, entry)).isDirectory())) {
         const source = readFileSync(join(toolsDir, dir, 'mod.rs'), 'utf-8');
@@ -153,8 +153,8 @@ describe('tools/list guardrails', () => {
   });
 
   describe('one module per tool (ADR-0005)', () => {
-    it('has exactly one module in rust/src/tools for each recorded tool, and no other', () => {
-      const toolsDir = join(ROOT, 'rust', 'src', 'tools');
+    it('has exactly one module in src/tools for each recorded tool, and no other', () => {
+      const toolsDir = join(ROOT, 'src', 'tools');
       const modules = readdirSync(toolsDir).filter(entry => entry !== 'mod.rs').sort();
       // A second implementation of a tool (a `*_http` or `*_datalog` module, or any extra module) would be listed here
       expect(modules).toEqual(tools.map(tool => tool.name.replace(/^logseq_/, '')).sort());

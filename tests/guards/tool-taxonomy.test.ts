@@ -11,7 +11,7 @@ import {
 /**
  * ADR-0037 (tool-taxonomy-get-find-explore-check), Mechanical enforcement (#488, part of #500).
  *
- * The recorded list, rust/tests/data/parity/tool-list.json, is held to the v2 naming rules: every name is
+ * The recorded list, tests/data/parity/tool-list.json, is held to the v2 naming rules: every name is
  * `logseq_<type>_<object>` with a type of get, find, explore or check; every description opens with its type's verb; and
  * no parameter uses a v1 name for a concept that v2 shares. Since #519 a positive list holds it as well: every parameter
  * must be one ADR-0037's vocabulary and surface table gives that tool (ALLOWED_PARAMETERS), so a new name fails even when
@@ -21,7 +21,7 @@ import {
  * fail and a stale entry is reported.
  */
 
-const TOOL_LIST_FILE = new URL('../../rust/tests/data/parity/tool-list.json', import.meta.url);
+const TOOL_LIST_FILE = new URL('../../tests/data/parity/tool-list.json', import.meta.url);
 const recorded = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as TaxonomyTool[];
 
 describe('tool taxonomy (ADR-0037)', () => {

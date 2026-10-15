@@ -1,7 +1,7 @@
 /**
  * The shapes the integration suites read out of tool results and LogSeq answers. They are deliberately loose:
  * a suite asserts exact values on the fixture graph, so the type only has to let it reach a field. The server
- * (rust/) is where the real shapes live.
+ * (`src/`) is where the real shapes live.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

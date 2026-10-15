@@ -271,7 +271,7 @@ without the letter, or change that test.
 ## Roll-up pages (#498)
 
 A roll-up page links to almost everything, like the weekly or monthly summary pages a graph generates, and is no journal.
-`explore_network` treats a page that links **more than 30 pages** (`HUB_LINKS`, `rust/src/tools/explore_network/selection.rs`)
+`explore_network` treats a page that links **more than 30 pages** (`HUB_LINKS`, `src/tools/explore_network/selection.rs`)
 as a leaf: it ranks after every other page and is not walked through unless `expand_journals` is set. The count is of
 distinct pages the page's blocks link, not of blocks. It is separate from the hub so the hub's depth-1 ranking stays as
 documented. Every name is made up, and the blocks avoid the letter `e` (see "The crowded topic").

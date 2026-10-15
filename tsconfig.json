@@ -1,6 +1,6 @@
 // Type-checks the repo's TypeScript tooling: scripts/ (the parity harness, the measure and probe scripts, the
 // per-worktree LogSeq instance) and the guard tests (tests/guards). The integration suites have their own
-// tests/integration/tsconfig.json. The server itself is Rust (rust/, #356). Run in CI: `npm run typecheck`.
+// tests/integration/tsconfig.json. The server itself is Rust (`src/`, #356). Run in CI: `npm run typecheck`.
 {
   "compilerOptions": {
     "target": "ES2022",

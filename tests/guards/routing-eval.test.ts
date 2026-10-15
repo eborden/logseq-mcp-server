@@ -189,7 +189,7 @@ describe('tests/fixtures/routing-eval/questions.json', () => {
 
   it('knows the type of every tool the recorded tool list holds', () => {
     // The recorded list moves from the v1 names to the v2 ones, one rename per PR (#500); either way the eval knows each
-    const recorded = JSON.parse(readFileSync(join(root, 'rust', 'tests', 'data', 'parity', 'tool-list.json'), 'utf8')) as Array<{ name: string }>;
+    const recorded = JSON.parse(readFileSync(join(root, 'tests', 'data', 'parity', 'tool-list.json'), 'utf8')) as Array<{ name: string }>;
     expect(recorded.length).toBeGreaterThan(0);
     for (const { name } of recorded) expect(toolType(name), name).toBeDefined();
   });

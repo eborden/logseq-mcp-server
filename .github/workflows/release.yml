@@ -13,7 +13,7 @@ name: Release
 #   Releases page, and that click creates the tag (ADR-0035 Decision 2 and 12). The wheels ride on the release and
 #   pypi.yml later uploads those exact files to PyPI (ADR-0036).
 #
-# The version input must equal the version in rust/Cargo.toml, package.json and both plugin manifests, or the run fails
+# The version input must equal the version in Cargo.toml, package.json and both plugin manifests, or the run fails
 # before it builds. A run fails if a release or a tag v<version> already exists, draft or not, so a stale draft is
 # never reused with different assets: the maintainer deletes it first, on purpose.
 #
@@ -60,7 +60,7 @@ jobs:
             echo "::error::The version input must be plain x.y.z, with no v prefix and no pre-release part."
             exit 1
           fi
-          cargo_version="$(sed -n '/^\[package\]/,/^\[/s/^version = "\([^"]*\)"$/\1/p' rust/Cargo.toml | head -n 1)"
+          cargo_version="$(sed -n '/^\[package\]/,/^\[/s/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)"
           status=0
           check() {
             if [ "$2" != "$VERSION" ]; then
@@ -68,7 +68,7 @@ jobs:
               status=1
             fi
           }
-          check rust/Cargo.toml "$cargo_version"
+          check Cargo.toml "$cargo_version"
           check package.json "$(jq -r '.version' package.json)"
           check .claude-plugin/plugin.json "$(jq -r '.version' .claude-plugin/plugin.json)"
           check .claude-plugin/marketplace.json "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)"
@@ -109,19 +109,17 @@ jobs:
         with:
           persist-credentials: false
 
-      # Installs the toolchain rust/rust-toolchain.toml names, with the target added. The build cache is off: a
+      # Installs the toolchain rust-toolchain.toml names, with the target added. The build cache is off: a
       # release is built from the lockfile alone, and a cold build is a few minutes (#304).
       - name: Set up the Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          rust-src-dir: rust
           target: ${{ matrix.target }}
           cache: false
           rustflags: ""
           build-warnings: warn
 
       - name: Check the compiler is the pinned one
-        working-directory: rust
         run: |
           expected="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
           rustc --version | grep -q "^rustc ${expected} " || { rustc --version; echo "expected rustc ${expected}" >&2; exit 1; }
@@ -136,7 +134,6 @@ jobs:
 
       - name: Build (release)
         id: build
-        working-directory: rust
         env:
           TARGET: ${{ matrix.target }}
         run: |
@@ -147,7 +144,6 @@ jobs:
       # The same steps ci.yml runs on the release build, against this target's build. The binary is the one just
       # built: the parity test starts it through CARGO_BIN_EXE, and the step after the gate checks its bytes did not change.
       - name: Parity test and its self-check
-        working-directory: rust
         env:
           TARGET: ${{ matrix.target }}
         run: cargo test --release --locked --target "$TARGET" --test parity --test parity_self_check
@@ -155,7 +151,6 @@ jobs:
       # The library's unit tests with debug_assertions off, as ci.yml runs them: LTO off and 16 codegen units keep
       # it short and change nothing about debug_assertions.
       - name: Unit tests (release)
-        working-directory: rust
         env:
           TARGET: ${{ matrix.target }}
           CARGO_PROFILE_RELEASE_LTO: 'off'
@@ -168,7 +163,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           BUILT_SHA256: ${{ steps.build.outputs.sha256 }}
         run: |
-          bin="rust/target/${TARGET}/release/logseq-mcp-server"
+          bin="target/${TARGET}/release/logseq-mcp-server"
           now="$(shasum -a 256 "$bin" | cut -d ' ' -f 1)"
           if [ "$now" != "$BUILT_SHA256" ]; then
             echo "::error::The binary changed after the release build, so the gate did not test the bytes that would ship."
@@ -207,8 +202,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # THIRD-PARTY-NOTICES.txt: the licences of the crates the three targets build, from Cargo.lock (rust/about.toml and
-  # rust/about.hbs). cargo-about is a release binary, pinned by version and by the SHA-256 of the tarball (from the
+  # THIRD-PARTY-NOTICES.txt: the licences of the crates the three targets build, from Cargo.lock (about.toml and
+  # about.hbs). cargo-about is a release binary, pinned by version and by the SHA-256 of the tarball (from the
   # release's <archive>.sha256 file); to bump it, change both and read that file. It reads only Cargo.lock and the
   # downloaded crates, and runs with the read-only token.
   notices:
@@ -228,7 +223,6 @@ jobs:
       - name: Set up the Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          rust-src-dir: rust
           cache: false
           rustflags: ""
           build-warnings: warn
@@ -244,14 +238,12 @@ jobs:
           mv "${RUNNER_TEMP}/${dir}/cargo-about" "${RUNNER_TEMP}/cargo-about"
 
       - name: Download the locked crates
-        working-directory: rust
         run: cargo fetch --locked
 
-      # Fails on a licence rust/about.toml doesn't accept, or a crate with none it can read, so a new dependency
+      # Fails on a licence about.toml doesn't accept, or a crate with none it can read, so a new dependency
       # can't ship unnoticed.
       - name: Generate THIRD-PARTY-NOTICES.txt
-        working-directory: rust
-        run: '"${RUNNER_TEMP}/cargo-about" generate --locked --offline --fail --config about.toml --output-file ../THIRD-PARTY-NOTICES.txt about.hbs'
+        run: '"${RUNNER_TEMP}/cargo-about" generate --locked --offline --fail --config about.toml --output-file THIRD-PARTY-NOTICES.txt about.hbs'
 
       - name: Collect the notices
         run: |

@@ -1,7 +1,7 @@
 // Start-up, memory and size of the Rust server (#126, #122; the Node comparison was dropped with the TypeScript
 // server, #356).
 //
-//   cd rust && cargo build --release --locked      # once; the script does not build the binary
+//   cargo build --release --locked      # once; the script does not build the binary
 //   npx tsx scripts/measure-footprint.ts [--runs 7] [--rust-binary <path>] [--settle-ms 500]
 //
 // It prints aggregates only (median, then min and max over the runs):
@@ -36,7 +36,7 @@ interface Options {
 function parseOptions(argv: string[]): Options {
   const options: Options = {
     runs: 7,
-    rustBinary: join(REPO_ROOT, 'rust', 'target', 'release', process.platform === 'win32' ? 'logseq-mcp-server.exe' : 'logseq-mcp-server'),
+    rustBinary: join(REPO_ROOT, 'target', 'release', process.platform === 'win32' ? 'logseq-mcp-server.exe' : 'logseq-mcp-server'),
     settleMs: 500
   };
   for (let i = 0; i < argv.length; i += 2) {
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
   if (process.platform === 'win32') throw new Error('this script reads memory with ps; run it on macOS or Linux');
   await stat(options.rustBinary).catch(() => {
-    throw new Error(`no Rust binary at ${options.rustBinary}; build it with: cd rust && cargo build --release --locked`);
+    throw new Error(`no Rust binary at ${options.rustBinary}; build it with: cargo build --release --locked`);
   });
 
   const work = await mkdtemp(join(tmpdir(), 'logseq-footprint-'));

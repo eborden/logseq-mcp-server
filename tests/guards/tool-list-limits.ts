@@ -1,6 +1,6 @@
 /**
  * The limits ADR-0016 puts on the `tools/list` payload, shared by the two tests that hold a list to them:
- * `tests/guards/tool-list.test.ts` (the recorded list, rust/tests/data/parity/tool-list.json) and
+ * `tests/guards/tool-list.test.ts` (the recorded list, tests/data/parity/tool-list.json) and
  * `tests/rust-guards/tool-list-live.test.ts` (the Rust server's own list, which is what a client receives).
  */
 
@@ -40,7 +40,7 @@ export const NON_IDEMPOTENT = ['logseq_get_current'];
 /**
  * The parameter aliases of the tools that take them (BR-0008): each tool's canonical parameter, and the other names the
  * server also reads. The canonical name stays `required` in the schema and no alias is advertised. This table is
- * checked against the `ALIASES` constants in `rust/src/tools/*\/mod.rs` by `tests/guards/tool-list.test.ts`, so it can't
+ * checked against the `ALIASES` constants in `src/tools/*\/mod.rs` by `tests/guards/tool-list.test.ts`, so it can't
  * drift from the code.
  */
 export const PARAM_ALIASES: Record<string, { canonical: string; aliases: string[] }> = {

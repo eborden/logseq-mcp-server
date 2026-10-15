@@ -2,7 +2,7 @@
 // guard tests that start the binary). It replays canned responses keyed by method and query text, records
 // every call it gets, and fails loud on any call it has no answer for. It listens on 127.0.0.1 with a port
 // the OS picks, never LogSeq's 12315, and checks a token made fresh for each run, so a server pointed at it
-// can't reach a real graph by mistake. The parity test has its own, in Rust (rust/tests/parity_support/stub.rs).
+// can't reach a real graph by mistake. The parity test has its own, in Rust (tests/parity_support/stub.rs).
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
