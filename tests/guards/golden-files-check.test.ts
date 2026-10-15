@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFile } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -37,6 +37,8 @@ function runBlock(stepName: string): string {
 }
 
 const DATA = 'tests/data/parity';
+// TEMPORARY (#540): the base of the PR that moves the crate still holds the data here. The follow-up PR reads the base from DATA too.
+const BASE_DATA = 'rust/tests/data/parity';
 const CEILING_FILE = `${DATA}/call-ceilings.json`;
 
 /** A group file as the recorder writes it: one case to a line. */
@@ -82,21 +84,25 @@ describe('the golden-files job in ci.yml', () => {
     const script = runBlock('Check the golden files');
 
     /** A repository whose base commit holds one group file, a tool list and a clock list, and whose next commit makes `changes` (a text, or null to delete the file). */
-    async function scratch(changes: Record<string, string | null>, withCeilings = true): Promise<string> {
+    async function scratch(changes: Record<string, string | null>, withCeilings = true, withData = true): Promise<string> {
       const dir = mkdtempSync(join(tmpdir(), 'golden-files-'));
       const git = (...args: string[]) => exec('git', args, { cwd: dir });
       await git('init', '-q', '-b', 'main');
       await git('config', 'user.email', 'test@example.com');
       await git('config', 'user.name', 'Test');
-      mkdirSync(join(dir, DATA), { recursive: true });
-      writeFileSync(join(dir, DATA, 'get-page.json'), group('get-page', [aCase(), aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]));
-      writeFileSync(join(dir, DATA, 'tool-list.json'), '[\n  {\n    "name": "logseq_get_page"\n  }\n]\n');
-      writeFileSync(join(dir, DATA, 'clock-cases.json'), '[]\n');
-      if (withCeilings) writeFileSync(join(dir, DATA, 'call-ceilings.json'), CEILINGS);
+      mkdirSync(join(dir, BASE_DATA), { recursive: true });
+      if (withData) {
+        writeFileSync(join(dir, BASE_DATA, 'get-page.json'), group('get-page', [aCase(), aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]));
+        writeFileSync(join(dir, BASE_DATA, 'tool-list.json'), '[\n  {\n    "name": "logseq_get_page"\n  }\n]\n');
+        writeFileSync(join(dir, BASE_DATA, 'clock-cases.json'), '[]\n');
+      }
+      if (withCeilings) writeFileSync(join(dir, BASE_DATA, 'call-ceilings.json'), CEILINGS);
       writeFileSync(join(dir, 'README.md'), 'base\n');
       await git('add', '.');
       await git('commit', '-q', '-m', 'base');
-      // the merge commit CI checks out: the base tip is its first parent
+      // the merge commit CI checks out: the base tip is its first parent. The PR moves the folder, as #540 does.
+      mkdirSync(join(dir, DATA), { recursive: true });
+      for (const file of readdirSync(join(dir, BASE_DATA))) renameSync(join(dir, BASE_DATA, file), join(dir, DATA, file));
       for (const [path, text] of Object.entries(changes)) {
         if (text === null) {
           rmSync(join(dir, path));
@@ -247,6 +253,16 @@ describe('the golden-files job in ci.yml', () => {
       expect((await run(scratch({ [GET_PAGE]: group('get-page', [aCase({ name: 'carol' })]) }), ['golden-change-later'])).status).toBe(1);
     });
 
+    it('fails when the base has no golden files, rather than comparing against nothing', async () => {
+      const { status, out } = await run(scratch({ 'README.md': 'changed\n' }, false, false), []);
+      expect(status).toBe(1);
+      expect(out).toContain(`The base has no golden files under ${BASE_DATA}`);
+    });
+
+    it('passes the move itself: the same goldens in the new folder, with no label', async () => {
+      expect((await run(scratch({}), [])).status).toBe(0);
+    });
+
     it('no longer watches the old folder, which is gone', async () => {
       expect((await run(scratch({ 'scripts/parity/expected/get-page.json': '{"a":1}\n' }), [])).status).toBe(0);
     });
@@ -323,8 +339,10 @@ describe('the golden-files job in ci.yml', () => {
         expect((await check(scratch({ [CEILING_FILE]: '[1,2]\n' }), [])).status).toBe(1);
       });
 
-      it('passes when the base has no file yet, which is the pull request that introduces it', async () => {
-        expect((await check(scratch({ [CEILING_FILE]: ceilings({ alice: 1, bob: 2, carol: 3 }) }, false), [])).status).toBe(0);
+      it('fails when the base has no ceilings file, rather than skipping the check', async () => {
+        const { status, out } = await check(scratch({ [CEILING_FILE]: ceilings({ alice: 1, bob: 2, carol: 3 }) }, false), []);
+        expect(status).toBe(1);
+        expect(out).toContain(`The base has no ${BASE_DATA}/call-ceilings.json`);
       });
 
       it('prints a case name indented, so a name can not read as a workflow command', async () => {
