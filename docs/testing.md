@@ -4,7 +4,7 @@ The Rust tests are unit tests beside the code (`#[cfg(test)]` in `src/`) and the
 
 ## Golden results
 
-`cargo test --locked` runs the golden-result test. `tests/parity.rs` starts the binary cargo built, answers its LogSeq calls from a stub on a random local port, and holds it to the results recorded from the TypeScript server before it was retired, in `tests/data/parity/`:
+`cargo test --locked` runs the golden-result test. `tests/parity.rs` starts the binary cargo built, answers its LogSeq calls from a stub on a random local port, and holds it to the results recorded from the TypeScript server before it was retired (its last version reads with `git show 35fa2dd3:<path>`; [ADR-0025](adr/0025-rust-implementation-alongside-typescript.md)), in `tests/data/parity/`:
 
 - Each result: a JSON tool result by deep equality (key order ignored, array order kept, numbers by value) and then minified; markdown, prompts, resources and the frame of a page-not-found message byte for byte; the closest names of a page-not-found message by the rules of ADR-0034 Decision 4 (below).
 - The LogSeq calls, by a bounded count and an effect, not by text or order (below).
