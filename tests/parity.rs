@@ -1,7 +1,6 @@
 //! The golden-result test (#371): run the server binary against the stub LogSeq and hold it to the results
 //! recorded from the TypeScript server before it was retired, which live in `tests/data/parity/` with the cases
-//! (#379: the one source, rewritten only by the recorder, `parity_record.rs`). It runs under `cargo test`, so
-//! that a mutant (`cargo-mutants`, ADR-0033) is killed by any parity case that notices it.
+//! (#379: the one source, rewritten only by the recorder, `parity_record.rs`). It runs under `cargo test`.
 //!
 //! It checks, for every case:
 //! - the result: a JSON tool result by deep equality (key order ignored, array order kept, numbers by value)

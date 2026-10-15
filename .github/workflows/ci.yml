@@ -238,8 +238,7 @@ jobs:
 
       # Includes the parity cases (#371): tests/parity.rs holds the binary to the recorded results, calls and
       # tools/list from tests/data/parity (the one source of the cases and their goldens, #379), and
-      # parity_self_check.rs proves it can fail. cargo-mutants runs this same command per mutant (ADR-0033), so a
-      # parity case kills a mutant it notices.
+      # parity_self_check.rs proves it can fail.
       #
       # The golden-result comparison (#124) is this cargo test (#371, #375): tests/parity.rs holds the binary
       # just built to the results recorded from the TypeScript server before it was retired (tests/data/parity):
