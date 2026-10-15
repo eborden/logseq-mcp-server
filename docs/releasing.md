@@ -4,7 +4,7 @@ For the maintainer. Nothing releases or publishes automatically, and nothing pub
 
 The order, from ADR-0035 (Decision 12) and ADR-0036 (Decision 9). Steps 2 and 5 are runs of a workflow from the Actions tab ("Run workflow", branch `main`):
 
-1. Bump the version in `rust/Cargo.toml`, `package.json` and both `.claude-plugin/` manifests together (a test keeps them equal), and move the `CHANGELOG.md` "Unreleased" entries under it with the release date. Merge that first: the release is built at the commit the run starts from.
+1. Bump the version in `Cargo.toml`, `package.json` and both `.claude-plugin/` manifests together (a test keeps them equal), and move the `CHANGELOG.md` "Unreleased" entries under it with the release date. Merge that first: the release is built at the commit the run starts from.
 2. Run `release.yml` with `dry_run` on, read the artifacts and the logs (every leg of the build, and the `wheels` job), then with it off to create the draft.
 3. **Pre-publish check.** Draft assets can't be downloaded anonymously, so download them with `gh release download v<version> --dir <empty dir>`. On a clean macOS and a clean Linux machine, run the launcher against that directory and call one tool, then install the wheel for that machine from it (`logseq_mcp_server-<version>-py3-none-<platform>.whl`, one per platform) and call one tool:
 

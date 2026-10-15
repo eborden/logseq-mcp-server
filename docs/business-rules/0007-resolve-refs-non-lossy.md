@@ -12,10 +12,10 @@ A reader that gets rewritten `content` can't tell what the author wrote, and a s
 
 ## Mechanical enforcement
 
-One resolver serves every tool: `resolve_block_refs` in `rust/src/resolve_refs/mod.rs`, with one Datalog query per nesting level and `seen` tracked per path, so siblings that share a target both resolve. A new tool that returns blocks should call the resolver rather than add its own.
+One resolver serves every tool: `resolve_block_refs` in `src/resolve_refs/mod.rs`, with one Datalog query per nesting level and `seen` tracked per path, so siblings that share a target both resolve. A new tool that returns blocks should call the resolver rather than add its own.
 
-test: `rust/tests/resolve_refs_calls.rs`
-test: `rust/tests/get_page_block_calls.rs`
+test: `tests/resolve_refs_calls.rs`
+test: `tests/get_page_block_calls.rs`
 test: `tests/integration/resolve-refs.test.ts`
 test: `tests/integration/fixture-only/resolve-refs-missing.test.ts`
 reviewer: A new tool that returns blocks should call `resolve_block_refs` rather than resolve refs itself.

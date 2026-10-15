@@ -33,6 +33,6 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `rust/src/meta.rs` (hasMore only with a way to continue)
+- test: `src/meta.rs` (hasMore only with a way to continue)
 - test: `tests/integration/result-caps.test.ts` (the array stays the first block and a meta block follows, through MCP, for every capped tool)
 - test: `tests/integration/slim-default.test.ts` (empty hasMore and warnings stay in slim output)

@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [2.0.0] - 2026-10-14
 
-v2.0.0 is a hard cut with no deprecation window (ADR-0037). The 16 v1 tools become 10, each named `logseq_<type>_<object>` with a type of `get`, `find`, `explore` or `check`, and every page parameter is `page`. There are no known external callers of v1, so nothing is kept as an alias beyond the few named below. A caller of the tools (the `logseq-skills` plugin skills are already rewritten for v2) should read the migration note first. `rust/Cargo.toml`, `package.json` and the plugin manifests all read 2.0.0.
+v2.0.0 is a hard cut with no deprecation window (ADR-0037). The 16 v1 tools become 10, each named `logseq_<type>_<object>` with a type of `get`, `find`, `explore` or `check`, and every page parameter is `page`. There are no known external callers of v1, so nothing is kept as an alias beyond the few named below. A caller of the tools (the `logseq-skills` plugin skills are already rewritten for v2) should read the migration note first. `Cargo.toml`, `package.json` and the plugin manifests all read 2.0.0.
 
 ### Migration note: v1 to v2
 
@@ -136,7 +136,7 @@ A call that sends only a retired name for a required parameter (`topic_name`, `c
 
 ### Changed (server runtime)
 
-- **The server is now the Rust binary** (ADR-0035, ADR-0036). It is released as native binaries on GitHub Releases for macOS (Apple silicon and Intel) and Linux x86_64, each listed in `SHA256SUMS` and attested with build provenance. The Claude Code plugin starts it through a small shell launcher that downloads the binary for the plugin's own version and checks it against `SHA256SUMS` before it runs. There is no Windows or Linux arm64 binary yet. There is no npm channel: the name `logseq-mcp-server` on npm is not this project, so `npx logseq-mcp-server` runs someone else's package and must not be used. To build from a clone instead, run `cd rust && cargo build --release --locked`. Entries below that mention the npm package, `npx` or the TypeScript server are kept as history.
+- **The server is now the Rust binary** (ADR-0035, ADR-0036). It is released as native binaries on GitHub Releases for macOS (Apple silicon and Intel) and Linux x86_64, each listed in `SHA256SUMS` and attested with build provenance. The Claude Code plugin starts it through a small shell launcher that downloads the binary for the plugin's own version and checks it against `SHA256SUMS` before it runs. There is no Windows or Linux arm64 binary yet. There is no npm channel: the name `logseq-mcp-server` on npm is not this project, so `npx logseq-mcp-server` runs someone else's package and must not be used. To build from a clone instead, run `cargo build --release --locked`. Entries below that mention the npm package, `npx` or the TypeScript server are kept as history.
 
 ### Added
 

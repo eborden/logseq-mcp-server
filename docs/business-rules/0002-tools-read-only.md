@@ -13,7 +13,7 @@ MCP clients retry, and LLMs call the same tool twice. A read-only tool makes tha
 ## Mechanical enforcement
 
 test: `tests/guards/tool-list.test.ts`
-test: `rust/src/server.rs`
+test: `src/server.rs`
 
 The recorded `tools/list` test fails unless every tool sets `readOnlyHint: true` and a title, and pins the `destructiveHint`, `idempotentHint` and `openWorldHint` values of each tool. `tools_list_returns_every_tool_read_only` checks the same five things (`readOnlyHint`, `destructiveHint`, `openWorldHint`, `idempotentHint` with its one exception, and the title) on the Rust server's own list, so the live list doesn't depend on the recorded file.
 

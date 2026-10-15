@@ -93,7 +93,7 @@ The CI guard, `tests/guards/docs-format.test.ts` (#78), parses these files with 
    - A list item whose leading word, ignoring `**`, `__` or backticks around it, is a tier or `none yet` in any case, such as `- Test:`, `- **test:**` or ``- `ci`:``.
 
    The reference is:
-   - `type`, `test`, `ci`: a backticked repo-relative file path, which must exist (for example ``test: `rust/src/server.rs` ``). A workflow is named by its file path (for example ``ci: `.github/workflows/ci.yml` ``). Explanatory text may follow the path. Any further backticked span on the line that is a file path must exist too. A span counts as a file path when it has a directory and its last segment has an extension, such as `rust/src/meta.rs`. Other spans, such as `:block/name`, `Issue/PR` or `ResultMeta`, are prose.
+   - `type`, `test`, `ci`: a backticked repo-relative file path, which must exist (for example ``test: `src/server.rs` ``). A workflow is named by its file path (for example ``ci: `.github/workflows/ci.yml` ``). Explanatory text may follow the path. Any further backticked span on the line that is a file path must exist too. A span counts as a file path when it has a directory and its last segment has an extension, such as `src/meta.rs`. Other spans, such as `:block/name`, `Issue/PR` or `ResultMeta`, are prose.
    - `reviewer`: the checklist item, as plain text.
    - `none-yet`: an issue, written as `#N`, as `https://github.com/<owner>/<repo>/issues/N`, or as a markdown link to that URL. Explanatory text may follow it (for example `none-yet: #61 (adds a cap test)`). The issue should be open when written, since it is meant to add the mechanism. The guard checks only the form. It accepts open or closed issues and doesn't call GitHub.
 

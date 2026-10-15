@@ -20,15 +20,15 @@ Two environment variables, set where the plugin's server starts, change where th
 
 | Variable | Effect |
 |---|---|
-| `LOGSEQ_MCP_BINARY` | An absolute path to a server binary to run as it is: no download, no checks. For offline use, or a binary you built (`cd rust && cargo build --release --locked`). |
+| `LOGSEQ_MCP_BINARY` | An absolute path to a server binary to run as it is: no download, no checks. For offline use, or a binary you built (`cargo build --release --locked`). |
 | `LOGSEQ_MCP_RELEASE_BASE_URL` | Where the release files are fetched from, in place of `https://github.com/eborden/logseq-mcp-server/releases/download/v<version>`. An `https://`, `http://` or `file://` base. The checksum checks still run, but over plain `http://` the checksums come from the same unprotected place as the binary, so they prove nothing against an attacker on the network (the launcher warns on stderr). |
 
 To use a clone's plugin with your own build, with no download:
 
 ```bash
 git clone https://github.com/eborden/logseq-mcp-server
-cd logseq-mcp-server/rust && cargo build --release --locked && cd ..
-LOGSEQ_MCP_BINARY="$PWD/rust/target/release/logseq-mcp-server" claude --plugin-dir .
+cd logseq-mcp-server && cargo build --release --locked
+LOGSEQ_MCP_BINARY="$PWD/target/release/logseq-mcp-server" claude --plugin-dir .
 ```
 
 A binary you download by hand through a browser is quarantined by macOS, and Gatekeeper refuses it until you run `xattr -d com.apple.quarantine <file>`. The launcher's `curl` download isn't affected.

@@ -43,9 +43,9 @@ Add an `offset` so a client can fetch the rest. Foundations 4.6 and 4.11."
 parallel. Each tool gets its own directory and its own new test file. -->
 | Area | File | Note |
 |---|---|---|
-| Queries | `rust/src/tools/<name>/queries.rs` | |
-| Tool | `rust/src/tools/<name>/mod.rs` | `NAME`, `definition`, `call`; registered in `rust/src/tools/mod.rs` |
-| Tests | `rust/tests/<name>_calls.rs` (new) | |
+| Queries | `src/tools/<name>/queries.rs` | |
+| Tool | `src/tools/<name>/mod.rs` | `NAME`, `definition`, `call`; registered in `src/tools/mod.rs` |
+| Tests | `tests/<name>_calls.rs` (new) | |
 
 ## Design sketch
 <!--
@@ -73,7 +73,7 @@ struct OutlineArgs { page: String, offset: Option<u64> }
 
 ## Constraints that apply
 <!-- Keep the ones this change can hit. Delete the rest. Each links to its source in CLAUDE.md or foundations. -->
-- [ ] Inputs parsed at the boundary (`parse_args` in `rust/src/args.rs`; the `inputSchema` generated from the argument type)
+- [ ] Inputs parsed at the boundary (`parse_args` in `src/args.rs`; the `inputSchema` generated from the argument type)
 - [ ] Strings bound with `:in`, ids embedded only through `ground_ids`; page names lowercased (`PageName`)
 - [ ] Calls and result sizes are bounded; any cap reports `ResultMeta` (BR-0006, ADR-0011)
 - [ ] No per-page crawls: one batched query, or `ground`-batched queries (Pattern 4)
@@ -91,8 +91,8 @@ struct OutlineArgs { page: String, offset: Option<u64> }
 ## Verification
 <!-- Exact commands and the numbers the PR must report (approximate, no names). -->
 ```bash
-(cd rust && cargo test --locked)
-(cd rust && cargo test --locked --test parity --test parity_self_check)
+cargo test --locked
+cargo test --locked --test parity --test parity_self_check
 npm run typecheck && npx vitest run tests/guards tests/rust-guards
 npx tsx scripts/logseq-instance.ts start && npm run test:integration && npx tsx scripts/logseq-instance.ts stop
 npx tsx scripts/measure-api-calls.ts   # report calls for: <tool>

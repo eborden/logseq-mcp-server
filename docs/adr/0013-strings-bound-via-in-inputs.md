@@ -37,8 +37,8 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `rust/src/client.rs` (`sends_datalog_inputs_as_edn_after_the_query`: the exact arguments sent for strings with quotes, backslashes and newlines)
-- test: `rust/src/edn.rs` (names are quoted and escaped as one string, ground ids must be positive integers, and block uuids must be strict)
+- test: `src/client.rs` (`sends_datalog_inputs_as_edn_after_the_query`: the exact arguments sent for strings with quotes, backslashes and newlines)
+- test: `src/edn.rs` (names are quoted and escaped as one string, ground ids must be positive integers, and block uuids must be strict)
 - test: `tests/integration/datalog-inputs.test.ts` (runs hostile names through every page-taking tool against a live graph)
-- test: `rust/src/escape.rs` (every regex metacharacter is escaped)
+- test: `src/escape.rs` (every regex metacharacter is escaped)
 - reviewer: A new query builder returns its query text and its inputs apart, and binds strings with :in.

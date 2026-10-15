@@ -10,19 +10,19 @@ An absent answer and an empty answer mean different things to the caller. Report
 
 ## Mechanical enforcement
 
-test: `rust/tests/simple_tools_calls.rs`
-test: `rust/tests/resolve_refs_calls.rs`
-test: `rust/tests/timeline_calls.rs`
-test: `rust/tests/get_page_outline_calls.rs`
-test: `rust/tests/current_context_calls.rs`
-test: `rust/tests/get_page_block_calls.rs`
-test: `rust/tests/page_resource_calls.rs`
-test: `rust/tests/network_path_calls.rs`
-test: `rust/tests/concept_calls.rs`
-test: `rust/tests/context_calls.rs`
-test: `rust/tests/check_links_calls.rs`
-test: `rust/tests/find_pages_calls.rs`
-test: `rust/tests/find_blocks_calls.rs`
+test: `tests/simple_tools_calls.rs`
+test: `tests/resolve_refs_calls.rs`
+test: `tests/timeline_calls.rs`
+test: `tests/get_page_outline_calls.rs`
+test: `tests/current_context_calls.rs`
+test: `tests/get_page_block_calls.rs`
+test: `tests/page_resource_calls.rs`
+test: `tests/network_path_calls.rs`
+test: `tests/concept_calls.rs`
+test: `tests/context_calls.rs`
+test: `tests/check_links_calls.rs`
+test: `tests/find_pages_calls.rs`
+test: `tests/find_blocks_calls.rs`
 
 What each test file pins on a `null` answer, and that a real `[]` carries no warning where one is tested beside it:
 

@@ -25,8 +25,8 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- reviewer: No console.log, console.info, console.debug or process.stdout write in the TypeScript tooling, and no `println!`, `print!` or other write to stdout in `rust/src`.
+- reviewer: No console.log, console.info, console.debug or process.stdout write in the TypeScript tooling, and no `println!`, `print!` or other write to stdout in `src`.
 - reviewer: No log line includes block content, page names or other graph data.
-- test: `rust/tests/no_stdout.rs` (no stdout write in `rust/src`; the scan is textual, so the reviewer line above covers what it can't see)
+- test: `tests/no_stdout.rs` (no stdout write in `src`; the scan is textual, so the reviewer line above covers what it can't see)
 
 Not mechanised yet, and no issue is open for it: a check on what log lines contain. That stays reviewer-only.

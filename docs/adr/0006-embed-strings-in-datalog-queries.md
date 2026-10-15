@@ -32,6 +32,6 @@ Date: 2026-10-05
 
 This decision no longer applies, and the code now does the opposite. The mechanism that keeps it from returning is the one that enforces its replacement.
 
-- test: `rust/src/edn.rs` (a hostile name is quoted as one string, so it can't reach the query text)
-- test: `rust/src/resolve/queries.rs` (the resolver's queries bind the lowercased name as an input)
-- test: `rust/src/client.rs` (`sends_datalog_inputs_as_edn_after_the_query`: inputs are EDN-encoded by the client)
+- test: `src/edn.rs` (a hostile name is quoted as one string, so it can't reach the query text)
+- test: `src/resolve/queries.rs` (the resolver's queries bind the lowercased name as an input)
+- test: `src/client.rs` (`sends_datalog_inputs_as_edn_after_the_query`: inputs are EDN-encoded by the client)
