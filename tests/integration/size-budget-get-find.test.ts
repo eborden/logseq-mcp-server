@@ -11,8 +11,8 @@ import { connectMcp } from './helpers/server-under-test.js';
  * (a result under the budget comes back as it was). The results the fixture takes past the budget are
  * `explore_context` on the hub at its largest caps, which is cut here, and the full tree of the `quartz log` page
  * and of its first section, which `tree-cursor.test.ts` reads to the end. Every other cut is held by the Rust server's own
- * tests with larger stubs: `rust/tests/budget_get_calls.rs`, `rust/tests/current_context_calls.rs` and the over-budget
- * parity cases (`rust/tests/data/parity/*.json`, named "over the character budget"). Assertions on size and on codes,
+ * tests with larger stubs: `tests/budget_get_calls.rs`, `tests/current_context_calls.rs` and the over-budget
+ * parity cases (`tests/data/parity/*.json`, named "over the character budget"). Assertions on size and on codes,
  * never on page names from the graph.
  */
 

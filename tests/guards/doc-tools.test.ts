@@ -19,7 +19,7 @@ import {
  * The live docs name only real tools, and their JSON examples validate against the tool's inputSchema (#503, part of #500).
  *
  * The skills guard (tests/guards/skill-tools.test.ts, #486) keeps the skills in step with the recorded tool list,
- * rust/tests/data/parity/tool-list.json. The same drift happens in the docs that name tools, so each rename of the v2
+ * tests/data/parity/tool-list.json. The same drift happens in the docs that name tools, so each rename of the v2
  * plan (#489 to #495) would leave them stale with nothing to catch it. Over every file in LIVE_DOCS, through the checker
  * the skills guard uses (tests/guards/skill-tools-check.ts, no copy of its helpers):
  *   1. every `logseq_[a-z0-9_]+` token names a recorded tool. Host-prefixed forms (`mcp__<server>__logseq_x`) count as
@@ -37,11 +37,11 @@ import {
  * name, a name that is a real tool, and a name that is not on the line outside the comment are errors too, so a
  * marker does not outlive the note it excuses. Because of that last rule the comment cannot be quoted literally in a
  * live doc; this header is the only place it is documented. Rename authors: when the sentence is about the current
- * tool (rust/README.md and CLAUDE.md name `logseq_get_page_outline` in sentences about it today), update the name to
+ * tool (CLAUDE.md names `logseq_get_page_outline` in sentences about it today), update the name to
  * the new one. Add the comment only when the sentence says "was" and the old name is the point.
  *
  * Bare names (#510). Most of the docs name tools without the prefix: the tool tables in README.md, its `Use: name(...)`
- * lines, the status table and prose of CLAUDE.md, the prose of rust/README.md. A rename (#489 to #495) leaves each of
+ * lines, the status table and prose of CLAUDE.md, the prose of docs/architecture.md. A rename (#489 to #495) leaves each of
  * those stale, so a bare token that equals a first-version tool name (FORMER_TOOL_NAMES, whole word) must be a tool in
  * the recorded list with the prefix added, or sit on a line whose history comment names it
  * (`<!-- guard:history get_old_name -->`, the bare name). A rename PR updates the bare names in step, or the guard fails
@@ -57,12 +57,12 @@ import {
  * Tool paths (#520, part of #500). A rename PR that renames a tool's directory used to leave the docs stale with no
  * failure, since the name rules skip paths. Two things are now read, through the same checker (`toolPaths` of
  * DocOptions):
- *   3. every `rust/src/tools/<path>` (in rust/README.md also `src/tools/<path>`) must name what exists under
- *      rust/src/tools: each directory of the path, and the file when the path ends in one (`mod.rs`). A `<name>`
- *      placeholder ends the path, so `rust/src/tools/<tool>/mod.rs` is not read past `<`. A nested directory such as
+ *   3. every `src/tools/<path>` must name what exists under
+ *      src/tools: each directory of the path, and the file when the path ends in one (`mod.rs`). A `<name>`
+ *      placeholder ends the path, so `src/tools/<tool>/mod.rs` is not read past `<`. A nested directory such as
  *      `get_page/outline/` is checked as one;
- *   4. every `name/` entry (a code span that is only a directory) in the file-map row of rust/README.md, the row that
- *      starts `| \`src/tools/<tool>/\``, must be a directory under rust/src/tools. The row has to exist once and hold
+ *   4. every `name/` entry (a code span that is only a directory) in the file-map row of docs/architecture.md, the row that
+ *      starts `| \`src/tools/<tool>/\``, must be a directory under src/tools. The row has to exist once and hold
  *      at least one entry, so the check cannot switch itself off by a rewording.
  * The failure names the doc, the line and the missing directory. A path to a directory that is gone on purpose (a
  * "was" note, such as a mode that lived in a directory before the merge) takes the history comment of the lines
@@ -88,12 +88,11 @@ import {
  */
 
 const ROOT = new URL('../../', import.meta.url);
-const TOOL_LIST_FILE = new URL('rust/tests/data/parity/tool-list.json', ROOT);
+const TOOL_LIST_FILE = new URL('tests/data/parity/tool-list.json', ROOT);
 
 /** The live docs that name tools, relative to the repo root. A new live doc is one more line here. */
 const LIVE_DOCS: readonly string[] = [
   'README.md',
-  'rust/README.md',
   'CLAUDE.md',
   'docs/architecture-foundations.md',
   'docs/tools.md',
@@ -102,6 +101,7 @@ const LIVE_DOCS: readonly string[] = [
   'docs/development.md',
   'docs/releasing.md',
   'docs/architecture.md',
+  'docs/testing.md',
 ];
 
 /** The keyword of the comment that excuses the unknown tool names it lists. Documented in the header above. */
@@ -125,13 +125,13 @@ const NON_TOOL_TOKENS: Readonly<Record<string, string>> = {
 /** Text that holds a former tool name and is not about the tool. The reason sits on each entry. */
 const BARE_CONTEXTS: Readonly<Record<string, string>> = {};
 
-const TOOLS_DIR = new URL('rust/src/tools/', ROOT);
+const TOOLS_DIR = new URL('src/tools/', ROOT);
 
-/** What `rel` (relative to rust/src/tools) is on disk, as the path rule reads it. Case-exact on every platform (#539). */
+/** What `rel` (relative to src/tools) is on disk, as the path rule reads it. Case-exact on every platform (#539). */
 const kindOf: ToolPathOptions['kindOf'] = exactKindOf(fileURLToPath(TOOLS_DIR));
 
-/** The file map of rust/README.md: the row that lists the tool directories, found by the start of its line. */
-const FILE_MAP = { path: 'rust/README.md', rowStart: '| `src/tools/<tool>/` |' };
+/** The file map of docs/architecture.md: the row that lists the tool directories, found by the start of its line. */
+const FILE_MAP = { path: 'docs/architecture.md', rowStart: '| `src/tools/<tool>/` |' };
 
 const read = (path: string) => ({ path, text: readFileSync(fileURLToPath(new URL(path, ROOT)), 'utf-8') });
 
@@ -322,7 +322,7 @@ describe('the bare-name rule can fail (#510 self-test)', () => {
   });
 
   it('skips a name inside a path', () => {
-    expect(run('See `rust/src/tools/get_widget/mod.rs` and get_widget/.\n')).toEqual([]);
+    expect(run('See `src/tools/get_widget/mod.rs` and get_widget/.\n')).toEqual([]);
   });
 
   it('skips a directory name, and checks a pair of names written with a slash', () => {
@@ -426,53 +426,53 @@ describe('the tool-path rule can fail (#520 self-test)', () => {
 
   it('passes real paths: a directory, a nested directory, a file, a placeholder and the tools directory itself', () => {
     const text = [
-      'See `rust/src/tools/get_page/` and `rust/src/tools/get_page/outline/queries.rs`.',
-      'The registry is `rust/src/tools/mod.rs`, and each tool is `rust/src/tools/<name>/mod.rs`.',
-      'Everything is under `rust/src/tools/`, or in `src/tools/get_thing`.',
-      'Ends a sentence at rust/src/tools/get_page/mod.rs.',
+      'See `src/tools/get_page/` and `src/tools/get_page/outline/queries.rs`.',
+      'The registry is `src/tools/mod.rs`, and each tool is `src/tools/<name>/mod.rs`.',
+      'Everything is under `src/tools/`, or in `src/tools/get_thing`.',
+      'Ends a sentence at src/tools/get_page/mod.rs.',
     ].join('\n');
     expect(run(text)).toEqual([]);
   });
 
   it('flags a path to a missing directory with the doc, the line and the directory', () => {
-    expect(run('Intro.\nSee `rust/src/tools/get_widget/mod.rs` here.\n')).toEqual([
-      'doc.md:2: "rust/src/tools/get_widget/mod.rs" names the directory rust/src/tools/get_widget/, which does not exist',
+    expect(run('Intro.\nSee `src/tools/get_widget/mod.rs` here.\n')).toEqual([
+      'doc.md:2: "src/tools/get_widget/mod.rs" names the directory src/tools/get_widget/, which does not exist',
     ]);
-    expect(run('In `rust/src/tools/get_widget/`.\n')).toEqual([
-      'doc.md:1: "rust/src/tools/get_widget/" names the directory rust/src/tools/get_widget/, which does not exist',
+    expect(run('In `src/tools/get_widget/`.\n')).toEqual([
+      'doc.md:1: "src/tools/get_widget/" names the directory src/tools/get_widget/, which does not exist',
     ]);
   });
 
   it('flags a missing nested directory and a missing file in a real directory', () => {
-    expect(run('`rust/src/tools/get_page/inline/queries.rs`\n')).toEqual([
-      'doc.md:1: "rust/src/tools/get_page/inline/queries.rs" names the directory rust/src/tools/get_page/inline/, which does not exist',
+    expect(run('`src/tools/get_page/inline/queries.rs`\n')).toEqual([
+      'doc.md:1: "src/tools/get_page/inline/queries.rs" names the directory src/tools/get_page/inline/, which does not exist',
     ]);
-    expect(run('`rust/src/tools/get_page/wire.rs`\n')).toEqual([
-      'doc.md:1: "rust/src/tools/get_page/wire.rs" names the file rust/src/tools/get_page/wire.rs, which does not exist',
+    expect(run('`src/tools/get_page/wire.rs`\n')).toEqual([
+      'doc.md:1: "src/tools/get_page/wire.rs" names the file src/tools/get_page/wire.rs, which does not exist',
     ]);
   });
 
   it('reports a path once per line, and each line on its own', () => {
-    const text = '`rust/src/tools/get_widget/` and `rust/src/tools/get_widget/mod.rs`.\nAgain `src/tools/get_widget/`.\n';
+    const text = '`src/tools/get_widget/` and `src/tools/get_widget/mod.rs`.\nAgain `src/tools/get_widget/`.\n';
     expect(run(text)).toEqual([
-      'doc.md:1: "rust/src/tools/get_widget/" names the directory rust/src/tools/get_widget/, which does not exist',
-      'doc.md:2: "src/tools/get_widget/" names the directory rust/src/tools/get_widget/, which does not exist',
+      'doc.md:1: "src/tools/get_widget/" names the directory src/tools/get_widget/, which does not exist',
+      'doc.md:2: "src/tools/get_widget/" names the directory src/tools/get_widget/, which does not exist',
     ]);
   });
 
   it('lets a history comment that names the missing directory excuse it, and only that directory', () => {
-    const note = 'It was `rust/src/tools/get_widget/` before v2.';
+    const note = 'It was `src/tools/get_widget/` before v2.';
     expect(run(`${note} ${mark('get_widget')}\n`)).toEqual([]);
     expect(run(`${note} See also \`src/tools/get_gadget/\`. ${mark('get_widget')}\n`)).toEqual([
-      'doc.md:1: "src/tools/get_gadget/" names the directory rust/src/tools/get_gadget/, which does not exist',
+      'doc.md:1: "src/tools/get_gadget/" names the directory src/tools/get_gadget/, which does not exist',
     ]);
     expect(run(`${note} ${mark('get_widget')}\nNow \`src/tools/get_widget/\`.\n`)).toEqual([
-      'doc.md:2: "src/tools/get_widget/" names the directory rust/src/tools/get_widget/, which does not exist',
+      'doc.md:2: "src/tools/get_widget/" names the directory src/tools/get_widget/, which does not exist',
     ]);
   });
 
   it('never excuses a stale file path, whatever name the comment holds', () => {
-    const file = 'rust/src/tools/get_page/wire.rs';
+    const file = 'src/tools/get_page/wire.rs';
     const missingFile = `doc.md:1: "${file}" names the file ${file}, which does not exist`;
     expect(run(`See \`${file}\`. ${mark('wire')}\n`)).toEqual([
       'doc.md:1: "wire" is not in FORMER_TOOL_NAMES, so the guard never reads it bare; name it with the logseq_ prefix or add it to the list',
@@ -487,16 +487,16 @@ describe('the tool-path rule can fail (#520 self-test)', () => {
 
   it('excuses a missing directory only when its name is in FORMER_TOOL_NAMES', () => {
     // get_widget is in the list (the excuse works, above); get_gadget is not, so the directory is still reported.
-    expect(run(`It was \`rust/src/tools/get_gadget/\`. ${mark('get_gadget')}\n`)).toEqual([
+    expect(run(`It was \`src/tools/get_gadget/\`. ${mark('get_gadget')}\n`)).toEqual([
       'doc.md:1: "get_gadget" is not in FORMER_TOOL_NAMES, so the guard never reads it bare; name it with the logseq_ prefix or add it to the list',
-      'doc.md:1: "rust/src/tools/get_gadget/" names the directory rust/src/tools/get_gadget/, which does not exist',
+      'doc.md:1: "src/tools/get_gadget/" names the directory src/tools/get_gadget/, which does not exist',
     ]);
     // Adding the name to the list is what makes the excuse work.
-    expect(run(`It was \`rust/src/tools/get_gadget/\`. ${mark('get_gadget')}\n`, 'doc.md', { formerToolNames: ['get_gadget'] })).toEqual([]);
+    expect(run(`It was \`src/tools/get_gadget/\`. ${mark('get_gadget')}\n`, 'doc.md', { formerToolNames: ['get_gadget'] })).toEqual([]);
   });
 
   it('fails a history comment that names a directory the line does not use', () => {
-    expect(run(`See \`rust/src/tools/get_page/\`. ${mark('get_widget')}\n`)).toEqual([
+    expect(run(`See \`src/tools/get_page/\`. ${mark('get_widget')}\n`)).toEqual([
       'doc.md:1: "get_widget" is not named on this line, so remove it from the history comment',
     ]);
   });
@@ -504,8 +504,8 @@ describe('the tool-path rule can fail (#520 self-test)', () => {
   it('reads the file-map row entries as directories, the nested ones too', () => {
     expect(run(row('`get_page/`, `get_page/outline/` and `get_thing/`'), 'map.md')).toEqual([]);
     expect(run(row('`get_page/`, `get_widget/` and `get_page/inline/`'), 'map.md')).toEqual([
-      'map.md:1: "get_widget/" names the directory rust/src/tools/get_widget/, which does not exist',
-      'map.md:1: "get_page/inline/" names the directory rust/src/tools/get_page/inline/, which does not exist',
+      'map.md:1: "get_widget/" names the directory src/tools/get_widget/, which does not exist',
+      'map.md:1: "get_page/inline/" names the directory src/tools/get_page/inline/, which does not exist',
     ]);
   });
 
@@ -527,7 +527,7 @@ describe('the tool-path rule can fail (#520 self-test)', () => {
   });
 
   it('checks no path when the option is absent (the skills guard path)', () => {
-    expect(run('`rust/src/tools/get_widget/`\n', 'doc.md', { toolPaths: undefined })).toEqual([]);
+    expect(run('`src/tools/get_widget/`\n', 'doc.md', { toolPaths: undefined })).toEqual([]);
   });
 });
 
@@ -570,9 +570,9 @@ describe('the tool-path rule is case-exact on disk (#539 self-test)', () => {
       toolPaths: { kindOf: onDisk, fileMap: { path: 'map.md', rowStart: '| `src/tools/<tool>/` |' } },
     };
     const map = { path: 'map.md', text: '| `src/tools/<tool>/` | Today: `get_page/` |\n' };
-    const doc = { path: 'doc.md', text: 'ok\nSee `rust/src/tools/Get_Page/` here.\n' };
+    const doc = { path: 'doc.md', text: 'ok\nSee `src/tools/Get_Page/` here.\n' };
     expect(docViolations([doc, map], [], options)).toEqual([
-      'doc.md:2: "rust/src/tools/Get_Page/" names the directory rust/src/tools/Get_Page/, which does not exist',
+      'doc.md:2: "src/tools/Get_Page/" names the directory src/tools/Get_Page/, which does not exist',
     ]);
   });
 

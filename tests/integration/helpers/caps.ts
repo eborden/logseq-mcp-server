@@ -1,7 +1,7 @@
 /**
  * The defaults and maximums the tools state in their descriptions and `ResultMeta` warnings (ADR-0011, BR-0006).
  * The suites assert the server against these numbers, so a change to a cap fails a test and is a decision
- * (BR-0004). Each is the value the tool's description states and the Rust constant in `rust/src/tools/` holds.
+ * (BR-0004). Each is the value the tool's description states and the Rust constant in `src/tools/` holds.
  */
 
 export const DEFAULT_SEARCH_LIMIT = 100;

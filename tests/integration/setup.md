@@ -35,11 +35,11 @@ npm run test:integration -- --reporter=verbose
 
 ### The server under test (#352, #356)
 
-The suites run against the Rust server (`rust/`, #122), the only server since the TypeScript one was retired (#356). Build it first:
+The suites run against the Rust server (the crate at the repo root, #122), the only server since the TypeScript one was retired (#356). Build it first:
 
 ```bash
 npx tsx scripts/logseq-instance.ts start
-(cd rust && cargo build)                   # the debug build: rust/target/debug/logseq-mcp-server
+cargo build                   # the debug build: target/debug/logseq-mcp-server
 npm run test:integration
 npx tsx scripts/logseq-instance.ts stop
 ```
@@ -121,8 +121,8 @@ All three are read-only.
 
 ```bash
 npx tsx scripts/logseq-instance.ts start
-(cd rust && cargo build --release --locked)
-LOGSEQ_MCP_RUST_BIN=$PWD/rust/target/release/logseq-mcp-server npx tsx scripts/routing-eval.ts --runs 3 --out .logseq-instance/routing-eval-v1.json
+cargo build --release --locked
+LOGSEQ_MCP_RUST_BIN=$PWD/target/release/logseq-mcp-server npx tsx scripts/routing-eval.ts --runs 3 --out .logseq-instance/routing-eval-v1.json
 npx tsx scripts/logseq-instance.ts stop
 npx tsx scripts/routing-eval.ts --dry-run          # check the question file and print the plan; calls no model
 npx tsx scripts/routing-eval.ts --only find --runs 1   # one type, or a list of question ids

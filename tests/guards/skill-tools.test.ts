@@ -15,10 +15,10 @@ import {
 /**
  * The skills name only real tools, and their JSON examples validate against the tool's inputSchema (#486, part of #500).
  *
- * The server instructions (rust/src/instructions.rs) and the prompts (rust/src/prompts.rs) have tests that fail on a
+ * The server instructions (src/instructions.rs) and the prompts (src/prompts.rs) have tests that fail on a
  * tool name that doesn't exist. The skills in skills/logseq-skills/ had none, and their examples were positional
  * pseudo-calls that hide the parameter names, which are what models get wrong. The recorded tool list,
- * rust/tests/data/parity/tool-list.json, is the contract, so each rename of the v2 plan fails here until the skills
+ * tests/data/parity/tool-list.json, is the contract, so each rename of the v2 plan fails here until the skills
  * move in the same PR. Over every .md file under skills/logseq-skills/:
  *   1. every `logseq_[a-z0-9_]+` token names a recorded tool. Host-prefixed forms (`mcp__<server>__logseq_x`) count as
  *      `logseq_x`;
@@ -40,7 +40,7 @@ import {
  */
 
 const SKILLS_DIR = fileURLToPath(new URL('../../skills/logseq-skills', import.meta.url));
-const TOOL_LIST_FILE = new URL('../../rust/tests/data/parity/tool-list.json', import.meta.url);
+const TOOL_LIST_FILE = new URL('../../tests/data/parity/tool-list.json', import.meta.url);
 
 /** The skill's tool reference, relative to SKILLS_DIR: one file per tool type (ADR-0037), each tool a heading in its type's file. */
 const TOOL_REFERENCE_PATHS: readonly string[] = [

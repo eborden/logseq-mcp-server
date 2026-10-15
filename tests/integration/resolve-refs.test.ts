@@ -15,7 +15,7 @@ import { connectFixture } from './helpers/fixture-client.js';
  * The TypeScript version of this suite also called the resolver directly (`resolveBlockRefs`) for a uuid that
  * does not exist and for a batched block-and-page embed. The Rust server has no such entry point; its
  * behaviours are held by fixture-only/resolve-refs-missing.test.ts (a missing target), the "every case" test
- * below (block and page embeds) and rust/tests/resolve_refs_calls.rs (one batched query per level).
+ * below (block and page embeds) and tests/resolve_refs_calls.rs (one batched query per level).
  */
 
 const STATUSES = ['ok', 'missing', 'depth_limit', 'cycle', 'unavailable'];

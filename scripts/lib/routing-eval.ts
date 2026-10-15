@@ -161,7 +161,7 @@ export interface CallRecord {
   schemaError: boolean;
 }
 
-/** What the server says when it rejects arguments: `Invalid parameter '<name>': ...` (rust/src/errors.rs). */
+/** What the server says when it rejects arguments: `Invalid parameter '<name>': ...` (src/errors.rs). */
 const SCHEMA_ERROR = /^\s*(Invalid parameter\b|InputValidationError\b|Invalid arguments\b)/;
 
 export function isSchemaError(resultText: string): boolean {

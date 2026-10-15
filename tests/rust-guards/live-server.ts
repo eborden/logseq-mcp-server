@@ -17,7 +17,7 @@ export interface LiveServer {
   close(): Promise<void>;
 }
 
-/** Starts the Rust debug build (`cd rust && cargo build`), or `LOGSEQ_MCP_RUST_BIN`, against an empty stub LogSeq. */
+/** Starts the Rust debug build (`cargo build`), or `LOGSEQ_MCP_RUST_BIN`, against an empty stub LogSeq. */
 export async function startLiveServer(): Promise<LiveServer> {
   requireRustBinary();
   const stub = await startStubLogseq();

@@ -5,7 +5,7 @@
  * Usage: npx tsx scripts/measure-api-calls.ts [--server rust] [--rust-binary <path>] [pageName]
  *
  * It runs the Rust binary over MCP stdio (`--server rust`, the only server since the TypeScript one was retired,
- * #356; the default binary is rust/target/release/logseq-mcp-server) and counts its LogSeq calls with a
+ * #356; the default binary is target/release/logseq-mcp-server) and counts its LogSeq calls with a
  * forwarding proxy (scripts/measure-server.ts, #353). The setup queries that pick the subject pages go straight
  * to LogSeq. With no LOGSEQ_MCP_CONFIG it reads the real graph on purpose, and its output has real page names:
  * never paste it.

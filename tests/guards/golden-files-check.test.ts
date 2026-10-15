@@ -6,14 +6,14 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 
-// The golden results are the tool contract: the `expected` result of each case in rust/tests/data/parity/<group>.json,
-// and the recorded tool list rust/tests/data/parity/tool-list.json. CI fails a pull request that changes one unless it
+// The golden results are the tool contract: the `expected` result of each case in tests/data/parity/<group>.json,
+// and the recorded tool list tests/data/parity/tool-list.json. CI fails a pull request that changes one unless it
 // carries the `golden-change` label, which the maintainer adds after an explicit OK recorded on the PR (#356, #379). A
 // group file holds the cases beside their goldens. A golden answers a request, so the request is compared with it (a case's
 // name, tool, arguments, resource or prompt request, and result), and a case's stub answers and expected calls are not: a
 // re-recorded call is not a change to the contract (ADR-0034 Decision 5). These guards keep the check in ci.yml, and
 // run its script against a scratch repository, so a reworded step can't quietly stop checking. A second step holds the call
-// ceilings (rust/tests/data/parity/call-ceilings.json, ADR-0034 Decision 5) the same way: a ceiling that is raised or new
+// ceilings (tests/data/parity/call-ceilings.json, ADR-0034 Decision 5) the same way: a ceiling that is raised or new
 // needs the same label, and a lowered one needs none.
 
 const exec = promisify(execFile);
@@ -36,7 +36,7 @@ function runBlock(stepName: string): string {
   return body.join('\n');
 }
 
-const DATA = 'rust/tests/data/parity';
+const DATA = 'tests/data/parity';
 const CEILING_FILE = `${DATA}/call-ceilings.json`;
 
 /** A group file as the recorder writes it: one case to a line. */
@@ -71,7 +71,7 @@ describe('the golden-files job in ci.yml', () => {
     expect(job).toContain('PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}');
     const script = runBlock('Check the golden files');
     expect(script).toContain('HEAD^1');
-    expect(script).toContain('rust/tests/data/parity');
+    expect(script).toContain('tests/data/parity');
     expect(script).toContain('golden-change');
     // never a `${{ }}` expression inside the script text
     expect(script).not.toContain('${{');

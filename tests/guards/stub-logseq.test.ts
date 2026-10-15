@@ -5,7 +5,7 @@ import { callKey, DATASCRIPT_QUERY, LOGSEQ_PORT, startStubLogseq, type CannedCal
 /**
  * The stub LogSeq the Node tooling runs the server against (the measure scripts and the guard tests that start the
  * binary, scripts/lib/stub-logseq.ts). The parity test has its own stub, in Rust, with the same tests
- * (rust/tests/parity_harness.rs). It has to answer by method and query text, check its token, fail loud on a call it
+ * (tests/parity_harness.rs). It has to answer by method and query text, check its token, fail loud on a call it
  * has no answer for and wait for calls that arrive late (#340), or a number or a result taken from it means nothing.
  */
 

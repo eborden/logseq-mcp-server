@@ -2,7 +2,7 @@
  * Smoke run of the Rust server binary against this worktree's fixture LogSeq (#359).
  *
  * Usage (start the fixture instance first: `npx tsx scripts/logseq-instance.ts start`):
- *   node node_modules/vite-node/vite-node.mjs scripts/smoke-rust-server.ts rust/target/release/logseq-mcp-server
+ *   node node_modules/vite-node/vite-node.mjs scripts/smoke-rust-server.ts target/release/logseq-mcp-server
  *
  * It drives the binary over MCP stdio with the SDK client, the way Claude Code does, and calls
  * each of the 10 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
@@ -35,7 +35,7 @@ interface ToolCall {
 }
 
 // Today in the machine's local zone, which the server under test reads too: the release binary has no
-// LOGSEQ_MCP_NOW (rust/src/env.rs), so the system clock and the local-zone conversion run here and in no
+// LOGSEQ_MCP_NOW (src/env.rs), so the system clock and the local-zone conversion run here and in no
 // parity case (#359). These are computed from `new Date()`, never from the server.
 const pad = (n: number): string => String(n).padStart(2, '0');
 const NOW = new Date();

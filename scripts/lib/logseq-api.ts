@@ -1,6 +1,6 @@
 // A small client for LogSeq's HTTP API, for the repo's own tooling: the integration tests' fixture check and
 // setup queries, the probe, the measure scripts and the per-worktree instance (#356). It is not the server: the
-// Rust server (rust/) has its own client, and nothing here is shipped. It keeps what the tooling needs and no more:
+// Rust server (`src/`) has its own client, and nothing here is shipped. It keeps what the tooling needs and no more:
 // bearer token, a timeout per call, the three connection errors, and the EDN encoding of Datalog inputs.
 //
 // The config is parsed with plain checks: `{ apiUrl, authToken, timeoutMs? }`. No error message here includes the

@@ -2,7 +2,7 @@
 // binary): the config pointed at a stub, the clock and the zone fixed, and every home and config directory a server
 // could look in for a fallback config (`~/.logseq-mcp/`) moved to an empty temp dir, so a server that ignores
 // LOGSEQ_MCP_CONFIG can't reach a real LogSeq (BR-0001). The parity test sets the same variables in Rust
-// (`Server::command` in rust/tests/parity_support/server.rs).
+// (`Server::command` in tests/parity_support/server.rs).
 import { join } from 'node:path';
 
 /**

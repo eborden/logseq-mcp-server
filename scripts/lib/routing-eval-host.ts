@@ -54,7 +54,7 @@ export const USAGE = `Usage: npx tsx scripts/routing-eval.ts [options]
   --max-budget-usd <x>   per session, passed to claude (default 0.15, at most ${LIMITS.maxBudgetUsd})
   --max-total-usd <x>    the whole run: no new session starts once the finished ones cost this much, and the run exits 1 (default 3, at most ${LIMITS.maxTotalUsd})
   --surface v1|v2        which acceptable-tool list to score against (default: read from the server's tool list)
-  --binary <path>        the server binary (default: LOGSEQ_MCP_RUST_BIN, else rust/target/debug/logseq-mcp-server)
+  --binary <path>        the server binary (default: LOGSEQ_MCP_RUST_BIN, else target/debug/logseq-mcp-server)
   --skill <dir>          add the body of <dir>/SKILL.md to every session's system prompt, to measure a skill against the run without it (#497)
   --rescore <file>       print the aggregates of an earlier --out file against the current questions; calls no model
   --dry-run              check the question file and print the plan; start nothing`;
