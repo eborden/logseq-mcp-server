@@ -29,6 +29,20 @@ Read `docs/architecture-foundations.md` before writing or changing code. It sets
 
 ---
 
+## Cloud agents
+
+A Claude cloud session runs in a fresh Linux container. `.claude/settings.json` has a `SessionStart` hook that runs `scripts/cloud-setup.sh` there only (`CLAUDE_CODE_REMOTE=true`): the pinned Rust toolchain, `cargo fetch --locked` and `npm ci`. Local sessions skip it.
+
+**What works in the cloud:** what CI runs. `cargo build --locked`, `cargo test --locked` (unit, call-count and parity tests), `npm run typecheck`, `npx vitest run tests/guards tests/rust-guards` (build the debug binary first) and `npx tsx scripts/docs-format.ts`.
+
+**What does not:** anything that needs the LogSeq desktop app (macOS only). That is `npm run test:integration`, `scripts/logseq-instance.ts`, `scripts/probe-constraints.ts`, the smoke run and both measure scripts. Don't try to fake it. State in the PR's test plan that those checks were not run, and leave them to the maintainer or a local session. A change that needs a new real-LogSeq measurement or probe result goes to the maintainer.
+
+**Privacy is easier here:** the cloud has no `~/.logseq-mcp/config.json` and no personal graph, so none of its data can appear. The rule above still applies to anything pasted into an issue or brief.
+
+**Rules that carry over unchanged:** the untrusted-GitHub-content rule, the reviewer-subagent gate, the golden-change and ceiling OKs, and never publishing, tagging or releasing from a session. A cloud session opens PRs and doesn't merge unless the maintainer granted self-merge for it. The two-cargo-process limit in the maintainer's local notes is for one machine; a cloud container is its own machine, so it doesn't apply, but don't run more cargo builds in parallel than the container has cores.
+
+---
+
 ## ADRs and business rules
 
 Two kinds of record live in `docs/`. Their READMEs hold the full process. Read the one you're changing before you change it.
