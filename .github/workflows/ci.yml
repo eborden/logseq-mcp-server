@@ -117,6 +117,13 @@ jobs:
         run: |
           base="$(git rev-parse HEAD^1)"
           dir=tests/data/parity
+          # TEMPORARY (#540): the base still has the data where the crate used to live. This is read only for the PR that
+          # moves the crate to the repo root; the follow-up PR deletes this line and reads the base from "$dir" too.
+          base_dir=rust/tests/data/parity
+          if [ -z "$(git ls-tree -r --name-only "$base" -- "$base_dir")" ]; then
+            echo "::error::The base has no golden files under ${base_dir}, so nothing can be compared."
+            exit 1
+          fi
           # A group file's goldens: each case's name, the request it answers and its result, a line of JSON each (none for a file that is not
           # there or not JSON, which then reads as every golden in it gone).
           file_cases() {
@@ -128,30 +135,35 @@ jobs:
           sorted() {
             jq -s -S -c 'sort_by(.name)'
           }
+          # Arguments: a revision and the folder the data is in at that revision.
           cases_at() {
-            git ls-tree -r --name-only "$1" -- "$dir" | while IFS= read -r file; do
+            git ls-tree -r --name-only "$1" -- "$2" | while IFS= read -r file; do
               case "$file" in
-                "$dir/clock-cases.json" | "$dir/tool-list.json" | "$dir/call-ceilings.json") continue ;;
+                "$2/clock-cases.json" | "$2/tool-list.json" | "$2/call-ceilings.json") continue ;;
               esac
               file_cases "$1" "$file"
             done | sorted
           }
           tools_at() {
-            git show "$1:$dir/tool-list.json" 2> /dev/null | jq -S -c . || echo "unreadable at $1"
+            git show "$1:$2/tool-list.json" 2> /dev/null | jq -S -c . || echo "unreadable at $1"
+          }
+          # The files of both folders by name relative to the folder, once each.
+          names() {
+            { git ls-tree -r --name-only "$base" -- "$base_dir" | sed "s#^${base_dir}/##"; git ls-tree -r --name-only HEAD -- "$dir" | sed "s#^${dir}/##"; } | sort -u
           }
           changed=""
-          if [ "$(cases_at "$base")" != "$(cases_at HEAD)" ]; then
+          if [ "$(cases_at "$base" "$base_dir")" != "$(cases_at HEAD "$dir")" ]; then
             # Name the files whose own goldens changed
-            while IFS= read -r file; do
-              case "$file" in
-                "$dir/clock-cases.json" | "$dir/tool-list.json" | "$dir/call-ceilings.json" | "") continue ;;
+            while IFS= read -r name; do
+              case "$name" in
+                "clock-cases.json" | "tool-list.json" | "call-ceilings.json" | "") continue ;;
               esac
-              if [ "$(file_cases "$base" "$file" | sorted)" != "$(file_cases HEAD "$file" | sorted)" ]; then
-                changed="${changed}${file}"$'\n'
+              if [ "$(file_cases "$base" "$base_dir/$name" | sorted)" != "$(file_cases HEAD "$dir/$name" | sorted)" ]; then
+                changed="${changed}${dir}/${name}"$'\n'
               fi
-            done <<< "$(git diff --name-only --no-renames "$base" HEAD -- "$dir")"
+            done <<< "$(names)"
           fi
-          if [ "$(tools_at "$base")" != "$(tools_at HEAD)" ]; then
+          if [ "$(tools_at "$base" "$base_dir")" != "$(tools_at HEAD "$dir")" ]; then
             changed="${changed}${dir}/tool-list.json"$'\n'
           fi
           if [ -z "$changed" ]; then
@@ -180,9 +192,11 @@ jobs:
         run: |
           base="$(git rev-parse HEAD^1)"
           file=tests/data/parity/call-ceilings.json
-          if ! old="$(git show "${base}:${file}" 2> /dev/null)"; then
-            echo "The base has no ${file}, so no ceiling is raised."
-            exit 0
+          # TEMPORARY (#540): the base's copy is where the crate used to live; the follow-up PR reads it from "$file".
+          base_file=rust/tests/data/parity/call-ceilings.json
+          if ! old="$(git show "${base}:${base_file}" 2> /dev/null)"; then
+            echo "::error::The base has no ${base_file}, so the ceilings cannot be compared."
+            exit 1
           fi
           new="$(git show "HEAD:${file}" 2> /dev/null || echo 'missing')"
           if ! printf '%s' "$new" | jq -e 'type == "object"' > /dev/null 2>&1; then
