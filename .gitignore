@@ -44,8 +44,8 @@ tests/fixtures/graph/pages/contents.md
 tests/fixtures/graph/journals/202[6-9]_*
 tests/fixtures/graph/journals/20[3-9][0-9]_*
 
-# Cargo build output of the Rust spike (ADR-0025, #123). Large, and rebuilt from rust/Cargo.lock.
-rust/target/
+# Cargo build output (ADR-0025, #123). Large, and rebuilt from Cargo.lock.
+/target/
 
 # Python bytecode from the wheel builder tests (scripts/pypi)
 __pycache__/
