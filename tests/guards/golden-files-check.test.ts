@@ -37,7 +37,7 @@ function runBlock(stepName: string): string {
 }
 
 const DATA = 'tests/data/parity';
-// TEMPORARY (#540): the base of the PR that moves the crate still holds the data here. The follow-up PR reads the base from DATA too.
+// TEMPORARY (#540): the base of the PR that moves the crate still holds the data here. The follow-up (#577) reads the base from DATA too.
 const BASE_DATA = 'rust/tests/data/parity';
 const CEILING_FILE = `${DATA}/call-ceilings.json`;
 

@@ -118,7 +118,7 @@ jobs:
           base="$(git rev-parse HEAD^1)"
           dir=tests/data/parity
           # TEMPORARY (#540): the base still has the data where the crate used to live. This is read only for the PR that
-          # moves the crate to the repo root; the follow-up PR deletes this line and reads the base from "$dir" too.
+          # moves the crate to the repo root; the follow-up (#577) deletes this line and reads the base from "$dir" too.
           base_dir=rust/tests/data/parity
           if [ -z "$(git ls-tree -r --name-only "$base" -- "$base_dir")" ]; then
             echo "::error::The base has no golden files under ${base_dir}, so nothing can be compared."
@@ -192,7 +192,7 @@ jobs:
         run: |
           base="$(git rev-parse HEAD^1)"
           file=tests/data/parity/call-ceilings.json
-          # TEMPORARY (#540): the base's copy is where the crate used to live; the follow-up PR reads it from "$file".
+          # TEMPORARY (#540): the base's copy is where the crate used to live; the follow-up (#577) reads it from "$file".
           base_file=rust/tests/data/parity/call-ceilings.json
           if ! old="$(git show "${base}:${base_file}" 2> /dev/null)"; then
             echo "::error::The base has no ${base_file}, so the ceilings cannot be compared."
