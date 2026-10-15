@@ -36,6 +36,10 @@ The server has 10 tools in four kinds, named in the tool names: `get`, `find`, `
 
 A result that is cut says so in `warnings` and sets `hasMore`. Where a call can read on, the result carries a `nextCursor`; pass it back as `cursor`, alone, to get the next part. A cursor only moves forward.
 
+## TOON output
+
+`find_pages` and `get_page` with `detail: "outline"` also take `format: "toon"` (the default stays `"json"`, BR-0014): a list's keys are written once, not on every row. `get_page` refuses a `format` its `detail` cannot take: `outline` takes `json` or `toon`, `page` and `full` take `json` or `markdown`. An error stays JSON.
+
 ## Markdown output and compact results
 
 `get_page`, `get_block`, `explore_context` and `explore_network` take `format: "markdown"` (the default is `"json"`). The result is one plain text block: page properties as `key:: value` lines, blocks as indented `- ` bullets with `((uuid))` refs kept (block uuids are left out, except in `compact`), related pages and references grouped by source page, and a short footer for warnings, `hasMore` and tips. It is roughly 45-80% smaller than the JSON. `explore_context` also takes `compact: true`, which swaps block bodies for a first-line snippet plus the block's uuid (it pays off on long blocks, and `resolve_refs` is skipped with a warning). For a long page, `get_page` with `detail: "outline"` lists the top-level blocks (uuid, snippet, child count) and `get_block` reads the ones you pick. The `logseq://page/{name}` resource renders through the same code.

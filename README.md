@@ -4,9 +4,11 @@ A read-only [MCP](https://modelcontextprotocol.io) server that lets Claude (or a
 
 It never writes to your graph. Every tool only reads.
 
+Install: see [Install](#install) (Claude Code plugin, `uvx`, or a clone).
+
 ## Who it is for
 
-You keep notes in LogSeq and want an AI assistant to use them: "what do I know about project atlas?", "what was I working on last week?", "how does this page connect to that one?". You run LogSeq desktop on the same machine as the client.
+You keep notes in LogSeq and want an AI assistant to use them: "what do I know about project atlas?", "what was I working on last week?", "how does this page connect to that one?". You run LogSeq desktop with its HTTP API on, reachable at `apiUrl` (default `127.0.0.1`).
 
 ## What you can ask
 
@@ -60,7 +62,7 @@ Claude Code with `uvx` (needs [uv](https://docs.astral.sh/uv/); the package is [
 claude mcp add logseq -- uvx logseq-mcp-server
 ```
 
-Claude Desktop, in `claude_desktop_config.json`, then restart it:
+Claude Desktop, in `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows: `%APPDATA%\Claude\claude_desktop_config.json`), then restart it:
 
 ```json
 {
