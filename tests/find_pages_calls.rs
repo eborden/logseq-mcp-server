@@ -216,8 +216,8 @@ async fn fifty_one_names_are_refused_and_never_cut() {
     let logseq = mock_logseq(vec![]).await;
     let names: Vec<String> = (1..=51).map(|n| format!("Page {n}")).collect();
     let error = find_pages::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"names": names}))).await.unwrap_err();
-    assert!(error.to_string().starts_with("Invalid parameter 'names': [\"Page 1\""), "{error}");
-    assert!(error.to_string().ends_with("\n\nExpected: at most 50 items\nExample: names: [\"...\"]"), "{error}");
+    // #584: the message names the count sent and the limit, and does not echo the list
+    assert_eq!(error.to_string(), "Invalid parameter 'names': 51 items\n\nExpected: at most 50 items\nExample: names: [\"...\"]");
     assert!(methods(&logseq).is_empty());
 }
 
