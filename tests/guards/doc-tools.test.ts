@@ -91,7 +91,18 @@ const ROOT = new URL('../../', import.meta.url);
 const TOOL_LIST_FILE = new URL('rust/tests/data/parity/tool-list.json', ROOT);
 
 /** The live docs that name tools, relative to the repo root. A new live doc is one more line here. */
-const LIVE_DOCS: readonly string[] = ['README.md', 'rust/README.md', 'CLAUDE.md', 'docs/architecture-foundations.md'];
+const LIVE_DOCS: readonly string[] = [
+  'README.md',
+  'rust/README.md',
+  'CLAUDE.md',
+  'docs/architecture-foundations.md',
+  'docs/tools.md',
+  'docs/configuration.md',
+  'docs/plugin.md',
+  'docs/development.md',
+  'docs/releasing.md',
+  'docs/architecture.md',
+];
 
 /** The keyword of the comment that excuses the unknown tool names it lists. Documented in the header above. */
 const HISTORY_MARKER = 'guard:history';
