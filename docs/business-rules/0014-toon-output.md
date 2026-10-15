@@ -18,3 +18,4 @@ test: `src/toon.rs` (a fixed value encodes to a pinned TOON text, so key order, 
 |---|---|---|
 | 2026-10-09 | Introduced. | #468, #472 |
 | 2026-10-09 | Enforcement: a unit test pins a fixed value's TOON output (additive; the `none-yet` line it replaces is the one for #469). | #474 |
+| 2026-10-14 | Paths in citations updated for the crate moving to the repo root (path text only, no change to the rule). | #576 |

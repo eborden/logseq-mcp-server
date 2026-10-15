@@ -32,3 +32,4 @@ Tests pin that a conflicting alias and canonical value is refused, that the alia
 | 2026-10-14 | Mechanical enforcement: the tests of `get_page` and `get_block`, the first tools with a required canonical name that take a `cursor`, replace the `none-yet: #552` line, and the `required` check of `tests/guards/tool-list.test.ts` takes the exception for a tool that takes a `cursor`. Additive; the Statement is unchanged. | #565 |
 | 2026-10-14 | Mechanical enforcement: the tests of `explore_context`, whose `page` is optional beside a `cursor` like `get_page` and `get_block`, join the `test:` lines. Additive; the Statement is unchanged. | #568 |
 | 2026-10-14 | Statement: drops "No tool takes a `cursor` yet"; tools take one. Wording only, the promises are unchanged. | #572 |
+| 2026-10-14 | Paths in citations updated for the crate moving to the repo root (path text only, no change to the rule). | #576 |

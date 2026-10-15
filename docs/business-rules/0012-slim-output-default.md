@@ -33,3 +33,4 @@ test: `tests/parity.rs`
 | 2026-10-12 | The statement names `find_blocks`, which replaced `search_blocks` and `query_by_property` (ADR-0037). Nothing else changed. | #525 |
 | 2026-10-13 | The statement names `explore_context`, the new name of `build_context`, among the tools with no slim mode, and the rationale drops the keyword search of `get_context_for_query`, which went (ADR-0037). Nothing else changed. | #529 |
 | 2026-10-13 | The statement names `explore_timeline`, which replaced `query_by_date_range` and brings `slim_results` to a page's days (ADR-0037), and says where a slim block names its page: an entry of one day names it, an entry with no day or one that joins a week or month cannot, so each block there does. The default and the full output are unchanged. | #531 |
+| 2026-10-14 | Paths in citations updated for the crate moving to the repo root (path text only, no change to the rule). | #576 |

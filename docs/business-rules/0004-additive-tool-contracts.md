@@ -28,3 +28,4 @@ reviewer: A diff of `tests/data/parity/tool-list.json` only adds optional parame
 | 2026-10-08 | Rationale only: the tool-list snapshot is the recorded `tools/list` the parity harness compares by meaning. Statement unchanged. | #372 |
 | 2026-10-08 | Mechanical enforcement: the parity check of the recorded `tools/list` is `tests/parity.rs` (`cargo test`), no longer a Node CI step. Added it as a `test:` line. Statement unchanged. | #376 |
 | 2026-10-08 | Mechanical enforcement: the recorded `tools/list` moved from `scripts/parity/expected/tool-list.json` to `tests/data/parity/tool-list.json`, so the `test:` and `reviewer:` lines and the Rationale name the new path. Same tiers, same file. Statement unchanged. | #388 |
+| 2026-10-14 | Paths in citations updated for the crate moving to the repo root (path text only, no change to the rule). | #576 |
