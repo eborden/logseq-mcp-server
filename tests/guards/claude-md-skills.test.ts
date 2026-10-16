@@ -11,9 +11,9 @@ import { fileURLToPath } from 'url';
  *   1. every directory in `.claude/skills/` has a row in the "## Skills" table of CLAUDE.md (first cell the skill's
  *      name in backticks, a non-empty "use when" cell), and every row names a skill that exists;
  *   2. every skill's `SKILL.md` description starts "Use when". Only the pinned shipped plugin skill is exempt (see
- *      SHIPPED_PLUGIN_SKILLS): it is the symlink `.claude/skills/logseq-skills` that resolves to `skills/logseq-skills`,
- *      whose description is checked by the routing eval and ADR-0018, and it says what it
- *      does before when to use it. It still needs its row. Any other skill, symlinked or not, must satisfy the rule;
+ *      SHIPPED_PLUGIN_SKILLS): it is the symlink `.claude/skills/logseq-skills` that resolves to `skills/logseq-skills`.
+ *      The shipped plugin skill keeps its own description, which says what it does before when to use it. It still
+ *      needs its row. Any other skill, symlinked or not, must satisfy the rule;
  *   3. CLAUDE.md is at most CLAUDE_MD_MAX_BYTES bytes.
  *
  * The ceiling only goes down. Set it to the size rounded up modestly, and lower it when the file shrinks: the test
