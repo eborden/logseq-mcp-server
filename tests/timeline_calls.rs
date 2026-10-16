@@ -1,5 +1,5 @@
 //! The LogSeq traffic of `logseq_explore_timeline` against a mock LogSeq on a local port: how many calls it makes, in
-//! which order and with which inputs, for a period alone and for a page. The call counts are those in `CLAUDE.md`
+//! which order and with which inputs, for a period alone and for a page. The call counts are those in `docs/performance.md`
 //! ("Current Implementation Status"); the parity harness (`parity.rs`) checks the same calls and the result bytes against
 //! the recorded results. Every page and block here is made up (BR-0001).
 

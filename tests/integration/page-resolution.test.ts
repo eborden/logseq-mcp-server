@@ -8,7 +8,7 @@ import { connectFixture, recordCalls } from './helpers/fixture-client.js';
  * Integration tests for page-name resolution (#41), against the fixture graph.
  *
  * Read-only. The resolver has no tool of its own, so its cases run through `get_page` with `detail: "outline"`, which costs the
- * resolver's calls plus one query for the blocks when the page is found (CLAUDE.md, "Current Implementation
+ * resolver's calls plus one query for the blocks when the page is found (docs/performance.md, "Current Implementation
  * Status"); an ambiguous or missing name costs the resolver's calls alone. The cases are fixture pages (tests/fixtures/README.md, "Page resolution and
  * aliases"): the journal Jan 6th, 2025; `atlas`, the alias only `project atlas` declares;
  * `roadmap`, declared by `project borealis` and `project cascade`; the namespace leaf `notes`,
