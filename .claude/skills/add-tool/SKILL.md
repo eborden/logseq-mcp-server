@@ -5,7 +5,7 @@ description: 'Use when adding a new MCP tool, or changing a tool''s name, descri
 
 # Add a tool
 
-The seven steps and the key-files list below moved here from CLAUDE.md ("When Adding New Tools") with their text unchanged; only the heading levels and the relative link paths changed. Two rules stay in CLAUDE.md whether or not this skill loads: every tool is read-only (BR-0002), and a change to the recorded `tools/list` or the goldens needs the maintainer's OK and the `golden-change` label.
+Two rules stay in CLAUDE.md whether or not this skill loads: every tool is read-only (BR-0002), and a change to the recorded `tools/list` or the goldens needs the maintainer's OK and the `golden-change` label.
 
 Checklist for new Datalog-based tools. Each tool is a directory in `src/tools/<tool>/`:
 
