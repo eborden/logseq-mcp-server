@@ -73,6 +73,8 @@ Work is tracked in GitHub issues and the [LogSeq MCP Workflow](https://github.co
 ### Issue and PR templates
 **Skill: `plan-in-issues`.** Use when planning multi-part work, filing an issue or PR, splitting work into sub-issues, or setting blocked-by edges or board status. Covers the template rules (`--body-file`, subagent briefs), sub-issues, waves, blocked-by edges and board intake. Invoke it before filing an issue or PR or planning a multi-part change.
 
+File every issue and PR with `--body-file` filled from its `.github/` template, never `--body` (`gh` skips the template then); every subagent brief carries this.
+
 | Kind | Template | Label | Use for |
 |---|---|---|---|
 | Task | [`task.md`](.github/ISSUE_TEMPLATE/task.md) | `task` | A bounded change a subagent implements. The issue is its whole brief: context, scope, out of scope, files, constraints, acceptance, verification, open questions, Definition of Ready |
