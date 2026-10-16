@@ -13,7 +13,7 @@ import { startLiveServer, type LiveServer } from './live-server.js';
 type Schema = {
   type?: string | string[];
   enum?: unknown[];
-  anyOf?: Array<{ type?: string }>;
+  anyOf?: Schema[];
   minimum?: number;
   minItems?: number;
 };
@@ -24,10 +24,19 @@ function typeOf(schema: Schema): string | undefined {
   return types.length === 1 ? types[0] : undefined;
 }
 
+/** An optional parameter is `anyOf` one type and null: read it as that one type. */
+function withoutNull(schema: Schema): Schema {
+  const rest = schema.anyOf?.filter(branch => branch.type !== 'null') ?? [];
+  if (!schema.anyOf || rest.length !== 1 || rest.length === schema.anyOf.length) return schema;
+  const { anyOf: _anyOf, ...outer } = schema;
+  return { ...outer, ...rest[0] };
+}
+
 /** A right value for a parameter, from its schema. */
-function sampleFor(name: string, schema: Schema): unknown {
+function sampleFor(name: string, optional: Schema): unknown {
+  const schema = withoutNull(optional);
   if (schema.enum) return schema.enum[0];
-  if (schema.anyOf?.some(branch => ['string', 'number', 'boolean'].includes(branch.type ?? ''))) return 'x';
+  if (schema.anyOf?.some(branch => ['string', 'number', 'boolean'].includes(typeOf(branch) ?? ''))) return 'x';
   switch (typeOf(schema)) {
     case 'string':
       return 'Alice';
@@ -46,7 +55,8 @@ function sampleFor(name: string, schema: Schema): unknown {
 }
 
 /** A value of the wrong type for a parameter, from its schema. */
-function wrongFor(name: string, schema: Schema): unknown {
+function wrongFor(name: string, optional: Schema): unknown {
+  const schema = withoutNull(optional);
   if (schema.enum || typeOf(schema) === 'string') return 42;
   if (schema.anyOf) return ['not', 'a', 'scalar'];
   switch (typeOf(schema)) {

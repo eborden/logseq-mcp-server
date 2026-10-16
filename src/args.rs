@@ -252,9 +252,22 @@ enum Kind {
     List,
 }
 
+/// An optional parameter's schema entry is `anyOf: [T, {"type": "null"}]` (`tool::NullableAsAnyOf`): read it as `T`,
+/// keeping the entry's own keys (`description`). Any other entry is returned as it is.
+fn without_null_branch(property: &Value) -> std::borrow::Cow<'_, Value> {
+    let Some(branches) = property.get("anyOf").and_then(Value::as_array) else { return std::borrow::Cow::Borrowed(property) };
+    let mut rest = branches.iter().filter(|branch| branch.get("type") != Some(&Value::String("null".into())));
+    let (Some(only), None) = (rest.next(), rest.next()) else { return std::borrow::Cow::Borrowed(property) };
+    let mut merged = property.as_object().cloned().unwrap_or_default();
+    merged.remove("anyOf");
+    merged.extend(only.as_object().cloned().unwrap_or_default());
+    std::borrow::Cow::Owned(Value::Object(merged))
+}
+
 impl Kind {
     fn of(property: Option<&Value>) -> Kind {
         let Some(property) = property else { return Kind::Text };
+        let property = &*without_null_branch(property);
         if let Some(words) = property.get("enum").and_then(Value::as_array) {
             return Kind::Choice(words.iter().filter_map(Value::as_str).map(str::to_owned).collect());
         }
@@ -335,7 +348,8 @@ struct Limits {
 
 impl Limits {
     fn of(property: Option<&Value>) -> Limits {
-        let number = |key: &str| property.and_then(|property| property.get(key)).and_then(|limit| limit.as_u64().or_else(|| limit.as_f64().map(|limit| limit as u64)));
+        let property = property.map(without_null_branch);
+        let number = |key: &str| property.as_deref().and_then(|property| property.get(key)).and_then(|limit| limit.as_u64().or_else(|| limit.as_f64().map(|limit| limit as u64)));
         Limits {
             min: number("minimum").unwrap_or(0),
             max_chars: number("maxLength").map(|limit| limit as usize),
