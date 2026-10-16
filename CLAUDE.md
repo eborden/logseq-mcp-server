@@ -25,15 +25,15 @@ Full rule, with rationale and enforcement: [BR-0001 (no-graph-data-in-repo)](doc
 
 ## Skills
 
-Procedures live in repo skills (`.claude/skills/<name>/SKILL.md`). A skill may not trigger, so a rule whose miss is costly stays here (last column). `tests/guards/claude-md-skills.test.ts` keeps every skill in this table, each description starting "Use when", and this file under a size ceiling.
+Procedures live in repo skills (`.claude/skills/<name>/SKILL.md`). A skill may not trigger, so a rule whose miss is costly stays here (last column). `tests/guards/claude-md-skills.test.ts` keeps this table complete and this file under a size ceiling.
 
 | Skill | Use when | Stays in CLAUDE.md |
 |---|---|---|
 | `datalog-queries` | Writing or reviewing a query builder (`queries.rs`), or a query returns 0 rows or errors | The five Datalog rules |
 | `add-tool` | Adding a tool, or changing a tool's name, description or schema | Tools are read-only (BR-0002); contract changes need the maintainer's OK |
-| `plan-in-issues` | Planning multi-part work, filing an issue or PR, setting blocked-by edges or board status | `--body-file` from the template, never `--body` |
-| `work-the-queue` | Picking up Ready issues, briefing subagents, opening or reviewing a PR, resolving threads | The merge gate and Merge policy; briefs name the skill and carry the safety rules |
-| `verify-before-merge` | About to merge or approve a PR, or judging its test plan | CI green; `golden-change` only on the maintainer's OK; no ceiling raises; privacy grep |
+| `plan-in-issues` | Planning multi-part work, filing an issue or PR, setting blocked-by edges or board status | `--body-file`, never `--body` |
+| `work-the-queue` | Picking up Ready issues, briefing subagents, opening or reviewing a PR | The merge gate and Merge policy; briefs name the skill |
+| `verify-before-merge` | About to merge or approve a PR, or judging its test plan | CI green; `golden-change` on the maintainer's OK only; privacy grep |
 | `github-rate-limits` | A `gh` call fails with 403, 429 or a rate-limit message, or before a burst of writes | Stagger writes from parallel subagents |
 | `remote-session` | Launching, briefing or watching a cloud session, or running inside one | A cloud session does what CI does and never publishes |
 | `logseq-skills` | Using the server's tools on a graph (users of the server, not development) | Nothing (it ships in the plugin) |
@@ -64,7 +64,7 @@ Two kinds of record live in `docs/`. Their READMEs hold the full process. Read t
 
 **Changing one.** An accepted ADR changes only in its status and pointer to a replacement (a reversal is a new ADR), a pinned `<commit>:<path>` citation of a deleted file, and its Mechanical enforcement section. IDs, Index and Changelog rows and the format rules are in the READMEs; `npx tsx scripts/docs-format.ts` checks them.
 
-**The OK rule.** Adding, changing, superseding or retiring an ADR or business rule needs the maintainer's OK before merge (see Merge policy). The one exception is a PR that only adds or strengthens Mechanical enforcement lines (`none-yet` to `test:` or `ci:`, a new line, or a stronger tier; order: `type`, `test`, `ci`, `reviewer`, `none-yet`) and changes no other ADR or business-rule content. Removing or weakening enforcement needs the OK.
+**The OK rule.** Adding, changing, superseding or retiring an ADR or business rule needs the maintainer's OK before merge (see Merge policy). The one exception is a PR that only adds or strengthens Mechanical enforcement lines (`none-yet` to `test:` or `ci:`, a new `type:`, `test:` or `ci:` line, or a stronger tier; order: `type`, `test`, `ci`, `reviewer`, `none-yet`) and changes no other ADR or business-rule content. Dropping a `none-yet` line only because a guard for that same issue replaced it counts as strengthening. Removing or weakening enforcement needs the OK.
 
 ---
 
