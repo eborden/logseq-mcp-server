@@ -29,12 +29,12 @@ Checklist for new Datalog-based tools. Each tool is a directory in `src/tools/<t
 
 4. **Integration Test** - Add to `tests/integration/`
    - Connect with `connectFixture()` and assert exact results on fixture pages; add a function for the tool to `tests/integration/helpers/tools.ts`, and fixture data (and its README rows) if the tool needs a case the fixture lacks
-   - Fail loud, never skip (see Integration Test Requirements)
+   - Fail loud, never skip (see "Integration Test Requirements" in [`docs/testing.md`](../../../docs/testing.md))
 
 5. **Contract and documentation** - The tool's `definition`
    - Give the tool `read_only_annotations("Title")` (`tests/guards/tool-list.test.ts` and `src/server.rs` fail without it). Every tool is read-only: [BR-0002 (tools-read-only)](../../../docs/business-rules/0002-tools-read-only.md)
    - Generate the `inputSchema` from the argument type with `input_schema`, and parse the arguments into that type with `parse_args` (`src/args.rs`) before the first LogSeq call. `tests/rust-guards/tool-arguments.test.ts` sends a wrong-typed value to every parameter and checks it fails
-   - Write the description with a "Can't find" line (ADR-0015), and add the tool's cases to the parity data (a new `tests/data/parity/<tool>.json`, recorded with `PARITY_RECORD=1`). A new tool changes `tests/data/parity/tool-list.json` and adds golden results and call ceilings (`call-ceilings.json`, recorded with the cases), which the `golden-files` job fails until the maintainer has OKed them and added the `golden-change` label (see "Verification before merge")
+   - Write the description with a "Can't find" line (ADR-0015), and add the tool's cases to the parity data (a new `tests/data/parity/<tool>.json`, recorded with `PARITY_RECORD=1`). A new tool changes `tests/data/parity/tool-list.json` and adds golden results and call ceilings (`call-ceilings.json`, recorded with the cases), which the `golden-files` job fails until the maintainer has OKed them and added the `golden-change` label (see "Verification before merge" in CLAUDE.md)
 
 6. **Measure** - Add the tool to `scripts/measure-api-calls.ts` and record its call count in the table in `docs/performance.md`
 
