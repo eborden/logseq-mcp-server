@@ -58,7 +58,7 @@ describe('resolve_refs on missing targets in the fixture graph (#138)', () => {
   });
 
   it('the fixture still has the placeholder rows this guards against', async () => {
-    // A uuid is matched with a `#uuid` literal, never a string (CLAUDE.md, constraint 7)
+    // A uuid is matched with a `#uuid` literal, never a string (docs/datalog.md, constraint 7)
     const query = `[:find (pull ?e [:db/id :block/uuid :block/content :block/name :block/original-name
                               {:block/page [:db/id :block/name :block/original-name]}])
                    :where [(ground [${uuidLiteral(DEAD)} ${uuidLiteral(BEEF)}]) [?u ...]] [?e :block/uuid ?u]]`;

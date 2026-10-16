@@ -195,7 +195,7 @@ export class LogseqClient {
   /**
    * Execute a Datalog query via `logseq.DB.datascriptQuery`. LogSeq reads every input after the query string as
    * EDN, so a bare string would be read as a symbol and match nothing: each input is sent as `JSON.stringify(value)`,
-   * a valid EDN literal (CLAUDE.md, constraint 1).
+   * a valid EDN literal (docs/datalog.md, constraint 1).
    */
   async executeDatalogQuery<T = unknown>(query: string, ...inputs: unknown[]): Promise<T> {
     return this.callAPI<T>('logseq.DB.datascriptQuery', [query, ...inputs.map(value => JSON.stringify(value))]);

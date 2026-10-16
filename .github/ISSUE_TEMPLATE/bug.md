@@ -40,7 +40,7 @@ Expected:
 - Deterministic? <!-- always / intermittent (how often, under what load) -->
 
 ## Suspected area
-<!-- Optional, but it saves an agent a search: tool, query builder, or the CLAUDE.md constraint or BR it may violate. -->
+<!-- Optional, but it saves an agent a search: tool, query builder, or the docs/datalog.md constraint or BR it may violate. -->
 
 ## Acceptance for the fix
 <!-- A known bug is pinned by a plain `it` that asserts the current wrong value and names this
