@@ -281,20 +281,7 @@ The seven verified constraints, the four patterns, the migration history and the
 
 Quick reference checklist for future work:
 
-**Queries**
-- [ ] Build page names as `PageName`, which lowercases them, before they reach a query
-- [ ] Pass strings as `:in` inputs (`DatalogInput`), never embedded in the query text. `execute_datalog_query` EDN-encodes them (a bare string would be read as a symbol).
-- [ ] Embed numeric IDs only through `ground_ids`, which takes `PageId`s
-- [ ] Don't use `clojure.string/lower-case`. `includes?`, `starts-with?`, `re-pattern` and `re-find` work.
-- [ ] Split queries when data might be empty (don't rely on or-join with ground nil)
-- [ ] Send Datalog to `logseq.DB.datascriptQuery`. `logseq.DB.q` takes the simple query DSL and returns `null` for Datalog.
-- [ ] Handle empty arrays from queries gracefully (an empty `Vec`; `null` is its own case)
-- [ ] Page names in `:block/name` are lowercase, not original casing
-- [ ] Use `[(ground [id1 id2 id3]) [?id ...]]` for batch queries
-- [ ] Never crawl `getAllPages` + one call per page (Pattern 4)
-- [ ] `:with` can't name a variable that's also aggregated in `:find` (error: `:find and :with should not use same variables`)
-- [ ] Match `:block/uuid` with `#uuid "..."` literals via `ground_uuids`; strings never match (constraint 7)
-- [ ] Remember: LogSeq Datalog ≠ Standard DataScript
+**Queries:** the checklist moved to the `datalog-queries` skill (`.claude/skills/datalog-queries/SKILL.md`, see "Datalog queries" above), and the constraints it cites are in [`docs/datalog.md`](docs/datalog.md).
 
 **Data shapes** (verified by `scripts/probe-constraints.ts`)
 - [ ] `:block/journal-day` is an integer `YYYYMMDD` (e.g. `20260422`). Parse its digits (`JournalDay::parse`); never treat it as a timestamp.
