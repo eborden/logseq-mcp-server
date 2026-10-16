@@ -57,3 +57,83 @@ cargo test --release --locked --test parity --test parity_self_check
 ## Closest names
 
 The closest names after `Closest:` in a page-not-found message are not compared byte for byte (ADR-0034 Decision 4, `tests/parity_support/suggestion_rules.rs`). The test checks the message frame, that the list is one to three distinct page names, that exact and prefix matches come first, that every name covers every word typed, and that there are as many as there are to list, up to three. It fails when the recorded cases lack one the ADR requires.
+
+## Testing Philosophy
+
+### Fixture Graph, Exact Assertions
+
+The integration tests run against `tests/fixtures/graph/`, a small made-up graph in the repo (#86, #90), and nothing else. `connectFixture()` (`tests/integration/helpers/fixture-client.ts`) loads the config and calls `requireFixtureGraph`, and the run's global setup does it once first, so a run against any other graph fails loud. The suites are TypeScript (vitest) but test the Rust server: a tool function imported from `tests/integration/helpers/tools.ts` calls the built binary over MCP stdio (`tests/integration/setup.md`, "The server under test"). `tests/integration/setup.md` has the run steps; `tests/fixtures/README.md` says what each page is for and what it returns.
+
+**Pattern:**
+```typescript
+beforeAll(async () => {
+  ({ client } = await connectFixture());
+});
+
+it('returns every neighbour of a page under the caps', async () => {
+  const result = await getConceptNetwork(client, 'bob', 1);
+
+  expect(result.nodes.map(n => n.name).sort()).toEqual(BOB_NETWORK); // known fixture data
+  expect(result).toMatchObject({ truncated: false, hasMore: false, warnings: [] });
+});
+```
+
+- **Exact values from known pages**, never data discovered at run time. A test that needs new data adds it to the fixture and its README in the same PR.
+- **Compute what drifts**: today's journal (LogSeq makes it on open; `laterJournalDays`), and page counts that include built-in pages. Use fixed date windows that end before 2026.
+- **Caps that pick by `:db/id` order** are stable in count, not by name; the fixture README's hub section says which is which.
+- **Invariants** that hold for any graph stay as property tests (`tests/integration/properties/`), run over a fixed list of fixture pages.
+- **A known bug** is a plain `it` (or a plain Rust `#[test]`) that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails` or `#[should_panic]`, which also pass when the body fails for another reason. Behavior copied from the TypeScript server that looks like a bug is tagged `// PARITY(#299)` in the crate and pinned the same way (see BR-0011).
+
+**Test Categories:**
+- **Rust tests** (`cargo test --locked`): unit tests beside the code (`#[cfg(test)]`: query builders, parsers, renderers, caps) and call-count tests in `tests/*_calls.rs`, which run a tool against a mock HTTP LogSeq (`tests/common/mod.rs`) and assert the exact calls and result. Also `tests/no_stdout.rs`, `env_reads.rs` and `no_env_proxy.rs`, which fail on a write to stdout, an environment read outside `env.rs` and a proxy picked up from the environment. They touch no LogSeq
+- **Golden results** (`cargo test --test parity`, #371; CI runs them through `cargo test`, #375): every tool, prompt and resource result against the results recorded from the TypeScript server, the LogSeq calls (each matches a recorded call, at most the case's ceiling in `call-ceilings.json` are made, all are reads; order and grouping are not compared, ADR-0034), and `tools/list` by meaning (ADR-0031). A JSON tool result is compared by deep equality (key order ignored, array order kept, numbers by value) and has to be minified (ADR-0009); markdown, prompt messages, resource reads and the frame of a not-found message are byte for byte. Each starts the binary against a stub LogSeq, and proves it can fail (`tests/parity_self_check.rs`). The cases and their golden results are `tests/data/parity/*.json` and nowhere else (#379), and `PARITY_RECORD=1 cargo test --test parity_record -- --nocapture` records them (it rewrites a result only when it changed in meaning, and refuses to run in CI). Every comparison rule is in `tests/parity_support/compare.rs`, and `tests/parity_comparator.rs` and `parity_harness.rs` hold the comparator, the stub and the run to their own rules
+- **Guard tests** (`npx vitest run tests/guards tests/rust-guards`): the repo's rules (docs format, templates, privacy, fixture, workflows, tool-list guardrails, the golden-files check). `tests/rust-guards` starts the Rust binary: the live `tools/list` against the size budget and description cap, a wrong-typed value sent to every parameter of every tool, and the version
+- **Integration tests** (`npm run test:integration`, ~215 in 22 files as of Oct 2026, against the fixture graph in a live LogSeq): exact results of every tool, through the Rust server
+- Note: `npm test` runs the guard tests, then `npm run test:integration`, so it needs the fixture instance running and the Rust debug build (it doesn't run `cargo test`: run that separately). The default vitest config leaves `tests/integration/` out.
+- **Property tests**: Universal invariants, equivalence validation (`tests/integration/properties/`, and the crawl oracles in `find-blocks-property` and `temporal-queries`)
+
+### Integration Test Requirements (Hard Failures)
+
+Integration tests must fail loud on BOTH setup issues AND missing test data.
+
+**Rules:**
+1. **NO it.skipIf() for integration tests** - Tests must run or fail, never skip
+2. **NO console.warn() in tests** - Silent warnings hide real failures
+3. **REQUIRE prerequisites explicitly** - `connectFixture()` checks the config, the connection and the fixture graph
+4. **Fail with helpful messages** - Point to setup.md for resolution steps
+
+**Pattern:**
+```typescript
+// ❌ BAD: Silent skip/warn
+beforeAll(async () => {
+  try {
+    await access(configPath);
+  } catch {
+    skipTests = true; // Silent skip - test suite passes without testing!
+  }
+});
+it.skipIf(skipTests)('test', async () => { ... });
+
+// ❌ BAD: Silent warn
+const result = await findBlocks(client, { text: 'test' });
+if (!result || result.length === 0) {
+  console.warn('No data found'); // Test passes without proving anything!
+  return;
+}
+
+// ✅ GOOD: Fail loud, and assert exactly what the fixture holds
+beforeAll(async () => {
+  ({ client } = await connectFixture()); // throws, pointing at setup.md, unless LogSeq serves the fixture
+});
+
+it('test', async () => {
+  const result = await findBlocks(client, { text: 'importer' });
+  expect(result).toHaveLength(11); // the fixture's 11 blocks that say "importer"
+});
+```
+
+**Why:**
+- Skipped tests provide false confidence
+- Passing tests that found no data prove nothing
+- Integration tests must test real integration
+- Clear failures guide developers to fix actual problems
