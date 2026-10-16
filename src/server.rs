@@ -371,7 +371,8 @@ mod tests {
             json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
             json!({"jsonrpc": "2.0", "id": 3, "method": "prompts/list"}),
             json!({"jsonrpc": "2.0", "id": 4, "method": "resources/list"}),
-            json!({"jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": {"uri": "logseq://guide"}}),
+            json!({"jsonrpc": "2.0", "id": 5, "method": "resources/templates/list"}),
+            json!({"jsonrpc": "2.0", "id": 6, "method": "resources/read", "params": {"uri": "logseq://guide"}}),
         ])
         .await;
         for response in &responses[1..] {
