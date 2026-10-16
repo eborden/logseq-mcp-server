@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'fs';
+import { readdirSync, readFileSync, realpathSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -10,9 +10,10 @@ import { fileURLToPath } from 'url';
  * A skill nobody knows about does nothing, and a rulebook that grows back defeats the move. Three checks:
  *   1. every directory in `.claude/skills/` has a row in the "## Skills" table of CLAUDE.md (first cell the skill's
  *      name in backticks, a non-empty "use when" cell), and every row names a skill that exists;
- *   2. every skill's `SKILL.md` description starts "Use when". A symlinked skill is exempt: it is the shipped plugin
- *      skill (`skills/logseq-skills`), whose description is checked by the routing eval and ADR-0018, and it says what it
- *      does before when to use it. It still needs its row;
+ *   2. every skill's `SKILL.md` description starts "Use when". Only the pinned shipped plugin skill is exempt (see
+ *      SHIPPED_PLUGIN_SKILLS): it is the symlink `.claude/skills/logseq-skills` that resolves to `skills/logseq-skills`,
+ *      whose description is checked by the routing eval and ADR-0018, and it says what it
+ *      does before when to use it. It still needs its row. Any other skill, symlinked or not, must satisfy the rule;
  *   3. CLAUDE.md is at most CLAUDE_MD_MAX_BYTES bytes.
  *
  * The ceiling only goes down. Set it to the size rounded up modestly, and lower it when the file shrinks: the test
@@ -32,9 +33,12 @@ const CEILING_SLACK_BYTES = 1_000;
 
 const SKILLS_HEADING = '## Skills';
 
+/** The shipped plugin skills (`skills/<name>`) that `.claude/skills/<name>` may symlink to. Adding one is a deliberate edit. */
+const SHIPPED_PLUGIN_SKILLS: ReadonlySet<string> = new Set(['logseq-skills']);
+
 interface Skill {
   readonly name: string;
-  /** True for a symlink into the shipped plugin directory (`skills/`). */
+  /** True only for a pinned shipped plugin skill, symlinked to its directory under `skills/` (see isShippedPlugin). */
   readonly shipped: boolean;
   /** The text of SKILL.md. */
   readonly text: string;
@@ -116,13 +120,31 @@ function skillViolations(claudeMd: string, skills: readonly Skill[]): string[] {
   return problems;
 }
 
+/** Whether a skill entry is the one exempt shape: a pinned name, a symlink, resolving to `skills/<name>` in the repo. */
+function isShippedPlugin(name: string, isSymlink: boolean, resolved: string | undefined, shippedDir: string): boolean {
+  return SHIPPED_PLUGIN_SKILLS.has(name) && isSymlink && resolved !== undefined && resolved === shippedDir;
+}
+
+const resolveOrUndefined = (path: string): string | undefined => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+};
+
 /** The skills under `.claude/skills/`, read from disk. */
 function readSkills(): Skill[] {
   return readdirSync(SKILLS_DIR, { withFileTypes: true })
     .filter(entry => entry.isDirectory() || entry.isSymbolicLink())
     .map(entry => ({
       name: entry.name,
-      shipped: entry.isSymbolicLink(),
+      shipped: isShippedPlugin(
+        entry.name,
+        entry.isSymbolicLink(),
+        resolveOrUndefined(join(SKILLS_DIR, entry.name)),
+        resolveOrUndefined(join(ROOT, 'skills', entry.name)) ?? '',
+      ),
       text: readFileSync(join(SKILLS_DIR, entry.name, 'SKILL.md'), 'utf8'),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -206,9 +228,20 @@ describe('the skill check can fail (#609)', () => {
     ]);
   });
 
-  it('exempts only a symlinked (shipped) skill from the description rule', () => {
+  it('exempts a shipped skill from the description rule', () => {
     const shipped: Skill = { name: 'alpha', shipped: true, text: "---\ndescription: 'Query things. Use when asked.'\n---\n" };
     expect(skillViolations(table, [shipped, good[1]])).toEqual([]);
+  });
+
+  it('exempts only the pinned name, as a symlink that resolves to skills/<name>', () => {
+    const dir = '/repo/skills/logseq-skills';
+    expect(isShippedPlugin('logseq-skills', true, dir, dir)).toBe(true);
+    // Any other name, even a symlink to a directory under skills/, is held to "Use when".
+    expect(isShippedPlugin('datalog-queries', true, '/repo/skills/datalog-queries', '/repo/skills/datalog-queries')).toBe(false);
+    // The pinned name as a plain directory, or a symlink that resolves elsewhere or not at all, is held to it too.
+    expect(isShippedPlugin('logseq-skills', false, dir, dir)).toBe(false);
+    expect(isShippedPlugin('logseq-skills', true, '/elsewhere/logseq-skills', dir)).toBe(false);
+    expect(isShippedPlugin('logseq-skills', true, undefined, dir)).toBe(false);
   });
 
   it('reads single-quoted descriptions with doubled quotes', () => {
