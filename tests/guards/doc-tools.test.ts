@@ -41,7 +41,7 @@ import {
  * the new one. Add the comment only when the sentence says "was" and the old name is the point.
  *
  * Bare names (#510). Most of the docs name tools without the prefix: the tool tables in README.md, its `Use: name(...)`
- * lines, the status table and prose of CLAUDE.md, the prose of docs/architecture.md. A rename (#489 to #495) leaves each of
+ * lines, the status table of docs/performance.md, the prose of CLAUDE.md, the prose of docs/architecture.md. A rename (#489 to #495) leaves each of
  * those stale, so a bare token that equals a first-version tool name (FORMER_TOOL_NAMES, whole word) must be a tool in
  * the recorded list with the prefix added, or sit on a line whose history comment names it
  * (`<!-- guard:history get_old_name -->`, the bare name). A rename PR updates the bare names in step, or the guard fails
