@@ -227,7 +227,7 @@ The server translates high-level queries (e.g., "get context for topic") into ca
 
 ## Why Datalog?
 
-Editor API calls return one entity per call, so a crawl costs O(n) calls for n entities. Batched Datalog costs O(maxDepth) calls, or a fixed few, whatever the graph size. The decision, its history and its costs (a narrower dialect, see the constraints below): [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md).
+Editor API calls return one entity per call, so a crawl costs O(n) calls for n entities. Batched Datalog costs O(maxDepth) calls, or a fixed few, whatever the graph size. The decision, its history and its costs (a narrower dialect, see the constraints in docs/datalog.md): [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md).
 
 ### Current Implementation Status
 
