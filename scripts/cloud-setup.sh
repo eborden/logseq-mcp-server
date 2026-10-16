@@ -2,7 +2,7 @@
 # Prepares a Claude cloud agent's fresh container to build and test this repo. Idempotent: safe to re-run.
 # It installs what CI's `tooling` and `cargo` jobs need (the pinned Rust toolchain, the crate's dependencies, the
 # Node dev dependencies) and nothing else. The cloud has no LogSeq desktop app, so the integration tests, the probe
-# and the measure scripts can't run there (CLAUDE.md, "Cloud agents").
+# and the measure scripts can't run there (the `remote-session` skill, "Cloud agents").
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
