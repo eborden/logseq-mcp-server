@@ -1,6 +1,6 @@
 # Testing
 
-The Rust tests are unit tests beside the code (`#[cfg(test)]` in `src/`) and the integration tests in `tests/*.rs`: call-count tests against a mock LogSeq (`tests/common/mod.rs`), `no_stdout.rs`, `env_reads.rs` and `no_env_proxy.rs`, and the parity test. None of them contact LogSeq. The Node tooling has its own suites: `tests/guards` and `tests/rust-guards` (vitest) and `tests/integration` (against a fixture LogSeq). [development.md](development.md) has the commands. This page is the golden-result contract.
+The Rust tests are unit tests beside the code (`#[cfg(test)]` in `src/`) and the integration tests in `tests/*.rs`: call-count tests against a mock LogSeq (`tests/common/mod.rs`), `no_stdout.rs`, `env_reads.rs` and `no_env_proxy.rs`, and the parity test. None of them contact LogSeq. The Node tooling has its own suites: `tests/guards` and `tests/rust-guards` (vitest) and `tests/integration` (against a fixture LogSeq). [development.md](development.md) has the commands. This page is the golden-result contract, followed by the test philosophy ("Testing Philosophy", at the end).
 
 ## Golden results
 
