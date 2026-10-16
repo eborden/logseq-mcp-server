@@ -131,7 +131,7 @@ describe('the shellcheck job in ci.yml', () => {
   });
 });
 
-// CLAUDE.md: a `# shellcheck disable=` needs its reason on the same line, as `# shellcheck disable=SC2034 # why`.
+// The `verify-before-merge` skill: a `# shellcheck disable=` needs its reason on the same line, as `# shellcheck disable=SC2034 # why`.
 describe('shellcheck disable directives', () => {
   const directive = /#\s*shellcheck\s+disable=/;
   const withReason = /#\s*shellcheck\s+disable=[A-Za-z0-9,-]+\s+#\s*\S/;
