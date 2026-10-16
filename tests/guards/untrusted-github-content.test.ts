@@ -54,7 +54,8 @@ describe('untrusted GitHub content rule', () => {
   });
 
   it('the merge-gate query returns each thread comment\'s authorAssociation', () => {
-    const gate = under(claude, '### Code review');
+    // The query moved with the Code review section into the work-the-queue skill (#604).
+    const gate = under(read('.claude/skills/work-the-queue/SKILL.md'), '## Code review');
     expect(gate).toMatch(/reviewThreads\(first: 100\) \{[^']*authorAssociation/);
   });
 
