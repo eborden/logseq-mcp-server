@@ -35,3 +35,53 @@ cargo build --release --locked        # target/release/logseq-mcp-server
 The server reads `~/.logseq-mcp/config.json`, or the absolute path in `LOGSEQ_MCP_CONFIG`. To point it at a worktree's fixture instance instead of your own graph, run `npx tsx scripts/logseq-instance.ts start` and set the `LOGSEQ_MCP_CONFIG` it prints. The unit tests never contact LogSeq: the client tests run their own mock HTTP server on a free local port.
 
 The full workflow (issues, PR template, review gate, merge policy) is in `CLAUDE.md`. Principles for writing code are in [architecture-foundations.md](architecture-foundations.md).
+
+## Useful Commands
+
+```bash
+# The Rust server: build, then its unit and call-count tests (touch no LogSeq)
+cargo build && cargo test --locked
+cargo build --release --locked   # the binary the measure scripts and the smoke run use
+
+# The Node tooling's dependencies (the harness, the guards, the scripts), from the lockfile
+npm ci
+
+# The golden-result test and its self-check (#124, #371, #375); the cases and their results are tests/data/parity/
+cargo test --locked --test parity --test parity_self_check
+# Re-record the golden results on purpose, from the Rust debug build, never in CI (#299, #379)
+PARITY_RECORD=1 cargo test --test parity_record -- --nocapture
+
+# The repo's guard tests (docs format, templates, privacy, workflows, tool-list guardrails) and the type-check
+npx vitest run tests/guards tests/rust-guards
+npm run typecheck
+npx tsx scripts/docs-format.ts
+
+# A release binary against the fixture instance, tool by tool (#359; start the instance first)
+node node_modules/vite-node/vite-node.mjs scripts/smoke-rust-server.ts target/release/logseq-mcp-server
+
+# Integration tests against this worktree's fixture instance (macOS; own profile, port and random API token)
+npx tsx scripts/logseq-instance.ts start
+npm run test:integration          # picks up .logseq-instance/config.json while the instance runs
+npx tsx scripts/logseq-instance.ts stop
+git status                        # sanity check: nothing under tests/fixtures/graph/ (the instance opens a copy, #151)
+
+# The suites run the Rust server (#352, #356): build the crate first (`cargo build`); details in tests/integration/setup.md
+
+# Verify Datalog/API constraints (read-only); the fixture reproduces all of them
+npx tsx scripts/probe-constraints.ts   # uses the running instance; never the personal config
+
+# Count API calls per tool (read-only): the default config is the real-graph baseline; the fixture gives reproducible counts
+npx tsx scripts/measure-api-calls.ts
+
+# Output size per tool: slim vs full, markdown and compact vs json (read-only; prints byte counts only)
+npx tsx scripts/measure-output-size.ts
+```
+
+## References
+
+- **LogSeq HTTP API:** http://127.0.0.1:12315/api (default)
+- **DataScript Docs:** https://github.com/tonsky/datascript (note: LogSeq subset only)
+- **Decisions and rules:** [`docs/adr/`](adr/README.md) (why we chose X) and [`docs/business-rules/`](business-rules/README.md) (what must stay true). The Datalog migration is recorded in [ADR-0002 (datalog-over-editor-api)](adr/0002-datalog-over-editor-api.md) and [ADR-0005 (datalog-only-no-feature-flags)](adr/0005-datalog-only-no-feature-flags.md).
+- **Example Scripts:** `scripts/probe-constraints.ts`
+- **The crate's map:** [`docs/architecture.md`](architecture.md)
+- **MCP Spec:** https://github.com/modelcontextprotocol
