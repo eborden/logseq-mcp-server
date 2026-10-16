@@ -18,7 +18,7 @@ Delete these comments before you file.
 <!-- Observed behavior, with the exact error text if it is short. -->
 
 ## What you expected
-<!-- Which tool contract, doc, ADR or business rule says so? Link it (BR-0006, "Common Gotchas", a tool description). -->
+<!-- Which tool contract, doc, ADR or business rule says so? Link it (BR-0006, `docs/tool-behaviour.md`, a tool description). -->
 
 ## Reproduce
 <!-- Against the fixture instance (`npx tsx scripts/logseq-instance.ts start`) using fixture

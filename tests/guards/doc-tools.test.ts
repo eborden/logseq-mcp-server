@@ -102,6 +102,8 @@ const LIVE_DOCS: readonly string[] = [
   'docs/releasing.md',
   'docs/architecture.md',
   'docs/testing.md',
+  'docs/logseq-behaviour.md',
+  'docs/tool-behaviour.md',
 ];
 
 /** The keyword of the comment that excuses the unknown tool names it lists. Documented in the header above. */
