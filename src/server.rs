@@ -35,6 +35,8 @@ pub const RESOURCE_READ_CACHE_SCOPE: CacheScope = CacheScope::Private;
 
 /// Whether the client negotiated 2026-07-28 or later, the versions that carry `ttlMs` and `cacheScope`. An older
 /// client gets the results it always did, with neither field (rmcp fills them in for newer clients only).
+/// This copies the gate in rmcp 3.5.1's `ServerHandler::handle_request` (`src/handler/server.rs`): keep it in step
+/// when rmcp is upgraded, or an older client could get fields it does not know.
 fn carries_cache_hints(context: &RequestContext<RoleServer>) -> bool {
     // ISO `YYYY-MM-DD` versions compare lexically the same as chronologically
     context.protocol_version().is_some_and(|v| v.as_str() >= ProtocolVersion::V_2026_07_28.as_str())
