@@ -282,7 +282,8 @@ The fixture-graph pattern, the test categories and the examples are in [`docs/te
 
 - Integration tests run against the committed fixture graph (`tests/fixtures/graph/`) and nothing else. `connectFixture()` fails loud on any other graph.
 - **Exact values from known pages**, never data discovered at run time. A test that needs new data adds it to the fixture and its README in the same PR.
-- **A known bug** is a plain `it` (or a plain Rust `#[test]`) that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails` or `#[should_panic]`, which also pass when the body fails for another reason.
+- **A known bug** is a plain `it` (or a plain Rust `#[test]`) that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails` or `#[should_panic]`, which also pass when the body fails for another reason. Behavior copied from the TypeScript server that looks like a bug is tagged `// PARITY(#299)` in the crate and pinned the same way (see BR-0011).
+- **Compute what drifts**: today's journal (LogSeq makes it on open; `laterJournalDays`), and page counts that include built-in pages. Use fixed date windows that end before 2026. The rest is in `docs/testing.md`.
 
 ### Integration Test Requirements (Hard Failures)
 
