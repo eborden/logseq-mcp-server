@@ -216,7 +216,7 @@ The repo is Rust-only since #356 (the Go on #349, ADR-0025). A TypeScript server
 **Key Stats:**
 - 10 MCP tools for graph operations, search, and temporal queries
 - Rust unit and call-count tests (`cargo test --locked`), the parity cases (`tests/parity.rs`, run by `cargo test`; `tests/parity_record.rs` is the recorder), the repo's guard tests (`npx vitest run tests/guards tests/rust-guards`) and integration tests against the committed fixture graph (`npm run test:integration`, which runs the Rust server). `npm test` runs the guards and the integration tests.
-- Mostly Datalog: graph traversal, search and date-range queries run as batched Datalog. A few single lookups use `logseq.Editor.*` (see "Current Implementation Status" below)
+- Mostly Datalog: graph traversal, search and date-range queries run as batched Datalog. A few single lookups use `logseq.Editor.*` (see [`docs/performance.md`](docs/performance.md))
 
 **Architecture:**
 ```
@@ -746,7 +746,7 @@ Checklist for new Datalog-based tools. Each tool is a directory in `src/tools/<t
    - Generate the `inputSchema` from the argument type with `input_schema`, and parse the arguments into that type with `parse_args` (`src/args.rs`) before the first LogSeq call. `tests/rust-guards/tool-arguments.test.ts` sends a wrong-typed value to every parameter and checks it fails
    - Write the description with a "Can't find" line (ADR-0015), and add the tool's cases to the parity data (a new `tests/data/parity/<tool>.json`, recorded with `PARITY_RECORD=1`). A new tool changes `tests/data/parity/tool-list.json` and adds golden results and call ceilings (`call-ceilings.json`, recorded with the cases), which the `golden-files` job fails until the maintainer has OKed them and added the `golden-change` label (see "Verification before merge")
 
-6. **Measure** - Add the tool to `scripts/measure-api-calls.ts` and record its call count in "Current Implementation Status"
+6. **Measure** - Add the tool to `scripts/measure-api-calls.ts` and record its call count in the table in `docs/performance.md`
 
 7. **Tool-list guardrails** - `tests/guards/tool-list.test.ts` checks the recorded `tools/list`, and `tests/rust-guards/tool-list-live.test.ts` the server's own (`tests/data/parity/tool-list.json`; `cargo test --test parity` holds the Rust server's list to it by meaning, so a change to a tool's name, description or schema is a change to that file, re-recorded with `PARITY_RECORD=1`) ([ADR-0016 (tool-list-size-guardrails)](docs/adr/0016-tool-list-size-guardrails.md))
    - Size budget: `TOOL_LIST_BUDGET_CHARS` in `tests/guards/tool-list-limits.ts` (~15% headroom over the size measured when it was added). If your tool or parameters push past it, trim first. If the growth is worth it, raise the constant and justify it in the PR description.
@@ -768,7 +768,7 @@ Checklist for new Datalog-based tools. Each tool is a directory in `src/tools/<t
 
 ## Summary
 
-Datalog is how this project gets its performance gains (see "Current Implementation Status"), and LogSeq's Datalog needs careful handling. The key is to:
+Datalog is how this project gets its performance gains (see [`docs/performance.md`](docs/performance.md)), and LogSeq's Datalog needs careful handling. The key is to:
 
 1. **Bind strings with `:in`** (`execute_datalog_query` EDN-encodes the inputs); never embed them in the query text
 2. **Lowercase in Rust** (a `PageName` does it; `clojure.string/lower-case` is unavailable; `includes?` / `re-find` work)

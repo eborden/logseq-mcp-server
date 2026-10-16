@@ -1,6 +1,6 @@
 //! The LogSeq traffic and the answers of `logseq_find_pages` against a mock LogSeq on a local port: the one call it
 //! makes whatever the filter (#490), what `names` and `property` with `value` find, what they refuse before any call,
-//! and how a `null` or failed page list reaches the caller. The call counts are those in `CLAUDE.md` ("Current
+//! and how a `null` or failed page list reaches the caller. The call counts are those in `docs/performance.md` ("Current
 //! Implementation Status"); the parity harness (`parity.rs`) checks the same calls and the result bytes against the
 //! recorded results. Every page, name and property here is made up (BR-0001).
 

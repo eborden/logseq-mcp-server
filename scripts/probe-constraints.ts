@@ -6,7 +6,7 @@
  * Runs against this worktree's fixture instance (`npx tsx scripts/logseq-instance.ts start`), or
  * the config in LOGSEQ_MCP_CONFIG. It never falls back to ~/.logseq-mcp/config.json, the personal
  * graph (#90): with neither, or with a config on port 12315, it stops before any network call. The fixture reproduces every
- * constraint; row counts differ from the real-graph numbers in CLAUDE.md.
+ * constraint; row counts differ from the real-graph numbers in docs/performance.md.
  */
 import { loadConfig, LogseqClient } from './lib/logseq-api.js';
 import { assertNotPersonalLogseq, resolveFixtureConfigPath } from '../tests/integration/helpers/instance-config.js';
