@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, realpathSync } from 'fs';
-import { join } from 'path';
+import { join, normalize, sep } from 'path';
 import { fileURLToPath } from 'url';
 
 /**
@@ -15,6 +15,10 @@ import { fileURLToPath } from 'url';
  *      The shipped plugin skill keeps its own description, which says what it does before when to use it. It still
  *      needs its row. Any other skill, symlinked or not, must satisfy the rule;
  *   3. CLAUDE.md is at most CLAUDE_MD_MAX_BYTES bytes.
+ *
+ * A fourth check keeps the repo skills out of the plugin (maintainer: "I don't want them in the plugin"): the plugin
+ * manifest and marketplace entry name no `.claude` skills path, `skills/` holds exactly SHIPPED_PLUGIN_SKILLS, and no
+ * repo skill name is also under `skills/`.
  *
  * The ceiling only goes down. Set it to the size rounded up modestly, and lower it when the file shrinks: the test
  * fails when the ceiling is more than CEILING_SLACK_BYTES above the size, so a shrunk file cannot keep a high ceiling.
@@ -246,5 +250,76 @@ describe('the skill check can fail (#609)', () => {
 
   it('reads single-quoted descriptions with doubled quotes', () => {
     expect(descriptionOf("---\ndescription: 'Use when it''s there'\n---\n")).toEqual({ description: "Use when it's there" });
+  });
+});
+
+/** Every string under a key named `skills`, at any depth, in parsed JSON. `skills` may be a string or an array of them. */
+function skillsPaths(json: unknown): string[] {
+  const found: string[] = [];
+  const walk = (value: unknown, underSkills: boolean): void => {
+    if (typeof value === 'string') {
+      if (underSkills) found.push(value);
+    } else if (Array.isArray(value)) {
+      for (const item of value) walk(item, underSkills);
+    } else if (value !== null && typeof value === 'object') {
+      for (const [key, item] of Object.entries(value)) walk(item, underSkills || key === 'skills');
+    }
+  };
+  walk(json, false);
+  return found;
+}
+
+/** The skills paths that reach into a hidden `.claude` directory (a path segment named `.claude`). */
+function claudeSkillsPaths(json: unknown): string[] {
+  return skillsPaths(json).filter(path => normalize(path).split(sep).includes('.claude'));
+}
+
+/** What `skills/` must hold: the shipped plugin skills, nothing else. Returns one line per problem. */
+function shippedDirViolations(shipped: readonly string[], repoSkills: readonly string[]): string[] {
+  const problems: string[] = [];
+  for (const name of shipped) {
+    if (!SHIPPED_PLUGIN_SKILLS.has(name)) problems.push(`skills/ holds "${name}", which is not in SHIPPED_PLUGIN_SKILLS`);
+  }
+  for (const name of SHIPPED_PLUGIN_SKILLS) {
+    if (!shipped.includes(name)) problems.push(`SHIPPED_PLUGIN_SKILLS names "${name}", which is not in skills/`);
+  }
+  for (const name of repoSkills) {
+    if (!SHIPPED_PLUGIN_SKILLS.has(name) && shipped.includes(name)) {
+      problems.push(`the repo skill "${name}" is also under skills/, so it would ship in the plugin`);
+    }
+  }
+  return problems;
+}
+
+const readJson = (rel: string): unknown => JSON.parse(readFileSync(join(ROOT, rel), 'utf8'));
+
+describe('the repo skills never ship in the plugin (#609)', () => {
+  it('plugin.json names no skills path into .claude', () => {
+    expect(claudeSkillsPaths(readJson('.claude-plugin/plugin.json'))).toEqual([]);
+  });
+
+  it('plugin.json still names a skills path, so the check above reads something', () => {
+    expect(skillsPaths(readJson('.claude-plugin/plugin.json')).length).toBeGreaterThan(0);
+  });
+
+  it('marketplace.json declares no skills path into .claude', () => {
+    expect(claudeSkillsPaths(readJson('.claude-plugin/marketplace.json'))).toEqual([]);
+  });
+
+  it('skills/ holds only the shipped plugin skills, and no repo skill is also there', () => {
+    const shipped = readdirSync(join(ROOT, 'skills')).sort();
+    const repoSkills = readdirSync(SKILLS_DIR);
+    expect(shippedDirViolations(shipped, repoSkills)).toEqual([]);
+  });
+
+  it('can fail', () => {
+    expect(claudeSkillsPaths({ skills: ['./skills/', './.claude/skills/'] })).toEqual(['./.claude/skills/']);
+    expect(claudeSkillsPaths({ plugins: [{ skills: '.claude/skills' }] })).toEqual(['.claude/skills']);
+    expect(claudeSkillsPaths({ skills: ['./skills/'], description: '.claude/skills' })).toEqual([]);
+    expect(shippedDirViolations(['logseq-skills', 'add-tool'], ['add-tool', 'logseq-skills'])).toEqual([
+      'skills/ holds "add-tool", which is not in SHIPPED_PLUGIN_SKILLS',
+      'the repo skill "add-tool" is also under skills/, so it would ship in the plugin',
+    ]);
+    expect(shippedDirViolations([], [])).toEqual(['SHIPPED_PLUGIN_SKILLS names "logseq-skills", which is not in skills/']);
   });
 });
