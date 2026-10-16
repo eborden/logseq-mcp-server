@@ -87,7 +87,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 - **MCP tool arguments:** each tool parses its arguments into a typed value in one place and fails with `InvalidParameter` (`ToolError::InvalidParameter`). A tool parses its arguments into its `Args` type with `parse_args` (`src/args.rs`) before it makes a LogSeq call, so a bad one fails first: `null` counts as absent, nothing is coerced, and the first bad argument in the order the type declares them is the one reported, worded in that one file. The tool's `inputSchema` is generated from the type the arguments are parsed into (`input_schema` in `src/tool.rs`, through schemars), so the schema and the parser can't drift (ADR-0019). Parsing runs after `resolve_param_aliases` (`src/params.rs`). See [BR-0008 (param-aliases-best-effort)](business-rules/0008-param-aliases-best-effort.md).
 - **LogSeq responses:** parse every response into a typed value with the reader in `src/wire.rs` before a tool reads it. The wire types live beside the code that reads them (the resolver's in `src/resolve/wire.rs`, a tool's in its own `wire.rs`) and hold only the fields the code reads. The parse is strict about the fields the code reads with no fallback, silent about the rest, and tolerant of what the code already reads with a fallback or skips (an optional field stays optional). A mismatch is a `ResponseError`, never an empty result, and `null` stays distinct from `[]` (the parsers answer `None` for `null` and the tool decides what that means). The error names the method and the path of the first mismatch and never a value. A full result carries each entity as LogSeq sent it, because LogSeq spells the same field differently in the Editor API and in Datalog (`originalName` vs `original-name`) and renaming those output keys is a contract change ([BR-0004 (additive-tool-contracts)](business-rules/0004-additive-tool-contracts.md)). So entities stay `Value`s, and `src/entity.rs` keeps both spellings readable in one place.
 - **Config and environment:** parse once at startup into a typed value and fail fast: the file in `src/config.rs`, the environment in `src/env.rs`. Nothing else reads an environment variable (`tests/env_reads.rs` checks it).
-- **Tool inputs that become queries:** strings go in as `:in` inputs (`DatalogInput`), never embedded in query text (see `CLAUDE.md`, constraint 6). Numeric ids go through `ground_ids`, which takes `PageId`s, not numbers, and uuids through `ground_uuids`.
+- **Tool inputs that become queries:** strings go in as `:in` inputs (`DatalogInput`), never embedded in query text (see `docs/datalog.md`, constraint 6). Numeric ids go through `ground_ids`, which takes `PageId`s, not numbers, and uuids through `ground_uuids`.
 
 **Agents get wrong.** Strict parsing that rejects fields LogSeq adds in a newer version (a serde type with `deny_unknown_fields` on a LogSeq answer). Be strict about the fields you read and tolerant of the ones you don't (tolerant reader). Also: "parsing" that silently coerces (`"87"` to `87`, missing to a default through `#[serde(default)]` or `unwrap_or_default()`) hides defects. Reject or log instead.
 
@@ -127,7 +127,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **In this repo.**
 - `call_api` applies a timeout to each request (`timeout_ms`, default 30 s). Tools that make many calls get it per call, so also bound the number of calls.
-- Prefer one batched Datalog query over one call per entity (`CLAUDE.md`, Pattern 4). A per-page crawl on a 2k-page graph is a bounded-resources bug, not a style issue.
+- Prefer one batched Datalog query over one call per entity (`docs/datalog.md`, Pattern 4). A per-page crawl on a 2k-page graph is a bounded-resources bug, not a style issue.
 - Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`src/meta.rs`, with the warnings in `src/truncation.rs`). See [BR-0006 (no-silent-truncation)](business-rules/0006-no-silent-truncation.md). Tips are never a truncation signal ([BR-0009 (tips-are-advisory)](business-rules/0009-tips-are-advisory.md)).
 - Classify errors: see [BR-0003 (infrastructure-errors-propagate)](business-rules/0003-infrastructure-errors-propagate.md).
 
@@ -146,7 +146,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 Use the unit tests to pin shapes and the harness and integration tests to pin behavior against real data. Commit tests, refactors and behavior changes separately.
 
 **How to treat what you find.**
-- Odd early returns, magic thresholds and special cases are often safeguards against real LogSeq behavior (see the constraints in `CLAUDE.md`). Preserve them, give them intention-revealing names and comment what they protect against if it's evident. Ask if it isn't.
+- Odd early returns, magic thresholds and special cases are often safeguards against real LogSeq behavior (see the constraints in `docs/datalog.md`). Preserve them, give them intention-revealing names and comment what they protect against if it's evident. Ask if it isn't.
 - If something looks like a bug, keep the behavior, add a test that documents it as current (not endorsed) behavior, and raise it in your notes.
 - Don't rewrite. Rewrites discard the hidden knowledge that makes old code work.
 
