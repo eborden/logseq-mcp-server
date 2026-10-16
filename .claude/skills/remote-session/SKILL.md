@@ -5,7 +5,7 @@ description: 'Use when launching, briefing or watching a cloud session, when run
 
 # Remote sessions
 
-A cloud session does what CI does, and the maintainer's Mac (the host) does what needs the LogSeq desktop app. The two sections below moved here from CLAUDE.md ("Cloud agents", and "Remote sessions and the host" in "Development Workflow") with their text unchanged; only the heading level of the second changed. In the moved text, "The rule above" in "Privacy is easier here" means the Privacy section of CLAUDE.md, and "Verification before merge" is in CLAUDE.md. The untrusted-GitHub-content rule, the reviewer-subagent gate (the `work-the-queue` skill holds the steps), the golden-change and ceiling OKs, and never publishing stay in CLAUDE.md.
+A cloud session does what CI does, and the maintainer's Mac (the host) does what needs the LogSeq desktop app. "The rule above" in "Privacy is easier here" means the Privacy section of CLAUDE.md, and "Verification before merge" is in CLAUDE.md. The untrusted-GitHub-content rule, the golden-change and ceiling OKs, and never publishing stay in CLAUDE.md whether or not this skill loads; the merge gate is one line in CLAUDE.md, with its steps in the `work-the-queue` skill.
 
 ## Cloud agents
 
