@@ -326,7 +326,7 @@ fn build_monthly_summary(args: &Arguments, today: CalendarDate) -> Result<String
         String::new(),
         "Steps:".to_owned(),
         format!(r#"1. logseq_find_pages with text "Weekly {month}", then logseq_get_page (detail "full") on each. {FULL_PAGE_NOTE} If a week is missing, say so; do not invent it."#),
-        format!(r#"2. logseq_find_pages with text "Monthly", then logseq_get_page on the 1 or 2 most recent, for trajectory context only. {}"#, newest_last(2)),
+        format!(r#"2. logseq_find_pages with text "Monthly", then logseq_get_page (detail "outline") on the 1 or 2 most recent, for trajectory context only, and logseq_get_block on the uuids of the threads that matter. {}"#, newest_last(2)),
         format!("3. Spot-check the busiest days in the raw journal: logseq_explore_timeline with start_date {start}, end_date {end}, include_content false, top_concepts_limit 20 and max_blocks 500 for the shape (the first page's summary covers the whole month), then a narrow range with content and max_blocks 200 for any day a weekly flagged. While hasMore is true on either call, call it again with only its nextCursor as cursor, until a result has no nextCursor or you have what the step needs. If a result is saved to a file, don't open the file or raise max_blocks: lower it, and say in the gist that part of the month went unread."),
         "4. For each candidate signal, state its trajectory against earlier months in the text: escalating, improving, unchanged, resolved or new. A candidate with no trajectory gets merged or dropped.".to_owned(),
         "5. Verify open items against the journal, past the end of the month, before listing any as unresolved.".to_owned(),
