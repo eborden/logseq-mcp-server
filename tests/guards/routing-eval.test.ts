@@ -74,7 +74,7 @@ describe('tests/fixtures/routing-eval/questions.json', () => {
   // is or how it connects. explore-topic-4 is a backlinks ask, which ADR-0037 folds into explore (maintainer decision, #514). A reworded ground-truth
   // question is a different question, so it takes an edit here and a new baseline run.
   const pinned: Record<string, { type: ToolType; intent: string; text: string; reason: string; v1: string[]; v2: string[] }> = {
-    'find-boundary-1': { type: 'find', intent: 'find-boundary', text: 'Where does project atlas come up in my notes?', reason: "ADR-0037's boundary test: the answer is a list of hits", v1: ['logseq_search_blocks'], v2: ['logseq_find_blocks'] },
+    'find-boundary-1': { type: 'find', intent: 'find-boundary', text: 'Which blocks in my notes bring up project atlas?', reason: "ADR-0037's boundary test: the answer is a list of hits", v1: ['logseq_search_blocks'], v2: ['logseq_find_blocks'] },
     'explore-boundary-1': { type: 'explore', intent: 'explore-boundary', text: 'Where does Bob stand on project atlas?', reason: "ADR-0037's boundary test: the answer is what Bob's part", v1: ['logseq_build_context', 'logseq_get_context_for_query'], v2: ['logseq_explore_context'] },
     'explore-boundary-2': { type: 'explore', intent: 'explore-boundary', text: 'Where does project borealis stand, going by my notes?', reason: "ADR-0037's boundary test: the answer is where project borealis stands", v1: ['logseq_build_context', 'logseq_get_context_for_query'], v2: ['logseq_explore_context'] },
     'explore-topic-4': { type: 'explore', intent: 'topic', text: 'What links to Bob?', reason: 'ADR-0037 folds get_backlinks into explore_context', v1: ['logseq_get_backlinks'], v2: ['logseq_explore_context'] },
