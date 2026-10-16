@@ -228,5 +228,5 @@ The history and the reasons are in the ADRs ([index](adr/README.md)):
 
 1. **LogSeq's Datalog ≠ standard DataScript.** Probe before concluding something "doesn't work": the original conclusions on `:in` and `clojure.string` were over-generalized from a single failing case (constraints 1 and 2, ADR-0013).
 2. **Simple is better.** Two queries that always work beat one query that sometimes works. No clever `or-join` tricks (Pattern 1, ADR-0007).
-3. **Test with real data.** Property-style tests against a live graph found the empty-page and case-sensitivity bugs. The fixture graph now holds those cases, so the tests assert them exactly (Testing Philosophy, below).
+3. **Test with real data.** Property-style tests against a live graph found the empty-page and case-sensitivity bugs. The fixture graph now holds those cases, so the tests assert them exactly (`CLAUDE.md`, Testing Philosophy).
 4. **Feature flags added complexity.** They maintained dual implementations and were eventually removed in favor of simplicity: one direct Datalog path (ADR-0005).
