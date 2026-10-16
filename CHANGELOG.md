@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 1.0.0 was the first release, so its entry has no earlier release to compare against. The 2.0.0 entry is a hard cut and opens with a migration note.
 
+## [2.1.0] - 2026-10-16
+
+No tool, parameter or result changes. Two protocol-level changes that clients see in `tools/list` and in the list and read results.
+
+### Changed
+
+- An optional parameter is written in the tool schemas as `anyOf` of its type and `null`, not as a type array (`"type": ["string", "null"]`). MCP Inspector warned about the array, and a client that maps a schema onto a one-type dialect (Gemini function declarations) could reject the tool or drop the constraint. A caller may still send `null`, so the contract is unchanged. A live `tools/list` guard fails on any remaining type array.
+
+### Added
+
+- Clients that negotiate protocol version 2026-07-28 get cache hints on the list and read results: `tools/list`, `prompts/list` and `resources/list` carry `ttlMs` of one hour and `cacheScope` public (they are fixed for the life of the process), and `resources/read` carries `ttlMs` 0 and `cacheScope` private (it changes with the graph). Clients on older versions get these results unchanged.
+- A guard test drives the server as a 2026-07-28 client and a 2025-11-25 client over raw JSON-RPC on stdio, checking `server/discover`, `resultType` on every result, the `-32602` error for a missing resource, and that the older handshake is unchanged.
+
 ## [2.0.1] - 2026-10-15
 
 A patch: one error message is clearer, and no tool, parameter or result changes.

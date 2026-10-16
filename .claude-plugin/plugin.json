@@ -1,7 +1,7 @@
 {
   "name": "logseq",
   "displayName": "LogSeq",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Query your LogSeq knowledge graph from Claude: context building, graph traversal, journal date ranges, weekly and monthly summaries, and safe concept linking. Needs LogSeq running with its HTTP API enabled.",
   "author": {
     "name": "Evan Rutledge Borden",
