@@ -80,8 +80,8 @@ impl schemars::transform::Transform for NullableAsAnyOf {
 const ANNOTATIONS: [&str; 7] = ["title", "description", "default", "examples", "deprecated", "readOnly", "writeOnly"];
 
 /// A tool's `inputSchema`, generated from the type its arguments are parsed into, so the two
-/// can't drift apart (ADR-0019). The schema is schemars' own (draft 2020-12, `null` in an
-/// `Option`'s type, `format` on numbers). The parity harness compares schemas by meaning (#292), so
+/// can't drift apart (ADR-0019). The schema is schemars' own (draft 2020-12, an
+/// `Option` as `anyOf` its type and `null` by [`NullableAsAnyOf`], `format` on numbers). The parity harness compares schemas by meaning (#292), so
 /// only the contract matters, not how a schema is spelled:
 /// - every named type (an enum such as `format`) is written where it is used, with no `$defs` and
 ///   no `$ref` (`inline_subschemas`): the MCP SDK's client drops `$defs` from a tool's `inputSchema`
@@ -382,6 +382,25 @@ mod tests {
         assert!(schema.get("$defs").is_none() && !schema.to_string().contains("$ref"));
         // about 100 characters a tool pays for (ADR-0016)
         assert!(CURSOR_DESCRIPTION.len() <= 110, "{}", CURSOR_DESCRIPTION.len());
+    }
+
+    #[test]
+    fn a_description_stays_on_the_parameter_outside_the_any_of() {
+        let schema = schema_of::<PagedArgs>();
+        let cursor = &schema["properties"]["cursor"];
+        assert_eq!(cursor["anyOf"], json!([{"type": "string"}, {"type": "null"}]), "{schema}");
+        assert_eq!(cursor["description"], CURSOR_DESCRIPTION);
+        assert!(cursor["anyOf"].to_string().find("description").is_none(), "{schema}");
+        assert!(cursor.get("type").is_none(), "{schema}");
+    }
+
+    /// A parameter that takes more than one type besides `null` has no single type to put in the branch, so it is left as
+    /// schemars wrote it: no tool has one today, and the live `tools/list` guard fails if one appears.
+    #[test]
+    fn a_union_of_several_types_is_left_alone() {
+        let mut schema = schemars::json_schema!({"type": ["string", "number", "null"], "description": "x"});
+        schemars::transform::Transform::transform(&mut NullableAsAnyOf, &mut schema);
+        assert_eq!(schema.to_value(), json!({"type": ["string", "number", "null"], "description": "x"}));
     }
 
     fn args(value: Value) -> Option<JsonObject> {
