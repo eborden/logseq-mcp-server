@@ -12,7 +12,7 @@
       "name": "logseq",
       "source": "./",
       "description": "Query your LogSeq knowledge graph from Claude: context building, graph traversal, journal date ranges, weekly and monthly summaries, and safe concept linking.",
-      "version": "2.0.1",
+      "version": "2.1.0",
       "category": "productivity",
       "tags": ["logseq", "knowledge-graph", "pkm", "mcp"]
     }
