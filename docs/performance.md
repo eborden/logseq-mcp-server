@@ -40,7 +40,7 @@ The measure scripts drive the Rust server (`--server rust` is the default and th
 
 ## Performance Benchmarks
 
-Measured numbers are in "Current Implementation Status" under "Why Datalog?". Regenerate them with:
+Measured numbers are in "Current Implementation Status" above. Regenerate them with:
 
 ```bash
 npx tsx scripts/measure-api-calls.ts            # picks the most-referenced page
