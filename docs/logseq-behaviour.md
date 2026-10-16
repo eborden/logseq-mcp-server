@@ -1,6 +1,6 @@
 # LogSeq behaviour
 
-What LogSeq's data and HTTP API do that a tool has to allow for. Each bullet is a checklist item, verified by `scripts/probe-constraints.ts` (read it against the fixture instance, never the personal graph). The Datalog dialect's own constraints are in [CLAUDE.md](../CLAUDE.md), and how the tools behave on top of this is in [tool-behaviour.md](tool-behaviour.md).
+What LogSeq's data and HTTP API do that a tool has to allow for. Each bullet is a checklist item, verified by `scripts/probe-constraints.ts` (read it against the fixture instance, never the personal graph). The Datalog dialect's own constraints are in [datalog.md](datalog.md), and how the tools behave on top of this is in [tool-behaviour.md](tool-behaviour.md).
 
 ## Data shapes (verified by `scripts/probe-constraints.ts`)
 
