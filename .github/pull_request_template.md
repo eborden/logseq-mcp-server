@@ -56,7 +56,7 @@ empty result, oversized result. -->
 - [ ] **ADR or business rule added, changed, superseded or retired**: this PR needs the maintainer's explicit OK before merge. A changed rule has a new Changelog row citing this PR. (An additive-only Mechanical enforcement edit needs no OK; say so here.)
 - [ ] **Tool contract changed**: additive only, the diff of the golden results in `tests/data/parity/` reviewed (a PR that changes one needs the maintainer's OK and the `golden-change` label), tool-list budget respected (ADR-0016)
 - [ ] **API call count or behavior of a tool changed**: "Current Implementation Status" table in `docs/performance.md` updated
-- [ ] **New tool**: the "When Adding New Tools" checklist in `CLAUDE.md` is done
+- [ ] **New tool**: the `add-tool` skill checklist (`.claude/skills/add-tool/SKILL.md`, named in `CLAUDE.md`) is done
 
 ## Roll back
 <!-- How to undo the change. -->
