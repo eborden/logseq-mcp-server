@@ -42,7 +42,7 @@ Procedures live in repo skills (`.claude/skills/<name>/SKILL.md`). A skill may n
 
 ## Architectural Foundations
 
-Read `docs/architecture-foundations.md` before writing or changing code. It sets the principles (parse input at the boundary, bound calls and result sizes, preserve behavior when refactoring, additive tool contracts) and the handoff sections for PR descriptions. The code doesn't meet all of them yet: #58 tracks the gaps and the order of work.
+Read `docs/architecture-foundations.md` before writing or changing code. It sets the principles (parse input at the boundary, bound calls and result sizes, preserve behavior when refactoring, additive tool contracts) and the handoff sections for PR descriptions.
 
 ---
 
@@ -182,7 +182,7 @@ Quick reference checklist for future work:
 - [ ] Never write to stdout (`println!`, `print!`, `dbg!`, `io::stdout`): it's the MCP stdio channel. Log with `eprintln!`, and never log graph data (ADR-0004).
 - [ ] Don't turn errors into empty results; propagate infrastructure errors: [BR-0003 (infrastructure-errors-propagate)](docs/business-rules/0003-infrastructure-errors-propagate.md)
 - [ ] Never cut results silently; any cap reports `ResultMeta`: [BR-0006 (no-silent-truncation)](docs/business-rules/0006-no-silent-truncation.md)
-- [ ] Publishing (#46) is manual: a workflow that publishes runs only on `workflow_dispatch`, from `main`, and defaults to a dry run. Never publish, tag or release from a session. Why: [ADR-0017 (manual-npm-publish)](docs/adr/0017-manual-npm-publish.md), carried over by [ADR-0035](docs/adr/0035-native-binary-release-on-github-releases.md) (Decision 10). The npm workflow and packaging were the TypeScript server's and are gone; the rule stands for whatever replaces them.
+- [ ] Publishing (#46) is manual: a workflow that publishes runs only on `workflow_dispatch`, from `main`, and defaults to a dry run. Never publish, tag or release from a session. Why: [ADR-0017 (manual-npm-publish)](docs/adr/0017-manual-npm-publish.md), carried over by [ADR-0035](docs/adr/0035-native-binary-release-on-github-releases.md) (Decision 10). The npm workflow and packaging were the TypeScript server's and are gone. The rule now governs `release.yml` (the GitHub Release) and `pypi.yml` (the PyPI wheels, [ADR-0036](docs/adr/0036-pypi-wheels-from-the-release-binaries.md)), which both follow it.
 
 ---
 
@@ -194,8 +194,7 @@ The fixture-graph pattern, the test categories and the examples are in [`docs/te
 
 - Integration tests run against the committed fixture graph (`tests/fixtures/graph/`) and nothing else. `connectFixture()` fails loud on any other graph.
 - **Exact values from known pages**, never data discovered at run time. A test that needs new data adds it to the fixture and its README in the same PR.
-- **A known bug** is a plain `it` (or a plain Rust `#[test]`) that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails` or `#[should_panic]`, which also pass when the body fails for another reason. Behavior copied from the TypeScript server that looks like a bug is tagged `// PARITY(#299)` in the crate and pinned the same way (see BR-0011).
-- **Compute what drifts**: today's journal (LogSeq makes it on open; `laterJournalDays`), and page counts that include built-in pages. Use fixed date windows that end before 2026. The rest is in `docs/testing.md`.
+- **A known bug** is a plain `it` (or a plain Rust `#[test]`) that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails` or `#[should_panic]`, which also pass when the body fails for another reason.- **Compute what drifts**: today's journal (LogSeq makes it on open; `laterJournalDays`), and page counts that include built-in pages. Use fixed date windows that end before 2026. The rest is in `docs/testing.md`.
 
 ### Integration Test Requirements (Hard Failures)
 
