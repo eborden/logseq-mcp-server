@@ -108,7 +108,7 @@ One rule stays in force whether or not the skill loads: writes from parallel sub
 These rules stay in force whether or not the skill loads:
 - **CI** (`.github/workflows/ci.yml`) must be green, and the PR must merge cleanly against its current base branch.
 - **The `golden-change` label goes on only after the maintainer's explicit OK, recorded on the PR**, and the maintainer adds it. Nobody applies it on their own: not a PR's author, not a reviewer, and not under the feature-branch self-merge grant.
-- **Never raise a call ceiling to make a case pass.** A PR that raises or adds one needs the same OK and label.
+- **Never raise a call ceiling to make a case pass.** A PR that raises or adds one needs the maintainer's explicit OK and the `golden-change` label, and only the maintainer adds the label.
 - **Privacy grep** of the diff, commit messages, PR body and review comments/replies. Don't paste integration-test or measure-script output anywhere on GitHub. Report pass/fail and approximate counts only.
 
 ### Merge policy
