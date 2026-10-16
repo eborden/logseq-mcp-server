@@ -235,7 +235,7 @@ impl BlockUuid {
 }
 
 /// A `ground` clause binding each id to `variable`:
-/// `[(ground [1 2 3]) [?p ...]]`. Bind it straight to the entity variable (CLAUDE.md
+/// `[(ground [1 2 3]) [?p ...]]`. Bind it straight to the entity variable (docs/datalog.md
 /// constraint 6). `variable` is part of the query, not input, so it must be a `?name`.
 pub fn ground_ids(ids: &[PageId], variable: &str) -> String {
     assert_logic_variable(variable);
