@@ -40,6 +40,45 @@ impl JsonSchema for CursorSchema {
     }
 }
 
+/// Writes an optional parameter's `"type": ["string", "null"]` as `anyOf: [{"type": "string"}, {"type": "null"}]`. Both
+/// are legal JSON Schema, but a client that maps a schema onto a one-`type` dialect (Gemini's function declarations)
+/// may reject or drop the array form, and MCP Inspector warns about it. The caller still may send `null`, so the
+/// contract is unchanged. The annotations (`description`, `default`...) stay on the parameter; every other keyword
+/// (`enum`, `minimum`, `format`...) goes to the non-null branch, where it applies.
+#[derive(Clone)]
+struct NullableAsAnyOf;
+
+impl schemars::transform::Transform for NullableAsAnyOf {
+    fn transform(&mut self, schema: &mut schemars::Schema) {
+        schemars::transform::transform_subschemas(self, schema);
+        let Some(object) = schema.as_object_mut() else { return };
+        let Some(Value::Array(types)) = object.get("type") else { return };
+        let non_null: Vec<&Value> = types.iter().filter(|t| *t != "null").collect();
+        if non_null.len() != 1 || non_null.len() == types.len() || object.contains_key("anyOf") {
+            return;
+        }
+        let kind = non_null[0].clone();
+        object.remove("type");
+        let mut branch = serde_json::Map::new();
+        branch.insert("type".into(), kind);
+        for key in object.keys().cloned().collect::<Vec<_>>() {
+            if !ANNOTATIONS.contains(&key.as_str()) {
+                let mut value = object.remove(&key).expect("the key was just listed");
+                if key == "enum" {
+                    if let Value::Array(values) = &mut value {
+                        values.retain(|v| !v.is_null());
+                    }
+                }
+                branch.insert(key, value);
+            }
+        }
+        object.insert("anyOf".into(), json!([Value::Object(branch), {"type": "null"}]));
+    }
+}
+
+/// The keywords that describe a parameter rather than constrain its value, which stay outside the `anyOf`.
+const ANNOTATIONS: [&str; 7] = ["title", "description", "default", "examples", "deprecated", "readOnly", "writeOnly"];
+
 /// A tool's `inputSchema`, generated from the type its arguments are parsed into, so the two
 /// can't drift apart (ADR-0019). The schema is schemars' own (draft 2020-12, `null` in an
 /// `Option`'s type, `format` on numbers). The parity harness compares schemas by meaning (#292), so
@@ -61,7 +100,10 @@ impl JsonSchema for CursorSchema {
 ///   `crate::args::parse_args`, the one parse of a tool's arguments, enforces the schema's minimum.
 ///   It reads a count up to 2^53 - 1 into a `u64`, and refuses a bad value (`2.5`, `-1`, `"5"`).
 pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
-    let generator = schemars::generate::SchemaSettings::draft2020_12().with(|settings| settings.inline_subschemas = true).into_generator();
+    let generator = schemars::generate::SchemaSettings::draft2020_12()
+        .with(|settings| settings.inline_subschemas = true)
+        .with_transform(NullableAsAnyOf)
+        .into_generator();
     let Value::Object(mut schema) = serde_json::to_value(generator.into_root_schema_for::<T>()).expect("a schema serializes")
     else {
         panic!("a tool's argument type must produce an object schema");
@@ -297,8 +339,9 @@ mod tests {
         let schema = schema_of::<SampleArgs>();
         // a named type is written in place: the MCP SDK's client drops `$defs`, so a `$ref` would dangle
         assert!(schema.get("$defs").is_none() && !schema.to_string().contains("$ref"), "{schema}");
-        assert_eq!(schema["properties"]["format"]["enum"], json!(["json", "markdown", null]), "{schema}");
-        assert_eq!(schema["properties"]["limit"]["type"], json!(["number", "null"]));
+        // an optional parameter is `anyOf` a single type and null, never a `type` array (MCP Inspector, Gemini)
+        assert_eq!(schema["properties"]["format"]["anyOf"], json!([{"type": "string", "enum": ["json", "markdown"]}, {"type": "null"}]), "{schema}");
+        assert_eq!(schema["properties"]["limit"]["anyOf"], json!([{"type": "number", "format": "double"}, {"type": "null"}]));
         assert!(schema.get("title").is_none() && schema.get("description").is_none());
         assert!(schema.get("additionalProperties").is_none());
     }
@@ -313,8 +356,7 @@ mod tests {
     fn a_count_is_an_integer_with_a_minimum() {
         let schema = schema_of::<IntegerArgs>();
         let depth = &schema["properties"]["max_depth"];
-        assert_eq!(depth["type"], json!(["integer", "null"]));
-        assert_eq!(depth["minimum"], json!(0));
+        assert_eq!(depth["anyOf"], json!([{"type": "integer", "format": "uint32", "minimum": 0}, {"type": "null"}]));
         // `format` is schemars' own and means nothing to a caller: the harness drops it
         assert_eq!(
             meaning(&schema),

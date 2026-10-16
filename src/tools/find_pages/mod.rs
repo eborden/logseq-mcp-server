@@ -1285,8 +1285,10 @@ mod tests {
     #[test]
     fn the_names_are_limited_to_the_constant_the_schema_and_the_parser_share() {
         let schema = schema_of::<Args>();
-        assert_eq!(schema["properties"]["names"]["maxItems"], json!(MAX_NAMES));
-        assert_eq!(schema["properties"]["names"]["minItems"], json!(1));
+        // an optional list is `anyOf` the list and null, so its limits are the list branch's
+        let names = &schema["properties"]["names"]["anyOf"][0];
+        assert_eq!(names["maxItems"], json!(MAX_NAMES));
+        assert_eq!(names["minItems"], json!(1));
     }
 
     #[test]

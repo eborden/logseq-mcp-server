@@ -43,6 +43,21 @@ describe('the live tools/list (ADR-0016)', () => {
     ).toBeLessThanOrEqual(TOOL_LIST_BUDGET_CHARS);
   });
 
+  it('writes no `type` array: an optional parameter is `anyOf` one type and null (MCP Inspector, Gemini)', () => {
+    const arrays: string[] = [];
+    const visit = (node: unknown, path: string): void => {
+      if (Array.isArray(node)) node.forEach((item, i) => visit(item, `${path}[${i}]`));
+      else if (node && typeof node === 'object') {
+        for (const [key, value] of Object.entries(node)) {
+          if (key === 'type' && Array.isArray(value)) arrays.push(path);
+          visit(value, `${path}.${key}`);
+        }
+      }
+    };
+    for (const tool of tools) visit(tool.inputSchema, tool.name);
+    expect(arrays).toEqual([]);
+  });
+
   it("keeps every description within its cap and says what each tool can't find", () => {
     for (const tool of tools) {
       const length = (tool.description ?? '').length;
