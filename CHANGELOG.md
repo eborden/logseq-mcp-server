@@ -8,10 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [2.1.0] - 2026-10-16
 
-No tool, parameter or result changes. Two protocol-level changes that clients see in `tools/list` and in the list and read results.
+No tool, parameter or result changes. Two protocol-level changes that clients see in `tools/list` and in the list and read results, and one reworded prompt.
 
 ### Changed
 
+- The `monthly_summary` prompt reads the trajectory pages as an outline (`logseq_get_page` with `detail: "outline"`, read on with `nextCursor`) and then calls `logseq_get_block` with `include_children` on the section that matters, instead of reading each whole page (#522). Only the prompt's message text changes; its arguments are the same.
 - An optional parameter is written in the tool schemas as `anyOf` of its type and `null`, not as a type array (`"type": ["string", "null"]`). MCP Inspector warned about the array, and a client that maps a schema onto a one-type dialect (Gemini function declarations) could reject the tool or drop the constraint. A caller may still send `null`, so the contract is unchanged. A live `tools/list` guard fails on any remaining type array.
 
 ### Added
@@ -222,6 +223,7 @@ A call that sends only a retired name for a required parameter (`topic_name`, `c
 
 - The unused `node-fetch` dependency. The client uses the global `fetch`.
 
-[2.0.1]: https://github.com/eborden/logseq-mcp-server/compare/v2.0.0...HEAD
+[2.1.0]: https://github.com/eborden/logseq-mcp-server/compare/v2.0.1...v2.1.0
+[2.0.1]: https://github.com/eborden/logseq-mcp-server/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/eborden/logseq-mcp-server/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/eborden/logseq-mcp-server/releases/tag/v1.0.0
