@@ -158,7 +158,7 @@ Use the unit tests to pin shapes and the harness and integration tests to pin be
 
 **Why.** Small changes are easy to review, debug and revert, and a failure points at its cause.
 
-**In this repo.** Commit early and often: once a coherent, working slice is done, commit it rather than batching many changes into one commit. Don't reformat, rename or "improve" unrelated code in the same change. Update the API-call table in `CLAUDE.md` when you change a tool's call count.
+**In this repo.** Commit early and often: once a coherent, working slice is done, commit it rather than batching many changes into one commit. Don't reformat, rename or "improve" unrelated code in the same change. Update the API-call table in `docs/performance.md` when you change a tool's call count.
 
 **Agents get wrong.** Large multi-concern diffs, and drive-by changes outside the task.
 

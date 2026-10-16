@@ -1,6 +1,6 @@
 //! The page outline's LogSeq traffic against a mock LogSeq on a local port: how many calls it
 //! makes, in which order, with which inputs, and what it answers. The call counts
-//! are those in `CLAUDE.md` ("Current Implementation Status"); the parity harness (`parity.rs`) checks the
+//! are those in `docs/performance.md` ("Current Implementation Status"); the parity harness (`parity.rs`) checks the
 //! same calls and the result bytes against the recorded results. Every page and block here is
 //! made up (BR-0001).
 

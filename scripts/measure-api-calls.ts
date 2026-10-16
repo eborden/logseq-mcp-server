@@ -1,6 +1,6 @@
 /**
  * Count LogSeq HTTP API calls made by each tool of the Rust server against a live graph.
- * Evidence for the performance claims in CLAUDE.md.
+ * Evidence for the performance claims in docs/performance.md.
  *
  * Usage: npx tsx scripts/measure-api-calls.ts [--server rust] [--rust-binary <path>] [pageName]
  *

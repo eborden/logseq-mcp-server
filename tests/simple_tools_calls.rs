@@ -1,6 +1,6 @@
 //! The LogSeq traffic of `logseq_get_graph`, `logseq_find_pages` and `logseq_find_blocks`
 //! against a mock LogSeq on a local port: how many calls each makes, with which inputs. The call
-//! counts are those in `CLAUDE.md` ("Current Implementation Status"); the parity harness
+//! counts are those in `docs/performance.md` ("Current Implementation Status"); the parity harness
 //! (`parity.rs`) checks the same calls and the result bytes against the recorded results.
 //! Every page and block here is made up (BR-0001).
 
