@@ -23,6 +23,23 @@ Full rule, with rationale and enforcement: [BR-0001 (no-graph-data-in-repo)](doc
 
 ---
 
+## Skills
+
+Procedures live in repo skills (`.claude/skills/<name>/SKILL.md`). A skill may not trigger, so a rule whose miss is costly stays here (last column). `tests/guards/claude-md-skills.test.ts` keeps every skill in this table, each description starting "Use when", and this file under a size ceiling.
+
+| Skill | Use when | Stays in CLAUDE.md |
+|---|---|---|
+| `datalog-queries` | Writing or reviewing a query builder (`queries.rs`), or a query returns 0 rows or errors | The five Datalog rules |
+| `add-tool` | Adding a tool, or changing a tool's name, description or schema | Tools are read-only (BR-0002); contract changes need the maintainer's OK |
+| `plan-in-issues` | Planning multi-part work, filing an issue or PR, setting blocked-by edges or board status | `--body-file` from the template, never `--body` |
+| `work-the-queue` | Picking up Ready issues, briefing subagents, opening or reviewing a PR, resolving threads | The merge gate and Merge policy; briefs name the skill and carry the safety rules |
+| `verify-before-merge` | About to merge or approve a PR, or judging its test plan | CI green; `golden-change` only on the maintainer's OK; no ceiling raises; privacy grep |
+| `github-rate-limits` | A `gh` call fails with 403, 429 or a rate-limit message, or before a burst of writes | Stagger writes from parallel subagents |
+| `remote-session` | Launching, briefing or watching a cloud session, or running inside one | A cloud session does what CI does and never publishes |
+| `logseq-skills` | Using the server's tools on a graph (users of the server, not development) | Nothing (it ships in the plugin) |
+
+---
+
 ## Architectural Foundations
 
 Read `docs/architecture-foundations.md` before writing or changing code. It sets the principles (parse input at the boundary, bound calls and result sizes, preserve behavior when refactoring, additive tool contracts) and the handoff sections for PR descriptions. The code doesn't meet all of them yet: #58 tracks the gaps and the order of work.
