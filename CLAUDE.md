@@ -45,18 +45,9 @@ Two kinds of record live in `docs/`. Their READMEs hold the full process. Read t
 - **Business rule** ([`docs/business-rules/`](docs/business-rules/README.md)): a promise the tools make to their user, such as staying read-only. It's edited in place, and each edit adds a Changelog row.
 - **Process rules** (how to work: vetting dependencies, behaviour-preserving refactors, never publishing from a session) have no file of their own. They stay in this file and [`docs/architecture-foundations.md`](docs/architecture-foundations.md).
 
-**IDs.** Files are named `NNNN-<slug>.md`, numbered per directory. The number is the ID, never changed or reused, and files are never deleted. Cite them as `ADR-0007` or `BR-0003`, optionally followed by the slug: `ADR-0007 (two-query-pattern-for-optional-data)`. A new entry takes the highest number + 1. If another PR merges that number first, renumber on rebase before merge.
+**Changing one.** An accepted ADR changes only in its status and pointer to a replacement (a reversal is a new ADR), a pinned `<commit>:<path>` citation of a deleted file, and its Mechanical enforcement section. IDs, Index and Changelog rows and the format rules are in the READMEs; `npx tsx scripts/docs-format.ts` checks them.
 
-**Changing one.**
-- An accepted ADR is immutable, with three exceptions. Don't reword its Context, Decision or Consequences.
-  - Its status and a pointer to its replacement. A reversal is a new ADR, and the same PR marks the old one `superseded by <NNNN-slug>`.
-  - A citation of a file that has since been deleted may be rewritten in place as a pinned `<commit>:<path>` reference to its last version, with no other rewording.
-  - Its Mechanical enforcement section may be updated in place, for example `none-yet` becoming `test:` once a guard lands.
-- A business rule is edited in place, with a new Changelog row. To retire one, follow the README; don't delete the file.
-
-Adding an ADR or rule, or any of these changes, needs the maintainer's OK before merge (see Merge policy), with one exception. A PR that adds or strengthens Mechanical enforcement lines on ADRs and business rules, and changes no other ADR or business-rule content, needs no OK: `none-yet` to `test:` or `ci:`, a new `type:`, `test:` or `ci:` line, or a stronger tier (order: `type`, `test`, `ci`, `reviewer`, `none-yet`). Dropping a `none-yet` line only because a guard for that same issue replaced it counts as strengthening. Removing or weakening enforcement still needs the OK: any other dropped line, a weaker tier, or back to `none-yet`. So does every other ADR or business-rule change. An additive enforcement edit to a business rule still adds its Changelog row, which is part of the edit, and that row cites the PR itself.
-
-**Format.** `tests/guards/docs-format.test.ts` checks both directories in CI: filenames, the Index table, required headings, ADR status lines, business-rule Changelog tables, `<tier>: <reference>` enforcement lines and relative links. Run `npx tsx scripts/docs-format.ts` to check locally.
+**The OK rule.** Adding, changing, superseding or retiring an ADR or business rule needs the maintainer's OK before merge (see Merge policy). The one exception is a PR that only adds or strengthens Mechanical enforcement lines (`none-yet` to `test:` or `ci:`, a new line, or a stronger tier; order: `type`, `test`, `ci`, `reviewer`, `none-yet`) and changes no other ADR or business-rule content. Removing or weakening enforcement needs the OK.
 
 ---
 
