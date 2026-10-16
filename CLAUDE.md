@@ -276,184 +276,44 @@ Quick reference checklist for future work:
 
 ## Testing Philosophy
 
+The fixture-graph pattern, the test categories and the examples are in [`docs/testing.md`](docs/testing.md) ("Testing Philosophy"). The commands are in [`docs/development.md`](docs/development.md). These rules stay in force whether or not you open them:
+
 ### Fixture Graph, Exact Assertions
 
-The integration tests run against `tests/fixtures/graph/`, a small made-up graph in the repo (#86, #90), and nothing else. `connectFixture()` (`tests/integration/helpers/fixture-client.ts`) loads the config and calls `requireFixtureGraph`, and the run's global setup does it once first, so a run against any other graph fails loud. The suites are TypeScript (vitest) but test the Rust server: a tool function imported from `tests/integration/helpers/tools.ts` calls the built binary over MCP stdio (`tests/integration/setup.md`, "The server under test"). `tests/integration/setup.md` has the run steps; `tests/fixtures/README.md` says what each page is for and what it returns.
-
-**Pattern:**
-```typescript
-beforeAll(async () => {
-  ({ client } = await connectFixture());
-});
-
-it('returns every neighbour of a page under the caps', async () => {
-  const result = await getConceptNetwork(client, 'bob', 1);
-
-  expect(result.nodes.map(n => n.name).sort()).toEqual(BOB_NETWORK); // known fixture data
-  expect(result).toMatchObject({ truncated: false, hasMore: false, warnings: [] });
-});
-```
-
+- Integration tests run against the committed fixture graph (`tests/fixtures/graph/`) and nothing else. `connectFixture()` fails loud on any other graph.
 - **Exact values from known pages**, never data discovered at run time. A test that needs new data adds it to the fixture and its README in the same PR.
-- **Compute what drifts**: today's journal (LogSeq makes it on open; `laterJournalDays`), and page counts that include built-in pages. Use fixed date windows that end before 2026.
-- **Caps that pick by `:db/id` order** are stable in count, not by name; the fixture README's hub section says which is which.
-- **Invariants** that hold for any graph stay as property tests (`tests/integration/properties/`), run over a fixed list of fixture pages.
-- **A known bug** is a plain `it` (or a plain Rust `#[test]`) that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails` or `#[should_panic]`, which also pass when the body fails for another reason. Behavior copied from the TypeScript server that looks like a bug is tagged `// PARITY(#299)` in the crate and pinned the same way (see BR-0011).
-
-**Test Categories:**
-- **Rust tests** (`cargo test --locked`): unit tests beside the code (`#[cfg(test)]`: query builders, parsers, renderers, caps) and call-count tests in `tests/*_calls.rs`, which run a tool against a mock HTTP LogSeq (`tests/common/mod.rs`) and assert the exact calls and result. Also `tests/no_stdout.rs`, `env_reads.rs` and `no_env_proxy.rs`, which fail on a write to stdout, an environment read outside `env.rs` and a proxy picked up from the environment. They touch no LogSeq
-- **Golden results** (`cargo test --test parity`, #371; CI runs them through `cargo test`, #375): every tool, prompt and resource result against the results recorded from the TypeScript server, the LogSeq calls (each matches a recorded call, at most the case's ceiling in `call-ceilings.json` are made, all are reads; order and grouping are not compared, ADR-0034), and `tools/list` by meaning (ADR-0031). A JSON tool result is compared by deep equality (key order ignored, array order kept, numbers by value) and has to be minified (ADR-0009); markdown, prompt messages, resource reads and the frame of a not-found message are byte for byte. Each starts the binary against a stub LogSeq, and proves it can fail (`tests/parity_self_check.rs`). The cases and their golden results are `tests/data/parity/*.json` and nowhere else (#379), and `PARITY_RECORD=1 cargo test --test parity_record -- --nocapture` records them (it rewrites a result only when it changed in meaning, and refuses to run in CI). Every comparison rule is in `tests/parity_support/compare.rs`, and `tests/parity_comparator.rs` and `parity_harness.rs` hold the comparator, the stub and the run to their own rules
-- **Guard tests** (`npx vitest run tests/guards tests/rust-guards`): the repo's rules (docs format, templates, privacy, fixture, workflows, tool-list guardrails, the golden-files check). `tests/rust-guards` starts the Rust binary: the live `tools/list` against the size budget and description cap, a wrong-typed value sent to every parameter of every tool, and the version
-- **Integration tests** (`npm run test:integration`, ~215 in 22 files as of Oct 2026, against the fixture graph in a live LogSeq): exact results of every tool, through the Rust server
-- Note: `npm test` runs the guard tests, then `npm run test:integration`, so it needs the fixture instance running and the Rust debug build (it doesn't run `cargo test`: run that separately). The default vitest config leaves `tests/integration/` out.
-- **Property tests**: Universal invariants, equivalence validation (`tests/integration/properties/`, and the crawl oracles in `find-blocks-property` and `temporal-queries`)
+- **A known bug** is a plain `it` (or a plain Rust `#[test]`) that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails` or `#[should_panic]`, which also pass when the body fails for another reason.
 
 ### Integration Test Requirements (Hard Failures)
 
 Integration tests must fail loud on BOTH setup issues AND missing test data.
-
-**Rules:**
-1. **NO it.skipIf() for integration tests** - Tests must run or fail, never skip
-2. **NO console.warn() in tests** - Silent warnings hide real failures
-3. **REQUIRE prerequisites explicitly** - `connectFixture()` checks the config, the connection and the fixture graph
-4. **Fail with helpful messages** - Point to setup.md for resolution steps
-
-**Pattern:**
-```typescript
-// ❌ BAD: Silent skip/warn
-beforeAll(async () => {
-  try {
-    await access(configPath);
-  } catch {
-    skipTests = true; // Silent skip - test suite passes without testing!
-  }
-});
-it.skipIf(skipTests)('test', async () => { ... });
-
-// ❌ BAD: Silent warn
-const result = await findBlocks(client, { text: 'test' });
-if (!result || result.length === 0) {
-  console.warn('No data found'); // Test passes without proving anything!
-  return;
-}
-
-// ✅ GOOD: Fail loud, and assert exactly what the fixture holds
-beforeAll(async () => {
-  ({ client } = await connectFixture()); // throws, pointing at setup.md, unless LogSeq serves the fixture
-});
-
-it('test', async () => {
-  const result = await findBlocks(client, { text: 'importer' });
-  expect(result).toHaveLength(11); // the fixture's 11 blocks that say "importer"
-});
-```
-
-**Why:**
-- Skipped tests provide false confidence
-- Passing tests that found no data prove nothing
-- Integration tests must test real integration
-- Clear failures guide developers to fix actual problems
+- **NO `it.skipIf()` for integration tests**: tests run or fail, never skip.
+- **NO `console.warn()` in tests**: a silent warning hides a real failure.
+- **REQUIRE prerequisites explicitly** (`connectFixture()`), and fail with a message that points to `tests/integration/setup.md`.
 
 ---
 
 ## Code Organization
 
-```
-Cargo.toml, Cargo.lock             - The crate: dependencies, each justified in a comment; the lockfile is committed
-rust-toolchain.toml                - The pinned compiler, which CI reads too
-about.toml, about.hbs              - cargo-about config and template for THIRD-PARTY-NOTICES.txt (release)
-src/                               - The server: one crate (docs/architecture.md has the file-by-file map)
-├── main.rs, lib.rs            - Starts the server on stdio; the crate's module list
-├── server.rs                  - rmcp ServerHandler: initialize, tools, prompts, resources. Only wires
-├── client.rs                  - LogseqClient: call_api and execute_datalog_query, timeout per call, LogseqError
-├── edn.rs                     - Typed query values (PageName, PageId, JournalDay, BlockUuid), DatalogInput, Query, ground_ids / ground_uuids
-├── config.rs, env.rs          - The config file and the environment, each parsed once at startup
-├── tool.rs, args.rs, params.rs - What every tool shares: read-only hints, schema generated from the argument type, the one argument parse (`parse_args`), parameter aliases
-├── wire.rs, entity.rs         - LogSeq's answers parsed at the boundary (ResponseError), and a page or block in either key spelling
-├── errors.rs, meta.rs, truncation.rs, tips.rs, slim.rs - ToolError, ResultMeta, the warnings a cap carries, next-step tips, slim output
-├── resolve/, resolve_refs/    - The page resolver (BR-0010) with the alias groups, and `((uuid))` / `{{embed}}` resolution (BR-0007)
-├── markdown.rs, markdown_context.rs, compact.rs, snippet.rs - The one Markdown renderer, Markdown for the context tools, compact JSON, snippets
-├── property.rs                - A property key and the rule for matching a property by value, shared by `find_blocks` and `find_pages`
-├── toon.rs                    - The one TOON encoder, for the opt-in `format: "toon"` of the flat-list tools (BR-0014)
-├── prompts.rs, resources.rs, instructions.rs - The five prompts, the page resource and guide, the server instructions
-└── tools/<tool>/              - One directory per tool (10): mod.rs (NAME, definition, call), queries.rs, wire.rs, tips.rs where it has them
-
-tests/                             - Rust integration tests (Cargo reads tests/*.rs) and the Node tooling around the crate (vitest, dev-only)
-├── *.rs, common/, parity_support/, data/ - Call-count tests against a mock LogSeq (common/mod.rs), the no-stdout and env-read checks, and the parity test (parity*.rs) with its data (data/parity/: the cases and the golden results) and its recorder
-├── guards/                        - The repo's rules as tests: docs format, templates, privacy, fixture, workflows, tool-list limits, golden files
-├── rust-guards/                   - Guard tests that start the Rust binary: the live tool list, wrong-typed arguments, the version
-├── integration/                   - Tests against a real LogSeq serving the fixture, through the Rust server
-│   └── properties/                - Property-based tests
-└── fixtures/                      - The made-up graph (graph/) and the hub fixture
-
-scripts/
-├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live LogSeq (use the fixture)
-├── measure-api-calls.ts           - Counts API calls per tool against a live graph (baseline: the real graph)
-├── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
-├── measure-footprint.ts, measure-latency.ts - Start-up, memory and size of the release binary (#126), and per-tool latency and call counts (#353), against a stub LogSeq (`lib/stub-logseq.ts`)
-├── measure-server.ts, lib/        - Shared code: the call-counting proxy of the measure scripts, and the LogSeq API client, Rust binary lookup and MCP stdio client the suites and scripts use
-├── smoke-rust-server.ts           - Drives a release binary through all 10 tools against the fixture instance (#359)
-├── logseq-instance.ts             - start/stop/status of this worktree's own LogSeq on a copy of the fixture graph (#118, #151, macOS)
-├── docs-format.ts                 - The format check for docs/adr and docs/business-rules (the guard test runs it)
-├── generate-hub-fixture.ts        - Writes (or --check's) the hub fixture's files from fixture-hub/hub-graph.ts (#89)
-├── fixture-hub/hub-graph.ts       - Shape and counts of the hub fixture; tests/guards/fixture-hub.test.ts checks the committed files against it
-└── logseq-instance/
-    ├── instance.ts                - Instance logic: paths, port, random token, graph copy, launch, readiness, stop (deps injected)
-    ├── local-storage.ts           - Writes a fresh profile's Chromium localStorage LevelDB (current-repo, http-server-enabled)
-    └── configs.edn.template       - App settings for the instance (API autostart, port and token placeholders)
-
-skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, references/, scripts/); symlinked from .claude/skills/
-.claude-plugin/                    - plugin.json + marketplace.json (the server entry runs the launcher, `scripts/logseq-mcp-server.sh`, ADR-0035)
-```
-
-**Key files:**
-- `src/tools/explore_context/queries.rs` - Query builders: typed inputs, `:in` binding and `ground_ids` (study this for patterns)
-- `src/tools/explore_context/mod.rs` - Example of two-query pattern
-- `src/tools/explore_network/mod.rs` - Example of multi-query BFS
-- `tests/concept_calls.rs` - Example of a call-count test against the mock LogSeq
-- `tests/integration/properties/graph-properties.test.ts` - Property-based testing examples
+The repo tree, with what each file holds, and the "Key files" to copy patterns from are in [`docs/architecture.md`](docs/architecture.md) ("Code Organization", and the file map above it).
 
 ---
 
 ## Useful Commands
 
+The full list (probe, measure and smoke scripts, the fixture instance, references) is in [`docs/development.md`](docs/development.md). The measure scripts read the personal graph by default (see Privacy above).
+
 ```bash
-# The Rust server: build, then its unit and call-count tests (touch no LogSeq)
-cargo build && cargo test --locked
-cargo build --release --locked   # the binary the measure scripts and the smoke run use
-
-# The Node tooling's dependencies (the harness, the guards, the scripts), from the lockfile
-npm ci
-
-# The golden-result test and its self-check (#124, #371, #375); the cases and their results are tests/data/parity/
-cargo test --locked --test parity --test parity_self_check
-# Re-record the golden results on purpose, from the Rust debug build, never in CI (#299, #379)
-PARITY_RECORD=1 cargo test --test parity_record -- --nocapture
-
-# The repo's guard tests (docs format, templates, privacy, workflows, tool-list guardrails) and the type-check
-npx vitest run tests/guards tests/rust-guards
+npm ci                                                          # the Node tooling's dependencies
+cargo build && cargo test --locked                              # the Rust server's tests, parity included; touch no LogSeq
+cargo test --locked --test parity --test parity_self_check      # the golden-result test and its self-check
+PARITY_RECORD=1 cargo test --test parity_record -- --nocapture  # re-record the goldens on purpose; never in CI
+npx vitest run tests/guards tests/rust-guards                   # the repo's guard tests
 npm run typecheck
-npx tsx scripts/docs-format.ts
-
-# A release binary against the fixture instance, tool by tool (#359; start the instance first)
-node node_modules/vite-node/vite-node.mjs scripts/smoke-rust-server.ts target/release/logseq-mcp-server
-
-# Integration tests against this worktree's fixture instance (macOS; own profile, port and random API token)
-npx tsx scripts/logseq-instance.ts start
-npm run test:integration          # picks up .logseq-instance/config.json while the instance runs
-npx tsx scripts/logseq-instance.ts stop
-git status                        # sanity check: nothing under tests/fixtures/graph/ (the instance opens a copy, #151)
-
-# The suites run the Rust server (#352, #356): build the crate first (`cargo build`); details in tests/integration/setup.md
-
-# Verify Datalog/API constraints (read-only); the fixture reproduces all of them
-npx tsx scripts/probe-constraints.ts   # uses the running instance; never the personal config
-
-# Count API calls per tool (read-only): the default config is the real-graph baseline; the fixture gives reproducible counts
-npx tsx scripts/measure-api-calls.ts
-
-# Output size per tool: slim vs full, markdown and compact vs json (read-only; prints byte counts only)
-npx tsx scripts/measure-output-size.ts
+npx tsx scripts/docs-format.ts                                  # format check for docs/adr and docs/business-rules
+npx tsx scripts/logseq-instance.ts start                        # this worktree's fixture instance (macOS)
+npm run test:integration                                        # against that instance
+npx tsx scripts/logseq-instance.ts stop                         # then `git status`: nothing under tests/fixtures/graph/
 ```
 
 ---
@@ -495,31 +355,3 @@ Checklist for new Datalog-based tools. Each tool is a directory in `src/tools/<t
    - Size budget: `TOOL_LIST_BUDGET_CHARS` in `tests/guards/tool-list-limits.ts` (~15% headroom over the size measured when it was added). If your tool or parameters push past it, trim first. If the growth is worth it, raise the constant and justify it in the PR description.
    - Description cap: 400 characters per tool. A new tool gets no allowance. Existing long descriptions are listed in `DESCRIPTION_ALLOWANCES` and may shrink but not grow. Delete an entry once its tool fits the cap.
    - Recorded list: any change to a name, title, annotation, description or input schema fails the parity test. Review the diff of `tests/data/parity/tool-list.json` before you accept it.
-
----
-
-## References
-
-- **LogSeq HTTP API:** http://127.0.0.1:12315/api (default)
-- **DataScript Docs:** https://github.com/tonsky/datascript (note: LogSeq subset only)
-- **Decisions and rules:** [`docs/adr/`](docs/adr/README.md) (why we chose X) and [`docs/business-rules/`](docs/business-rules/README.md) (what must stay true). The Datalog migration is recorded in [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md) and [ADR-0005 (datalog-only-no-feature-flags)](docs/adr/0005-datalog-only-no-feature-flags.md).
-- **Example Scripts:** `scripts/probe-constraints.ts`
-- **The crate's map:** [`docs/architecture.md`](docs/architecture.md)
-- **MCP Spec:** https://github.com/modelcontextprotocol
-
----
-
-## Summary
-
-Datalog is how this project gets its performance gains (see [`docs/performance.md`](docs/performance.md)), and LogSeq's Datalog needs careful handling. The key is to:
-
-1. **Bind strings with `:in`** (`execute_datalog_query` EDN-encodes the inputs); never embed them in the query text
-2. **Lowercase in Rust** (a `PageName` does it; `clojure.string/lower-case` is unavailable; `includes?` / `re-find` work)
-3. **Split queries** for optional data (no or-join with ground nil)
-4. **Always lowercase** page names before queries
-5. **Handle empty results** gracefully, but never turn errors into empty results
-6. **Batch, don't crawl**: one query or `ground`-batched queries, never one call per page
-
-When a constraint seems to block you, re-run `scripts/probe-constraints.ts` against the fixture instance before working around it.
-
-When in doubt, look at `src/tools/explore_context/queries.rs` for working patterns and `src/tools/explore_context/mod.rs` or `src/tools/explore_network/mod.rs` for implementation examples.
