@@ -18,7 +18,7 @@ Every constraint below marked **Verified** is reproduced by `npx tsx scripts/pro
 | `datascriptQuery(query-with-:in, "my page")` (bare string) | **0** |
 | `datascriptQuery(query-with-:in, "\"my page\"")` (EDN-quoted) | 1 |
 
-**Verified.** The "0 results" recorded in commit c108174 matches the bare-string case: the original example passed `'my-page'` unquoted. Why strings were once embedded and are now bound with `:in`: [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md), which supersedes ADR-0006.
+**Verified.** The "0 results" recorded in commit c108174 matches the bare-string case: the original example passed `'my-page'` unquoted. Why strings were once embedded and are now bound with `:in`: [ADR-0013 (strings-bound-via-in-inputs)](adr/0013-strings-bound-via-in-inputs.md), which supersedes ADR-0006.
 
 **Current practice:** string parameters go through `:in`. `LogseqClient::execute_datalog_query(query, inputs)` (`src/client.rs`) sends each input as its JSON text (a JSON string literal is also a valid EDN string literal), and every query builder returns a `Query { text, inputs }` (`src/edn.rs`). An input is a `DatalogInput`, a type that says what the value means, and a `PageName` is lowercase by construction:
 ```rust
@@ -72,7 +72,7 @@ The pattern `(or-join [?x ?y] ... [(ground nil) ?y])` doesn't work as expected f
 4. LogSeq filters out result rows containing `nil`
 5. **Result:** Query returns 0 results (should return page with no blocks)
 
-**DO:** split into separate queries (Pattern 1 below): the page first, failing if it's absent, then its blocks, where an empty array is a valid answer. The decision: [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md).
+**DO:** split into separate queries (Pattern 1 below): the page first, failing if it's absent, then its blocks, where an empty array is a valid answer. The decision: [ADR-0007 (two-query-pattern-for-optional-data)](adr/0007-two-query-pattern-for-optional-data.md).
 
 Empty pages are common: in a journal-heavy graph, most non-journal pages may have no file at all (they exist only as link targets).
 
@@ -129,7 +129,7 @@ Embedding a string that contains `"` in the query text produces a malformed quer
 
 **Verified.** A JSON string literal (what `serde_json` writes, and `JSON.stringify` in the scripts) is a valid EDN string literal for quotes, backslashes and newlines, and the escaped form runs correctly.
 
-**DO:** pass strings as `:in` inputs (constraint 1). The client does the escaping, and the value is never part of the query text, so there is nothing to inject into. Every `queries.rs` in `src` works this way ([ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md)).
+**DO:** pass strings as `:in` inputs (constraint 1). The client does the escaping, and the value is never part of the query text, so there is nothing to inject into. Every `queries.rs` in `src` works this way ([ADR-0013 (strings-bound-via-in-inputs)](adr/0013-strings-bound-via-in-inputs.md)).
 
 - Numeric IDs are still embedded, in `ground` vectors, because collection `:in` inputs are unprobed. Build them with `ground_ids(&ids, "?p")` (`src/edn.rs`), which takes `PageId`s: a `PageId` is only ever a positive whole number, so nothing else can reach the query text. Bind the ids straight to the entity variable (`ground_ids(&ids, "?p")` followed by a pattern on `?p`). `[?p :db/id ?id]` matches nothing, and a query whose only clause is the `ground` binding errors.
 - If you ever must embed a string literal, write it with `serde_json::to_string`. A string used inside `re-pattern` also needs regex metacharacters escaped first (`src/escape.rs`, #4).
@@ -163,7 +163,7 @@ When related data might not exist (pages without blocks, pages without connectio
 1. Query the main entity. If it's absent, fail (page-taking tools return `ToolError::PageNotFound` through the resolver).
 2. Query the related data. An empty result is a valid answer: an empty `Vec`, not an error. (`null` is its own case, BR-0011.)
 
-Why, and what it costs: [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md).
+Why, and what it costs: [ADR-0007 (two-query-pattern-for-optional-data)](adr/0007-two-query-pattern-for-optional-data.md).
 
 **Used in:** `src/tools/explore_context/mod.rs`: page query, blocks query, then linked references via `logseq.Editor.getPageLinkedReferences`.
 
@@ -188,7 +188,7 @@ for depth in 1..=max_depth {
 
 **Performance:** at most max_depth + 1 calls, asserted by a call-count test (`tests/concept_calls.rs`; the path with `to` has `tests/network_path_calls.rs`). Depth 2 from a hub with ~100 neighbours takes 3 calls, down from ~120.
 
-> **Implemented in `src/tools/explore_network/` (#3).** Caps matter: journal pages link to almost everything, and an uncapped depth-2 walk from one hub reached ~550 nodes once outbound links were followed. The walk holds at most 500 pages (`MAX_NODES_LIMIT`), `max_nodes` (default 50, root included) is the size of a page of it and is read to the end with `cursor` (#556), and `max_fanout` is 15 new pages per page. Journal pages are leaves unless `expand_journals` is set, and `truncated: true` is set whenever a rule of the walk (`max_fanout` or the limit of 500) left a page out. Roll-up pages are leaves too (#498): a page that links more than 30 distinct pages (`HUB_LINKS`) ranks after every other page, is not walked through unless `expand_journals` is set, and is named in a `hub_pages_not_expanded` warning when a depth was left to walk it. The count comes from the same query as the links (a `degree` row per pair, with `count-distinct`, no call of its own); a page that links nothing has no such row, which reads as 0. MCP clients set the page size with `max_nodes` (≤ 500), the rules of the walk with `max_fanout` (≤ 100) and `expand_journals`, and read the next page with `cursor`, on `logseq_explore_network`, which refuses the first three with `to` (the path is one page after another, so they have nothing to bound), and `with_snippets` for the first line of a linking block on each edge of the root. Why every walk is capped: [ADR-0011 (bounded-calls-and-results)](docs/adr/0011-bounded-calls-and-results.md).
+> **Implemented in `src/tools/explore_network/` (#3).** Caps matter: journal pages link to almost everything, and an uncapped depth-2 walk from one hub reached ~550 nodes once outbound links were followed. The walk holds at most 500 pages (`MAX_NODES_LIMIT`), `max_nodes` (default 50, root included) is the size of a page of it and is read to the end with `cursor` (#556), and `max_fanout` is 15 new pages per page. Journal pages are leaves unless `expand_journals` is set, and `truncated: true` is set whenever a rule of the walk (`max_fanout` or the limit of 500) left a page out. Roll-up pages are leaves too (#498): a page that links more than 30 distinct pages (`HUB_LINKS`) ranks after every other page, is not walked through unless `expand_journals` is set, and is named in a `hub_pages_not_expanded` warning when a depth was left to walk it. The count comes from the same query as the links (a `degree` row per pair, with `count-distinct`, no call of its own); a page that links nothing has no such row, which reads as 0. MCP clients set the page size with `max_nodes` (≤ 500), the rules of the walk with `max_fanout` (≤ 100) and `expand_journals`, and read the next page with `cursor`, on `logseq_explore_network`, which refuses the first three with `to` (the path is one page after another, so they have nothing to bound), and `with_snippets` for the first line of a linking block on each edge of the root. Why every walk is capped: [ADR-0011 (bounded-calls-and-results)](adr/0011-bounded-calls-and-results.md).
 
 **Real implementation:** `connected_pages` (`queries.rs`) and `explore_network` (`mod.rs`) in `src/tools/explore_network/`. With `to`, `explore_path` (`path.rs`) runs the same BFS from every name of the first page without the caps, stops at the first hop that reaches a name of the second and reads the path back through the page each page was reached through (a page that is no journal, then more references, then the lower id, among paths of one length). When the root has aliases, depth 1 uses `connected_pages_grouped` instead, so one query covers every name in the alias group (#69). One `or-join` covers both directions (outbound: blocks on the source page that ref another page; inbound: blocks on another page that ref the source). Frontier ids are bound with `ground_ids` directly to the entity variable (see constraint 6), and each page pair gets one edge with a reference count.
 
@@ -208,19 +208,19 @@ Always lowercase page names before passing them as `:in` inputs, to match `:bloc
 
 Never call `logseq.Editor.getAllPages` and then make one call per page. On a ~2k-page graph, `query_by_property` (now `find_blocks` with a property) used to make ~2k calls (one per page) and take ~10s this way (#33). <!-- guard:history query_by_property -->
 
-Use one Datalog query, filtering in the query with `includes?` / `re-find` / `get` / `contains?`, or batched queries with `[(ground [ids...]) [?id ...]]`. No tool crawls any more. The decision: [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md).
+Use one Datalog query, filtering in the query with `includes?` / `re-find` / `get` / `contains?`, or batched queries with `[(ground [ids...]) [?id ...]]`. No tool crawls any more. The decision: [ADR-0002 (datalog-over-editor-api)](adr/0002-datalog-over-editor-api.md).
 
 ---
 
 ## Migration History
 
-The history and the reasons are in the ADRs ([index](docs/adr/README.md)):
+The history and the reasons are in the ADRs ([index](adr/README.md)):
 
-- Editor API crawls (O(n) calls), then batched Datalog: [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md)
-- A feature-flagged dual HTTP/Datalog implementation, replaced by Datalog only (df7503a, 37fe0d6): [ADR-0005 (datalog-only-no-feature-flags)](docs/adr/0005-datalog-only-no-feature-flags.md)
-- Strings embedded in query text, later bound with `:in` once probing showed it works: [ADR-0006](docs/adr/0006-embed-strings-in-datalog-queries.md), superseded by [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md)
-- Pages without blocks, fixed by splitting queries (d6c3151): [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md)
-- Redundant tools removed, 13 to 11 (9642558, 34a699a): [ADR-0008 (remove-redundant-tools)](docs/adr/0008-remove-redundant-tools.md). Later work added tools back. There are 10 registered in `src/tools/mod.rs` today.
+- Editor API crawls (O(n) calls), then batched Datalog: [ADR-0002 (datalog-over-editor-api)](adr/0002-datalog-over-editor-api.md)
+- A feature-flagged dual HTTP/Datalog implementation, replaced by Datalog only (df7503a, 37fe0d6): [ADR-0005 (datalog-only-no-feature-flags)](adr/0005-datalog-only-no-feature-flags.md)
+- Strings embedded in query text, later bound with `:in` once probing showed it works: [ADR-0006](adr/0006-embed-strings-in-datalog-queries.md), superseded by [ADR-0013 (strings-bound-via-in-inputs)](adr/0013-strings-bound-via-in-inputs.md)
+- Pages without blocks, fixed by splitting queries (d6c3151): [ADR-0007 (two-query-pattern-for-optional-data)](adr/0007-two-query-pattern-for-optional-data.md)
+- Redundant tools removed, 13 to 11 (9642558, 34a699a): [ADR-0008 (remove-redundant-tools)](adr/0008-remove-redundant-tools.md). Later work added tools back. There are 10 registered in `src/tools/mod.rs` today.
 - A Rust implementation beside the TypeScript server (ADR-0025, ADR-0031, #122), held to its results byte for byte, then the TypeScript server removed after the Go on #349 (#356, last version at `35fa2dd3`)
 - Oct 2026: a review of 11 LogSeq, Obsidian, Roam, Notion, Tana and Basic Memory MCP servers set the roadmap in GitHub issues #3–#18. Probing the Datalog constraints and measuring API calls against a live graph (`scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`) corrected constraints 1, 2 and 4.
 
