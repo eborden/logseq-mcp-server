@@ -515,10 +515,11 @@ Quick reference checklist for future work:
 
 **Data shapes and HTTP API behaviour** (verified by `scripts/probe-constraints.ts`) are in [`docs/logseq-behaviour.md`](docs/logseq-behaviour.md). Read it before reading a LogSeq answer in a new way or writing a query that depends on a field's shape.
 
-**Tool behaviour** (result budgets, cursors, output formats, per-tool rules) is in [`docs/tool-behaviour.md`](docs/tool-behaviour.md). Read it before adding a tool or changing what one returns. Three rules stay here because a miss is costly:
+**Tool behaviour** (result budgets, cursors, output formats, per-tool rules) is in [`docs/tool-behaviour.md`](docs/tool-behaviour.md). Read it before adding a tool or changing what one returns. Four rules stay here because a miss is costly:
 - [ ] Never write to stdout (`println!`, `print!`, `dbg!`, `io::stdout`): it's the MCP stdio channel. Log with `eprintln!`, and never log graph data (ADR-0004).
 - [ ] Don't turn errors into empty results; propagate infrastructure errors: [BR-0003 (infrastructure-errors-propagate)](docs/business-rules/0003-infrastructure-errors-propagate.md)
 - [ ] Never cut results silently; any cap reports `ResultMeta`: [BR-0006 (no-silent-truncation)](docs/business-rules/0006-no-silent-truncation.md)
+- [ ] Publishing (#46) is manual: a workflow that publishes runs only on `workflow_dispatch`, from `main`, and defaults to a dry run. Never publish, tag or release from a session. Why: [ADR-0017 (manual-npm-publish)](docs/adr/0017-manual-npm-publish.md), carried over by [ADR-0035](docs/adr/0035-native-binary-release-on-github-releases.md) (Decision 10). The npm workflow and packaging were the TypeScript server's and are gone; the rule stands for whatever replaces them.
 
 ---
 
