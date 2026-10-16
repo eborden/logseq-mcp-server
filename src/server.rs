@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, GetPromptRequestParams, GetPromptResponse, Implementation,
-    ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
+    CacheScope, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
@@ -22,6 +22,23 @@ use crate::resources;
 use crate::snapshots::Snapshots;
 use crate::tool::{error_result, into_result};
 use crate::tools;
+
+/// How long a client may keep the lists the process never changes (`tools/list`, `prompts/list`, `resources/list`):
+/// an hour. They are fixed at build time, so only a restart changes them (SEP-2549, #589).
+pub const STATIC_LIST_TTL_MS: u64 = 3_600_000;
+/// The static lists hold no graph data, so any client or intermediary may share them.
+pub const STATIC_LIST_CACHE_SCOPE: CacheScope = CacheScope::Public;
+/// `resources/read` of a page changes as LogSeq is edited, so it is never fresh.
+pub const RESOURCE_READ_TTL_MS: u64 = 0;
+/// A read page is the person's own graph data.
+pub const RESOURCE_READ_CACHE_SCOPE: CacheScope = CacheScope::Private;
+
+/// Whether the client negotiated 2026-07-28 or later, the versions that carry `ttlMs` and `cacheScope`. An older
+/// client gets the results it always did, with neither field (rmcp fills them in for newer clients only).
+fn carries_cache_hints(context: &RequestContext<RoleServer>) -> bool {
+    // ISO `YYYY-MM-DD` versions compare lexically the same as chronologically
+    context.protocol_version().is_some_and(|v| v.as_str() >= ProtocolVersion::V_2026_07_28.as_str())
+}
 
 /// The server name `serverInfo` reports.
 pub const SERVER_NAME: &str = "logseq-mcp-server";
@@ -73,17 +90,27 @@ impl ServerHandler for LogseqServer {
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(tools::list()))
+        let result = ListToolsResult::with_all_items(tools::list());
+        Ok(if carries_cache_hints(&context) {
+            result.with_ttl_ms(STATIC_LIST_TTL_MS).with_cache_scope(STATIC_LIST_CACHE_SCOPE)
+        } else {
+            result
+        })
     }
 
     async fn list_prompts(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
-        Ok(ListPromptsResult::with_all_items(prompts::list()))
+        let result = ListPromptsResult::with_all_items(prompts::list());
+        Ok(if carries_cache_hints(&context) {
+            result.with_ttl_ms(STATIC_LIST_TTL_MS).with_cache_scope(STATIC_LIST_CACHE_SCOPE)
+        } else {
+            result
+        })
     }
 
     async fn get_prompt(
@@ -97,9 +124,14 @@ impl ServerHandler for LogseqServer {
     async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        Ok(ListResourcesResult::with_all_items(resources::list()))
+        let result = ListResourcesResult::with_all_items(resources::list());
+        Ok(if carries_cache_hints(&context) {
+            result.with_ttl_ms(STATIC_LIST_TTL_MS).with_cache_scope(STATIC_LIST_CACHE_SCOPE)
+        } else {
+            result
+        })
     }
 
     async fn list_resource_templates(
@@ -113,9 +145,14 @@ impl ServerHandler for LogseqServer {
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
-        Ok(resources::read(&self.client, &request.uri).await?.into())
+        let result = resources::read(&self.client, &request.uri).await?;
+        Ok(if carries_cache_hints(&context) {
+            result.with_ttl_ms(RESOURCE_READ_TTL_MS).with_cache_scope(RESOURCE_READ_CACHE_SCOPE).into()
+        } else {
+            result.into()
+        })
     }
 
     async fn call_tool(
@@ -286,5 +323,58 @@ mod tests {
         let unknown = &responses[2]["result"];
         assert_eq!(unknown["isError"], true);
         assert_eq!(unknown["content"][0]["text"], r#"{"error":"Unknown tool: logseq_nope"}"#);
+    }
+
+    /// A request that negotiates 2026-07-28 inline, in its own `_meta`, with no `initialize`.
+    fn inline_2026(id: u64, method: &str, params: Value) -> Value {
+        let mut params = params;
+        params["_meta"] = json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "0"},
+            "io.modelcontextprotocol/clientCapabilities": {}
+        });
+        json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+    }
+
+    /// The cache hints of the five cacheable results (SEP-2549, #589), as a 2026-07-28 client sees them.
+    #[tokio::test]
+    async fn a_2026_client_gets_the_cache_hints_pinned_here() {
+        let responses = exchange(&closed_port_url(), &[
+            inline_2026(1, "tools/list", json!({})),
+            inline_2026(2, "prompts/list", json!({})),
+            inline_2026(3, "resources/list", json!({})),
+            inline_2026(4, "resources/templates/list", json!({})),
+            inline_2026(5, "resources/read", json!({"uri": "logseq://guide"})),
+        ])
+        .await;
+        let hints = |i: usize| (responses[i]["result"]["ttlMs"].clone(), responses[i]["result"]["cacheScope"].clone());
+        for i in 0..3 {
+            assert_eq!(hints(i), (json!(STATIC_LIST_TTL_MS), json!("public")), "{}", responses[i]);
+        }
+        assert!(STATIC_LIST_TTL_MS > 0);
+        assert_eq!(STATIC_LIST_CACHE_SCOPE, CacheScope::Public);
+        // the templates list stays at rmcp's defaults: not in #589's decision, so not cached
+        assert_eq!(hints(3), (json!(0), json!("private")), "{}", responses[3]);
+        assert_eq!(hints(4), (json!(RESOURCE_READ_TTL_MS), json!("private")), "{}", responses[4]);
+        assert_eq!(RESOURCE_READ_TTL_MS, 0);
+        assert_eq!(RESOURCE_READ_CACHE_SCOPE, CacheScope::Private);
+    }
+
+    /// A client that negotiated an older version gets the results it always did: no cache fields.
+    #[tokio::test]
+    async fn an_older_client_sees_no_cache_hints() {
+        let responses = exchange(&closed_port_url(), &[
+            initialize(),
+            serde_json::from_str(INITIALIZED).unwrap(),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+            json!({"jsonrpc": "2.0", "id": 3, "method": "prompts/list"}),
+            json!({"jsonrpc": "2.0", "id": 4, "method": "resources/list"}),
+            json!({"jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": {"uri": "logseq://guide"}}),
+        ])
+        .await;
+        for response in &responses[1..] {
+            let result = response["result"].as_object().unwrap();
+            assert!(!result.contains_key("ttlMs") && !result.contains_key("cacheScope"), "{response}");
+        }
     }
 }
