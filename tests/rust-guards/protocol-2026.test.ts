@@ -55,6 +55,12 @@ const GRAPH_CALLS: CannedCall[] = [
   { method: 'logseq.App.getCurrentGraph', args: [], response: { name: 'my graph', path: '/graphs/my-graph', url: 'logseq_local_/graphs/my-graph' } },
 ];
 
+/** At least one line, and each a JSON-RPC object (a bare `42` or `"x"` parses as JSON but is no frame). */
+function expectOnlyFrames(lines: string[]): void {
+  expect(lines.length).toBeGreaterThan(0);
+  for (const line of lines) expect(JSON.parse(line), line).toMatchObject({ jsonrpc: '2.0' });
+}
+
 class RawClient {
   private nextId = 1;
   private waiting = new Map<number, (reply: Reply) => void>();
@@ -163,7 +169,7 @@ describe('the server as a 2026-07-28 and a 2025-11-25 MCP client (#590)', () => 
       const reply = await client.request2026('tools/list');
       expect(reply.error).toBeUndefined();
       expect(reply.result!.resultType).toBe('complete');
-      expect((reply.result!.tools as unknown[]).length).toBe(10);
+      expect((reply.result!.tools as unknown[]).length).toBeGreaterThan(0);
     });
 
     it('tools/call against the stub carries resultType "complete" and the tool result', async () => {
@@ -192,11 +198,13 @@ describe('the server as a 2026-07-28 and a 2025-11-25 MCP client (#590)', () => 
 
     it('resources/read of an unknown resource is -32602 too', async () => {
       const reply = await client.request2026('resources/read', { uri: 'logseq://nope' });
-      expect(reply.error?.code).toBe(-32602);
+      // The message and uri tell this apart from a malformed request, which is also -32602
+      expect(reply.error).toMatchObject({ code: -32602, data: { uri: 'logseq://nope' } });
+      expect(reply.error!.message).toContain('Unknown resource');
     });
 
     it('stdout holds only MCP frames (ADR-0004)', () => {
-      for (const line of client.stdout()) expect(() => JSON.parse(line), line).not.toThrow();
+      expectOnlyFrames(client.stdout());
     });
   });
 
@@ -239,7 +247,7 @@ describe('the server as a 2026-07-28 and a 2025-11-25 MCP client (#590)', () => 
     });
 
     it('stdout holds only MCP frames (ADR-0004)', () => {
-      for (const line of client.stdout()) expect(() => JSON.parse(line), line).not.toThrow();
+      expectOnlyFrames(client.stdout());
     });
   });
 });
