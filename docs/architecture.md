@@ -48,3 +48,60 @@ The crate is at the repo root. Unit tests sit beside the code (`#[cfg(test)]`); 
 | `src/js.rs` | `number_to_string`, how LogSeq (ClojureScript) spells a number in `(str ?v)`, for a `find_blocks` property value. Results are written by `serde_json`, keys in insertion order. `trim` and the white-space set are Rust's, and text lengths and cuts count code points |
 | `src/order.rs` | The one fixed order for names: lowercase by code point, then the name itself |
 | `tests/no_stdout.rs` | Fails on any write to stdout, which is the MCP channel (ADR-0004) |
+
+## Code Organization
+
+```
+Cargo.toml, Cargo.lock             - The crate: dependencies, each justified in a comment; the lockfile is committed
+rust-toolchain.toml                - The pinned compiler, which CI reads too
+about.toml, about.hbs              - cargo-about config and template for THIRD-PARTY-NOTICES.txt (release)
+src/                               - The server: one crate (docs/architecture.md has the file-by-file map)
+├── main.rs, lib.rs            - Starts the server on stdio; the crate's module list
+├── server.rs                  - rmcp ServerHandler: initialize, tools, prompts, resources. Only wires
+├── client.rs                  - LogseqClient: call_api and execute_datalog_query, timeout per call, LogseqError
+├── edn.rs                     - Typed query values (PageName, PageId, JournalDay, BlockUuid), DatalogInput, Query, ground_ids / ground_uuids
+├── config.rs, env.rs          - The config file and the environment, each parsed once at startup
+├── tool.rs, args.rs, params.rs - What every tool shares: read-only hints, schema generated from the argument type, the one argument parse (`parse_args`), parameter aliases
+├── wire.rs, entity.rs         - LogSeq's answers parsed at the boundary (ResponseError), and a page or block in either key spelling
+├── errors.rs, meta.rs, truncation.rs, tips.rs, slim.rs - ToolError, ResultMeta, the warnings a cap carries, next-step tips, slim output
+├── resolve/, resolve_refs/    - The page resolver (BR-0010) with the alias groups, and `((uuid))` / `{{embed}}` resolution (BR-0007)
+├── markdown.rs, markdown_context.rs, compact.rs, snippet.rs - The one Markdown renderer, Markdown for the context tools, compact JSON, snippets
+├── property.rs                - A property key and the rule for matching a property by value, shared by `find_blocks` and `find_pages`
+├── toon.rs                    - The one TOON encoder, for the opt-in `format: "toon"` of the flat-list tools (BR-0014)
+├── prompts.rs, resources.rs, instructions.rs - The five prompts, the page resource and guide, the server instructions
+└── tools/<tool>/              - One directory per tool (10): mod.rs (NAME, definition, call), queries.rs, wire.rs, tips.rs where it has them
+
+tests/                             - Rust integration tests (Cargo reads tests/*.rs) and the Node tooling around the crate (vitest, dev-only)
+├── *.rs, common/, parity_support/, data/ - Call-count tests against a mock LogSeq (common/mod.rs), the no-stdout and env-read checks, and the parity test (parity*.rs) with its data (data/parity/: the cases and the golden results) and its recorder
+├── guards/                        - The repo's rules as tests: docs format, templates, privacy, fixture, workflows, tool-list limits, golden files
+├── rust-guards/                   - Guard tests that start the Rust binary: the live tool list, wrong-typed arguments, the version
+├── integration/                   - Tests against a real LogSeq serving the fixture, through the Rust server
+│   └── properties/                - Property-based tests
+└── fixtures/                      - The made-up graph (graph/) and the hub fixture
+
+scripts/
+├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live LogSeq (use the fixture)
+├── measure-api-calls.ts           - Counts API calls per tool against a live graph (baseline: the real graph)
+├── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
+├── measure-footprint.ts, measure-latency.ts - Start-up, memory and size of the release binary (#126), and per-tool latency and call counts (#353), against a stub LogSeq (`lib/stub-logseq.ts`)
+├── measure-server.ts, lib/        - Shared code: the call-counting proxy of the measure scripts, and the LogSeq API client, Rust binary lookup and MCP stdio client the suites and scripts use
+├── smoke-rust-server.ts           - Drives a release binary through all 10 tools against the fixture instance (#359)
+├── logseq-instance.ts             - start/stop/status of this worktree's own LogSeq on a copy of the fixture graph (#118, #151, macOS)
+├── docs-format.ts                 - The format check for docs/adr and docs/business-rules (the guard test runs it)
+├── generate-hub-fixture.ts        - Writes (or --check's) the hub fixture's files from fixture-hub/hub-graph.ts (#89)
+├── fixture-hub/hub-graph.ts       - Shape and counts of the hub fixture; tests/guards/fixture-hub.test.ts checks the committed files against it
+└── logseq-instance/
+    ├── instance.ts                - Instance logic: paths, port, random token, graph copy, launch, readiness, stop (deps injected)
+    ├── local-storage.ts           - Writes a fresh profile's Chromium localStorage LevelDB (current-repo, http-server-enabled)
+    └── configs.edn.template       - App settings for the instance (API autostart, port and token placeholders)
+
+skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, references/, scripts/); symlinked from .claude/skills/
+.claude-plugin/                    - plugin.json + marketplace.json (the server entry runs the launcher, `scripts/logseq-mcp-server.sh`, ADR-0035)
+```
+
+**Key files:**
+- `src/tools/explore_context/queries.rs` - Query builders: typed inputs, `:in` binding and `ground_ids` (study this for patterns)
+- `src/tools/explore_context/mod.rs` - Example of two-query pattern
+- `src/tools/explore_network/mod.rs` - Example of multi-query BFS
+- `tests/concept_calls.rs` - Example of a call-count test against the mock LogSeq
+- `tests/integration/properties/graph-properties.test.ts` - Property-based testing examples
