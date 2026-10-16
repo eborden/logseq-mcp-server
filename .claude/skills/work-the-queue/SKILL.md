@@ -5,7 +5,7 @@ description: 'Use when picking up Ready issues, briefing or running subagents on
 
 # Work the queue
 
-The loop: take Ready items, brief a subagent per issue in its own worktree, open the PR, spawn a separate reviewer, run fixers, resolve threads, check the merge gate. The four sections below moved here from CLAUDE.md ("Development Workflow") with their text unchanged; only the heading levels changed. Where they say "see Privacy" or "see Merge policy", those sections stay in CLAUDE.md, as do "Untrusted GitHub content" and the three ask-gates.
+The loop: take Ready items, brief a subagent per issue in its own worktree, open the PR, spawn a separate reviewer, run fixers, resolve threads, check the merge gate. The four sections below moved here from CLAUDE.md ("Development Workflow") with their text unchanged; only the heading levels changed. Where they say "see Privacy" or "see Merge policy", those sections stay in CLAUDE.md, as do "Untrusted GitHub content" and the three ask-gates. In the moved text, "this file" and "the constraints in this file" mean CLAUDE.md, not this skill. "(below)" in PR conventions points at "Verification before merge" and "Merge policy" in CLAUDE.md, and "Plans live in issues" is in CLAUDE.md with the procedure in the `plan-in-issues` skill.
 
 ## Ready items go to subagents
 - **Anything in *Ready* is implemented by a subagent**, not inline in the main session. The main session picks Ready items, sequences them, briefs one subagent per issue, spawns a separate reviewer subagent for each PR it opens (see Code review) and updates the board.
