@@ -181,7 +181,7 @@ npm run run-issue -- --issue 123 --base feature/x --wait   # PR against another 
 **Bounds** (all in `src/review-policy.ts`, importable from workflow code; the numbers are assumptions for the maintainer to confirm):
 
 - `DEFAULT_MAX_FIX_ROUNDS = 3`. The input may set `maxFixRounds` (1 to 10).
-- `DEFAULT_REVIEW_LOOP_TIMEOUT_MS = 4 hours` for the whole loop, enforced by a cancellable scope in `issue.ts`. The input may set `reviewLoopTimeoutMs` (1 second to 6 hours; the small values are for tests). The whole run is still limited to 8 hours.
+- `DEFAULT_REVIEW_LOOP_TIMEOUT_MS = 4 hours` for the whole loop, enforced by a cancellable scope in `issue.ts`. The input may set `reviewLoopTimeoutMs` (1 second to 6 hours; the small values are for tests). The whole run is limited to 21 days (see "Bounds" above).
 - Each step, retries included, 2 hours (`ISSUE_STEP_TIMEOUT`); the reviewer and the fixer activities have the implementer's 75 minutes (`REVIEW_SESSION_ACTIVITY_OPTIONS`), with 3 attempts. A session is never run twice: its marker in the repo's git config (`orchestrator.reviewer-<pr>-r<round>`, `orchestrator.fixer-<pr>-r<round>`: `started`, then `success` or `error`) turns a retry into the finished result, `SessionInterrupted` or `SessionError`, and these are not retried.
 - The thread list, the gate and the posting use the GitHub activity timeouts and 3 attempts.
 
@@ -227,6 +227,8 @@ After the review loop the run waits for the maintainer, with a signal, at no cos
 6. **Done.** On a merge it sets the PR and then its issue to Done with the #635 activities and reads each status back (`BoardDisagrees` if the board does not show it), then checks the issue is closed (`checkIssue`) and closes it if not (`closeIssue`: the one new write, `state: closed` with the reason `completed`, read back, an issue of a trusted author only). A PR merged into a branch other than the default does not close its issue, and the cause of #626 closing on its own was not established, so the run verifies instead of assuming. `outcome: 'merged'` says whether the run closed it (`issueClosedByRun`).
 
 **A decision binds to the head current when the gate clears**, not to the head the maintainer saw when they sent it; the comment names that head. A push after the comment stops the run (`HeadMovedAfterApproval`).
+
+**A merge wins over a decision.** If the PR is merged while a `changes_requested` is held, the run records that decision (its comment says the run does not change the branch again), then moves the PR and the issue to Done anyway, since the merge happened.
 
 **A timeout never approves.** With no decision by the limit the run comments on the PR (key `decision-timeout-<pr>`) and ends `outcome: 'decision_timeout'`.
 
