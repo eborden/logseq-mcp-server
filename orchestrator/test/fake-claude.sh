@@ -8,6 +8,8 @@
 #   FAKE_CLAUDE_LOG       a file that gets one line per invocation, so a test can count sessions
 #   FAKE_CLAUDE_ARGS_FILE a file that gets the arguments, each followed by a NUL byte
 #   FAKE_CLAUDE_PID_FILE  a file that gets "<its pid> <its child's pid>" in the modes that wait or leave a child
+#   FAKE_CLAUDE_SEQUENCE  a directory for the review loop's sessions (#630): the Nth invocation reads `<N>.sh`, if there is
+#                         one, and runs it in the working directory (it writes the findings or replies file, maybe commits)
 #   FAKE_CLAUDE_SLOW_SECONDS  how long `slow` takes (default 1)
 set -euo pipefail
 
@@ -46,6 +48,18 @@ leave_orphan() {
     echo "$$ $!" >"$FAKE_CLAUDE_PID_FILE"
   fi
 }
+
+if [ -n "${FAKE_CLAUDE_SEQUENCE:-}" ]; then
+  count_file="$FAKE_CLAUDE_SEQUENCE/count"
+  count=$(($(cat "$count_file" 2>/dev/null || echo 0) + 1))
+  echo "$count" >"$count_file"
+  if [ -f "$FAKE_CLAUDE_SEQUENCE/$count.sh" ]; then
+    # shellcheck disable=SC1090
+    . "$FAKE_CLAUDE_SEQUENCE/$count.sh"
+    echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"fake"}'
+    exit 0
+  fi
+fi
 
 case "$mode" in
   success)
