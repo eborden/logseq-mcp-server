@@ -1,0 +1,31 @@
+{
+  "name": "logseq-mcp-orchestrator",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Temporal orchestrator for the issue-to-PR loop (parent plan #625). Not part of the Rust server or the root tooling.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "start-server": "tsx src/start-server.ts",
+    "worker": "tsx src/worker.ts",
+    "run-hello": "tsx src/client.ts",
+    "test:unit": "node --import tsx --test test/activities.test.ts",
+    "test:crash": "node --import tsx --test test/crash.test.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@temporalio/activity": "1.24.0",
+    "@temporalio/client": "1.24.0",
+    "@temporalio/testing": "1.24.0",
+    "@temporalio/worker": "1.24.0",
+    "@temporalio/workflow": "1.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}
