@@ -24,10 +24,13 @@ export interface SessionInput {
  * - `error`: the session ran and exited non-zero, or reported `is_error`, or timed out.
  * - `interrupted`: the branch holds a session that started and never finished (a killed worker, a cancel). It may
  *   still be running. No second session was started.
+ * - `claimed`: an attempt created this branch and died before it recorded starting a session (or is doing so
+ *   right now). No session ran, and none was started now. Nothing here can tell a dead attempt from a live
+ *   one, so the workflow or an operator decides (README, "Recovering a stuck branch").
  * - `existing`: the branch (or an open PR's branch) existed and this activity did not create it, so nothing here
  *   says how its session ended. No second session was started.
  */
-export type SessionExitStatus = 'success' | 'error' | 'interrupted' | 'existing';
+export type SessionExitStatus = 'success' | 'error' | 'interrupted' | 'claimed' | 'existing';
 
 export interface SessionResult {
   readonly branch: string;
@@ -36,7 +39,7 @@ export interface SessionResult {
   readonly exitStatus: SessionExitStatus;
 }
 
-export const EXIT_STATUSES: readonly SessionExitStatus[] = ['success', 'error', 'interrupted', 'existing'];
+export const EXIT_STATUSES: readonly SessionExitStatus[] = ['success', 'error', 'interrupted', 'claimed', 'existing'];
 
 export const MAX_PROMPT_CHARS = 100_000;
 const MAX_PATH_CHARS = 1024;

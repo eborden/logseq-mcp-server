@@ -8,6 +8,12 @@ import type { ActivityOptions } from '@temporalio/workflow';
 export const SESSION_TIMEOUT_MS = 30 * 60_000;
 /** How often the activity heartbeats while the session runs. */
 export const HEARTBEAT_INTERVAL_MS = 5_000;
+/**
+ * How long Temporal waits for a heartbeat before it counts the attempt dead. The heartbeat is a timer that runs
+ * from the start of the activity to its end, so no git call or session can starve it, however long it takes:
+ * the timeout only has to be a few intervals.
+ */
+export const HEARTBEAT_TIMEOUT_MS = 30_000;
 /** How long a stopped child has to exit after SIGTERM before it gets SIGKILL. */
 export const KILL_GRACE_MS = 5_000;
 
@@ -23,7 +29,7 @@ export const START_TO_CLOSE_MS = 35 * 60_000;
 
 export const CLAUDE_SESSION_ACTIVITY_OPTIONS: ActivityOptions = {
   startToCloseTimeout: START_TO_CLOSE_MS,
-  heartbeatTimeout: '30 seconds',
+  heartbeatTimeout: HEARTBEAT_TIMEOUT_MS,
   retry: {
     // Only infrastructure failures (git, the network) are retried, and each retry is idempotent.
     maximumAttempts: 3,
