@@ -39,6 +39,7 @@ export function parseHelloInput(raw: unknown): HelloInput {
   if (typeof raw !== 'object' || raw === null) {
     throw new InvalidInputError('input must be an object');
   }
+  // Safe: raw is a non-null object here, and every field is type-checked below before it is used.
   const { name, logFile, runKey, workMs } = raw as Record<string, unknown>;
   if (typeof name !== 'string' || !NAME.test(name)) {
     throw new InvalidInputError('name must be 1 to 100 letters, digits, spaces, dots, dashes or underscores');
@@ -53,4 +54,25 @@ export function parseHelloInput(raw: unknown): HelloInput {
     throw new InvalidInputError(`workMs must be a whole number from 0 to ${MAX_WORK_MS}`);
   }
   return { name, logFile, runKey, workMs };
+}
+
+function isStepResult(raw: unknown): raw is StepResult {
+  if (typeof raw !== 'object' || raw === null) {
+    return false;
+  }
+  const step: unknown = 'step' in raw ? raw.step : undefined;
+  const appended: unknown = 'appended' in raw ? raw.appended : undefined;
+  return (step === 'greet' || step === 'farewell') && typeof appended === 'boolean';
+}
+
+/** Parses a workflow result that came back untyped (for example from a start by workflow name). */
+export function parseHelloResult(raw: unknown): HelloResult {
+  if (typeof raw !== 'object' || raw === null || !('runKey' in raw) || !('steps' in raw)) {
+    throw new InvalidInputError('result must have runKey and steps');
+  }
+  const { runKey, steps } = raw;
+  if (typeof runKey !== 'string' || !Array.isArray(steps) || !steps.every(isStepResult)) {
+    throw new InvalidInputError('result has a malformed runKey or steps');
+  }
+  return { runKey, steps };
 }
