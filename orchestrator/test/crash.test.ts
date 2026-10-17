@@ -13,7 +13,9 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { TestWorkflowEnvironment } from '@temporalio/testing';
 import { startDevServer } from '../src/dev-server.ts';
-import type { HelloInput, HelloResult } from '../src/hello-types.ts';
+import { hasErrorCode } from '../src/fs-errors.ts';
+import { parseHelloResult } from '../src/hello-types.ts';
+import type { HelloInput } from '../src/hello-types.ts';
 
 const WORKER_ENTRY = fileURLToPath(new URL('../src/worker.ts', import.meta.url));
 const TASK_QUEUE = 'crash-test';
@@ -58,7 +60,7 @@ async function lines(file: string): Promise<string[]> {
   try {
     return (await readFile(file, 'utf8')).split('\n').filter((line) => line !== '');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (hasErrorCode(error, 'ENOENT')) {
       return [];
     }
     throw error;
@@ -99,16 +101,16 @@ test('a run survives a SIGKILLed worker and each side effect happens once', { ti
     workflowExecutionTimeout: '2 minutes',
   });
 
-  // Wait until the first activity is done and the second is running on the first worker, then kill it.
-  await until('the farewell activity to be running', 60_000, async () => {
+  // Wait until farewell has WRITTEN its line and is still running (it wraps up for WORK_MS after the write), then
+  // kill the worker. This is the case the idempotent write exists for: the side effect is done, the worker dies
+  // before Temporal hears about it, and the activity is retried.
+  await until('farewell to have written its line while still running', 60_000, async () => {
     const description = await handle.describe();
-    const pending = description.raw.pendingActivities ?? [];
-    const running = pending.some(
+    const running = (description.raw.pendingActivities ?? []).some(
       (activity) => activity.activityType?.name === 'farewell' && (activity.lastStartedTime ?? null) !== null,
     );
-    return running ? true : undefined;
+    return running && (await lines(logFile)).length === 2 ? true : undefined;
   });
-  assert.equal((await lines(logFile)).length, 1, 'greet has appended its line, farewell has not yet');
   first.kill('SIGKILL');
   await once(first, 'exit');
 
@@ -121,15 +123,13 @@ test('a run survives a SIGKILLed worker and each side effect happens once', { ti
     );
     return retried ? true : undefined;
   });
-  const result = (await handle.result()) as HelloResult;
+  const result = parseHelloResult(await handle.result());
 
   assert.equal(result.runKey, 'crash-run-1');
-  assert.deepEqual(
-    result.steps.map((step) => step.step),
-    ['greet', 'farewell'],
-  );
-  const finalLines = await lines(logFile);
-  assert.equal(finalLines.length, 2, `expected one line per activity, got: ${JSON.stringify(finalLines)}`);
-  assert.equal(finalLines.filter((line) => line.startsWith('crash-run-1 greet ')).length, 1);
-  assert.equal(finalLines.filter((line) => line.startsWith('crash-run-1 farewell ')).length, 1);
+  // greet ran once and wrote. farewell wrote before the crash, so its retry found the line and wrote nothing.
+  assert.deepEqual(result.steps, [
+    { step: 'greet', appended: true },
+    { step: 'farewell', appended: false },
+  ]);
+  assert.deepEqual(await lines(logFile), ['crash-run-1 greet hello Alice', 'crash-run-1 farewell goodbye Alice']);
 });
