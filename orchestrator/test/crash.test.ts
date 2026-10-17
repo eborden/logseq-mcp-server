@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { TestWorkflowEnvironment } from '@temporalio/testing';
+import { loadServerConfig } from '../src/config.ts';
 import { startDevServer } from '../src/dev-server.ts';
 import { hasErrorCode } from '../src/fs-errors.ts';
 import { parseHelloResult } from '../src/hello-types.ts';
@@ -63,7 +64,8 @@ const workers: ChildProcess[] = [];
 
 before(async () => {
   port = await freePort();
-  server = await startDevServer({ port });
+  // TEMPORAL_CLI_PATH is honoured here too, so a machine without network access can point at an installed CLI.
+  server = await startDevServer({ port, cliPath: loadServerConfig(process.env).cliPath });
   dir = await mkdtemp(join(tmpdir(), 'orchestrator-crash-'));
 });
 
