@@ -33,7 +33,16 @@ export interface ClaudeConfig {
   readonly permissionPrompts: PermissionPrompts | undefined;
   /** Passed as one `--allowedTools=<comma list>` argument. Empty means no flag at all. */
   readonly allowedTools: readonly string[];
+  /** Passed as one `--disallowedTools=<comma list>` argument. Empty means no flag at all. Deny beats allow. */
+  readonly disallowedTools: readonly string[];
+  /** Passed as `--setting-sources <comma list>`. Empty means no flag, so every source loads (the CLI's default). */
+  readonly settingSources: readonly SettingSource[];
+  /** Passed as `--strict-mcp-config`, with no `--mcp-config`: the session loads no MCP server at all. */
+  readonly strictMcpConfig: boolean;
 }
+
+/** The choices `claude --help` lists for `--setting-sources` (CLI 2.1.302). */
+export type SettingSource = 'user' | 'project' | 'local';
 
 export type Env = Readonly<Record<string, string | undefined>>;
 
@@ -98,6 +107,14 @@ export const BYPASS_OPT_IN_VALUE = 'yes-skip-all-permission-checks';
  */
 export const DEFAULT_PERMISSION_MODE: PermissionMode = 'acceptEdits';
 export const DEFAULT_PERMISSION_PROMPTS: PermissionPrompts = 'none';
+// The allowed list is risk reduction, not a sandbox (README, "Permission modes"): the commands that run the repo's
+// own tests run repo code as the worker's OS user, which no pattern here can prevent. What it does keep out is the
+// session's own ways of reaching further: no push of any kind (the orchestrator's `pushBranch` pushes, with fixed
+// argv), no code runner that takes its program from the command line (`node`, `npx`, `npm exec`), no `git rebase`
+// (`--exec`) or `git fetch` (`--upload-pack`), no GitHub read of an issue or PR (it would show comments the brief
+// left out), and a status comment only through `--body`.
+// The commit and comment forms the brief tells the session to use are exactly the two Bash rules for them below, and
+// a test checks that every command the brief names matches an allowed rule and no denied one.
 export const DEFAULT_ALLOWED_TOOLS: readonly string[] = [
   // Reading and editing the worktree.
   'Read',
@@ -105,49 +122,89 @@ export const DEFAULT_ALLOWED_TOOLS: readonly string[] = [
   'Grep',
   'Edit',
   'Write',
-  // Version control, by verb. A push goes only to a `claude/` branch: the implementer never writes to another ref.
+  // Version control in the worktree. Never a push, a rebase, a fetch or a config change.
   'Bash(git status)',
   'Bash(git status *)',
   'Bash(git diff *)',
   'Bash(git log *)',
   'Bash(git show *)',
-  'Bash(git add *)',
-  'Bash(git commit *)',
-  'Bash(git fetch *)',
-  'Bash(git rebase *)',
   'Bash(git rev-parse *)',
-  'Bash(git push -u origin claude/*)',
-  'Bash(git push origin claude/*)',
-  'Bash(git push --force-with-lease origin claude/*)',
-  // The repo's own test and check commands (CLAUDE.md "Verification before merge").
-  'Bash(cargo *)',
-  'Bash(npm *)',
-  'Bash(npx *)',
-  'Bash(node *)',
+  'Bash(git add *)',
+  'Bash(git rm *)',
+  'Bash(git mv *)',
+  'Bash(git commit -m *)',
+  // The repo's own checks, as exact commands where the scripts allow it (CLAUDE.md "Verification before merge").
+  'Bash(npm ci)',
+  'Bash(npm run typecheck)',
+  'Bash(npm run test:unit)',
+  'Bash(npm run test:github)',
+  'Bash(npm run test:workflow)',
+  'Bash(npm run test:server)',
+  'Bash(npm run test:crash)',
+  'Bash(cargo build *)',
+  'Bash(cargo test *)',
+  'Bash(cargo fmt *)',
+  'Bash(cargo clippy *)',
   'Bash(shellcheck *)',
-  // The issue and its PR, read, and the issue's status comment. No `gh api`, no `gh pr create`, no merge.
-  'Bash(gh issue view *)',
-  'Bash(gh issue comment *)',
-  'Bash(gh pr view *)',
-  'Bash(ls *)',
+  // The one status comment on the issue, with the text on the command line. Not `--body-file`, not another command.
+  'Bash(gh issue comment * --body *)',
 ];
+
+/**
+ * Denied whatever an allow rule or a settings file says (deny beats allow). Paths are rules for the file tools; the
+ * orchestrator's diff guard (`src/diff-guard.ts`) refuses the same paths after the session, because the path syntax of
+ * a deny rule was not verified against a real session (README, "Before the first real run").
+ */
+export const DEFAULT_DISALLOWED_TOOLS: readonly string[] = [
+  'Bash(gh api *)',
+  'Bash(gh pr *)',
+  'Bash(gh issue comment * --body-file *)',
+  'Bash(gh issue comment * -F *)',
+  'Bash(git push *)',
+  'WebFetch',
+  'WebSearch',
+  ...['.github/**', 'CLAUDE.md', '.claude/**', 'docs/adr/**', 'docs/business-rules/**', '.env*'].flatMap((path) => [`Edit(${path})`, `Write(${path})`]),
+];
+
+/** The settings files a session loads. The host user's own settings and hooks are left out. */
+export const DEFAULT_SETTING_SOURCES: readonly SettingSource[] = ['project'];
 
 const PERMISSION_PROMPTS: readonly PermissionPrompts[] = ['host', 'none'];
 // One tool rule: a tool name, optionally with a parenthesised pattern. No comma inside, because the list is joined with commas.
 const TOOL_RULE = /^[A-Za-z][A-Za-z0-9_]{0,63}(\([^,\0\r\n()]{1,200}\))?$/;
 const MAX_ALLOWED_TOOLS = 100;
 
-function parseAllowedTools(raw: string | undefined): readonly string[] {
-  if (raw === undefined) {
-    return DEFAULT_ALLOWED_TOOLS;
-  }
+function parseToolRules(name: string, raw: string): readonly string[] {
   const rules = raw.split(',').map((rule) => rule.trim());
   if (rules.length > MAX_ALLOWED_TOOLS || rules.some((rule) => !TOOL_RULE.test(rule))) {
     throw new ConfigError(
-      `CLAUDE_ALLOWED_TOOLS must be a comma-separated list of at most ${MAX_ALLOWED_TOOLS} tool rules such as "Edit" or "Bash(git status *)"`,
+      `${name} must be a comma-separated list of at most ${MAX_ALLOWED_TOOLS} tool rules such as "Edit" or "Bash(git status *)"`,
     );
   }
   return rules;
+}
+
+function parseAllowedTools(raw: string | undefined): readonly string[] {
+  return raw === undefined ? DEFAULT_ALLOWED_TOOLS : parseToolRules('CLAUDE_ALLOWED_TOOLS', raw);
+}
+
+/** Extra denials are added to the defaults and never replace them: a deny rule can only make a session safer. */
+function parseDisallowedTools(raw: string | undefined): readonly string[] {
+  return raw === undefined ? DEFAULT_DISALLOWED_TOOLS : [...DEFAULT_DISALLOWED_TOOLS, ...parseToolRules('CLAUDE_DISALLOWED_TOOLS', raw)];
+}
+
+const SETTING_SOURCES: readonly SettingSource[] = ['user', 'project', 'local'];
+
+function parseSettingSources(raw: string | undefined): readonly SettingSource[] {
+  if (raw === undefined) {
+    return DEFAULT_SETTING_SOURCES;
+  }
+  const sources = raw.split(',').map((source) => SETTING_SOURCES.find((candidate) => candidate === source.trim()));
+  const known = sources.filter((source): source is SettingSource => source !== undefined);
+  if (known.length !== sources.length) {
+    throw new ConfigError(`CLAUDE_SETTING_SOURCES must be a comma-separated list of ${SETTING_SOURCES.join(', ')}`);
+  }
+  return known;
 }
 
 export function loadClaudeConfig(env: Env): ClaudeConfig {
@@ -170,7 +227,15 @@ export function loadClaudeConfig(env: Env): ClaudeConfig {
   if (permissionPrompts === undefined) {
     throw new ConfigError(`CLAUDE_PERMISSION_PROMPTS must be one of ${PERMISSION_PROMPTS.join(', ')}`);
   }
-  return { claudeBin, permissionMode, permissionPrompts, allowedTools: parseAllowedTools(blankAsAbsent(env['CLAUDE_ALLOWED_TOOLS'])) };
+  return {
+    claudeBin,
+    permissionMode,
+    permissionPrompts,
+    allowedTools: parseAllowedTools(blankAsAbsent(env['CLAUDE_ALLOWED_TOOLS'])),
+    disallowedTools: parseDisallowedTools(blankAsAbsent(env['CLAUDE_DISALLOWED_TOOLS'])),
+    settingSources: parseSettingSources(blankAsAbsent(env['CLAUDE_SETTING_SOURCES'])),
+    strictMcpConfig: true,
+  };
 }
 
 export function loadServerConfig(env: Env): ServerConfig {
