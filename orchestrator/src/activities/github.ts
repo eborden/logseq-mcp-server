@@ -59,6 +59,12 @@ const MAX_REVIEW_COMMENTS = 100;
 const HEARTBEAT_SLICE_MS = 5_000;
 
 const SETTABLE: readonly SettableStatus[] = ['In progress', 'In review', 'Done'];
+/** The moves `setStatus` makes: from a status to the one next step it may take. */
+const ALLOWED_MOVES: ReadonlyMap<string, SettableStatus> = new Map<string, SettableStatus>([
+  ['In progress', 'In review'],
+  ['In review', 'Done'],
+]);
+const ALLOWED_MOVES_TEXT = [...ALLOWED_MOVES].map(([from, to]) => `${from} to ${to}`).join(' and ');
 
 export type RefusalType = 'InvalidInput' | 'UntrustedAuthor' | 'InvalidState' | 'NotFound';
 
@@ -107,6 +113,9 @@ function parseSettableStatus(raw: unknown): SettableStatus {
 }
 
 const HEAD = /^claude\/\d{1,9}(?:-[A-Za-z0-9._-]{1,100})?$/;
+/** Review states that count toward the gate. PENDING (an unsubmitted draft) and DISMISSED do not. */
+const COUNTED_REVIEW_STATES: ReadonlySet<string> = new Set(['COMMENTED', 'APPROVED', 'CHANGES_REQUESTED']);
+
 const BASE = /^[A-Za-z0-9._/-]{1,100}$/;
 const SHA = /^[0-9a-f]{40}$/;
 const KEY = /^[A-Za-z0-9._-]{1,100}$/;
@@ -158,12 +167,12 @@ const BOARD_QUERY =
   'projectItems(first:20){pageInfo{hasNextPage} nodes{project{number owner{... on User{login} ... on Organization{login}}} ' +
   'fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}';
 
-// The query of CLAUDE.md "Code review" step 5, with the review's author association added so a stranger's review
-// cannot clear the gate, and a page-info flag so a PR with more than 100 reviews or threads fails instead of
+// The query of CLAUDE.md "Code review" step 5, with the review's state and author association added (a PENDING draft
+// or a DISMISSED review, or a stranger's review, must not clear the gate; the step 5 query has that gap too), and a page-info flag so a PR with more than 100 reviews or threads fails instead of
 // being counted from part of its list.
 const GATE_QUERY =
   'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){' +
-  'headRefOid reviews(first:100){pageInfo{hasNextPage} nodes{body authorAssociation commit{oid}}} ' +
+  'headRefOid reviews(first:100){pageInfo{hasNextPage} nodes{state body authorAssociation commit{oid}}} ' +
   'reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved}}}}}';
 
 function splitRepo(repo: string): { owner: string; name: string } {
@@ -171,8 +180,8 @@ function splitRepo(repo: string): { owner: string; name: string } {
   return { owner, name };
 }
 
-export function createGithubActivities(config: GhConfig, deps: GhDeps = activityDeps) {
-  const gh = new GhCli(config, deps);
+/** The operations, bound to one `gh` wrapper. Each attempt of an activity gets its own, so its rate-limit waits are counted per attempt. */
+function operations(config: GhConfig, gh: GhCli) {
   const { owner, name } = splitRepo(config.repo);
   const repoRoute = `repos/${config.repo}`;
 
@@ -283,6 +292,15 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     return { ...head.issue, comments: comments.items, droppedUntrustedComments: comments.dropped };
   }
 
+  /**
+   * Moves a Ready item to In progress, unless a PR or a `claude/` branch for it exists. Read, then write.
+   *
+   * What the workflow (#629) must do with the answer: carry on when `proceed` is true, never when only `claimed` is
+   * false. A retry of a claim that already moved the item (the worker died before the result was recorded) reads In
+   * progress and answers `claimed: false, reason: 'already_in_progress', proceed: true`. Ownership is not decided
+   * here: two concurrent claims can both answer `claimed: true`. The workflow ID decides it, so #629 must start one
+   * workflow per issue with a deterministic ID (from the issue number) and a reuse policy that rejects duplicates.
+   */
   async function claimIssue(raw: unknown): Promise<ClaimResult> {
     const issue = parseIssueNumber(raw, 'issue');
     const lookup = await boardLookup(issue);
@@ -290,23 +308,23 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
       throw new GithubRefusal('InvalidState', `issue #${issue} is not on the board`);
     }
     if (lookup.status === 'In progress') {
-      return { claimed: false, reason: 'already_in_progress' };
+      return { claimed: false, reason: 'already_in_progress', proceed: true };
     }
     if (lookup.status === 'In review' || lookup.status === 'Done') {
-      return { claimed: false, reason: 'already_past_in_progress' };
+      return { claimed: false, reason: 'already_past_in_progress', proceed: false };
     }
     if (lookup.status !== 'Ready') {
       // Backlog to anything is the maintainer's move, and so is an item with no status.
       throw new GithubRefusal('InvalidState', `issue #${issue} is not Ready (${lookup.status ?? 'no status'}), so it is not claimed`);
     }
     if ((await openPrsFor(issue)).length > 0) {
-      return { claimed: false, reason: 'open_pr' };
+      return { claimed: false, reason: 'open_pr', proceed: false };
     }
     if ((await claudeBranchesFor(issue)).length > 0) {
-      return { claimed: false, reason: 'claude_branch' };
+      return { claimed: false, reason: 'claude_branch', proceed: false };
     }
     await moveTo(issue, 'In progress');
-    return { claimed: true, reason: 'claimed' };
+    return { claimed: true, reason: 'claimed', proceed: true };
   }
 
   async function setStatus(rawIssue: unknown, rawStatus: unknown): Promise<SetStatusResult> {
@@ -316,11 +334,17 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     if (!lookup.onBoard) {
       throw new GithubRefusal('InvalidState', `issue #${issue} is not on the board`);
     }
-    if (lookup.status === undefined || lookup.status === 'Backlog') {
-      throw new GithubRefusal('InvalidState', `issue #${issue} is ${lookup.status ?? 'without a status'}, and only a maintainer moves it out`);
-    }
     if (lookup.status === status) {
       return { changed: false, status };
+    }
+    // Only the forward steps after a claim. Ready is claimIssue's (its PR and branch checks must not be skipped),
+    // Backlog is the maintainer's, and nothing moves back out of Done.
+    const allowed = lookup.status === undefined ? undefined : ALLOWED_MOVES.get(lookup.status);
+    if (allowed !== status) {
+      throw new GithubRefusal(
+        'InvalidState',
+        `issue #${issue} is ${lookup.status ?? 'without a status'}; setStatus allows only ${ALLOWED_MOVES_TEXT} (claimIssue claims a Ready item)`,
+      );
     }
     await moveTo(issue, status);
     return { changed: true, status };
@@ -387,7 +411,7 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
       throw new GithubRefusal('NotFound', `pull request #${number} does not exist`);
     }
     const reviewsOnHead = facts.reviews.filter(
-      (review) => review.trusted && review.commitOid === facts.headSha && review.body.trim().length > 0,
+      (review) => COUNTED_REVIEW_STATES.has(review.state) && review.trusted && review.commitOid === facts.headSha && review.body.trim().length > 0,
     ).length;
     return {
       headSha: facts.headSha,
@@ -397,23 +421,33 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     };
   }
 
-  const guard = <Args extends unknown[], Result>(work: (...args: Args) => Promise<Result>) =>
+  return { listReadyIssues, readIssue, claimIssue, setStatus, openPr, postReview, getGateStatus };
+}
+
+/**
+ * The activities. Give each of them `GITHUB_ACTIVITY_TIMEOUTS` (src/gh-config.ts) in the workflow: one attempt can
+ * wait out up to three rate limits of ten minutes each.
+ */
+export function createGithubActivities(config: GhConfig, deps: GhDeps = activityDeps) {
+  /** One fresh `gh` wrapper per attempt, and every failure mapped to a Temporal failure. */
+  const activity =
+    <Args extends unknown[], Result>(run: (ops: ReturnType<typeof operations>, ...args: Args) => Promise<Result>) =>
     async (...args: Args): Promise<Result> => {
       try {
-        return await work(...args);
+        return await run(operations(config, new GhCli(config, deps)), ...args);
       } catch (error) {
         throw toFailure(error);
       }
     };
 
   return {
-    listReadyIssues: guard(listReadyIssues),
-    readIssue: guard((issue: number) => readIssue(issue)),
-    claimIssue: guard((issue: number) => claimIssue(issue)),
-    setStatus: guard((issue: number, status: SettableStatus) => setStatus(issue, status)),
-    openPr: guard((input: OpenPrInput) => openPr(input)),
-    postReview: guard((input: PostReviewInput) => postReview(input)),
-    getGateStatus: guard((pr: number) => getGateStatus(pr)),
+    listReadyIssues: activity((ops) => ops.listReadyIssues()),
+    readIssue: activity((ops, issue: number) => ops.readIssue(issue)),
+    claimIssue: activity((ops, issue: number) => ops.claimIssue(issue)),
+    setStatus: activity((ops, issue: number, status: SettableStatus) => ops.setStatus(issue, status)),
+    openPr: activity((ops, input: OpenPrInput) => ops.openPr(input)),
+    postReview: activity((ops, input: PostReviewInput) => ops.postReview(input)),
+    getGateStatus: activity((ops, pr: number) => ops.getGateStatus(pr)),
   };
 }
 
