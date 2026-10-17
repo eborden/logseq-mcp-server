@@ -7,7 +7,7 @@
 // never read, copied or returned. The filter lives here, inside the listing parse, so no caller can forget it.
 
 import { GhError } from './gh.ts';
-import type { BoardStatus, IssueComment, IssueView, ItemKind } from './types.ts';
+import type { BoardStatus, IssueComment, IssueView, ItemKind, ReviewThread } from './types.ts';
 
 type Obj = ReadonlyMap<string, unknown>;
 
@@ -386,4 +386,68 @@ export function parseGate(data: unknown): GateFacts | undefined {
     (element, index) => !bool(obj(element, what, `$...reviewThreads.nodes[${index}]`), 'isResolved', what, `$...reviewThreads.nodes[${index}]`),
   ).length;
   return { headSha, reviews: reviewFacts, unresolvedThreads };
+}
+
+// ---- review threads (#630) ------------------------------------------------------------------------------------
+
+const THREAD_PAGE = 100;
+const THREAD_COMMENT_PAGE = 30;
+const THREAD_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+/**
+ * The unresolved review threads of a PR. The text of a comment by an author who is not an OWNER, MEMBER or COLLABORATOR
+ * is never read: that comment keeps its id and `trusted: false`, with an empty body. A list or a thread with more
+ * entries than one page reads fails instead of being cut, because a reply or a brief made from part of a thread could
+ * miss the comment that matters.
+ */
+export function parseReviewThreads(data: unknown): ReviewThread[] | undefined {
+  const what = 'review threads';
+  const repository = obj(obj(data, what, '$').get('repository'), what, '$.repository');
+  const prRaw = repository.get('pullRequest');
+  if (prRaw === null) {
+    return undefined;
+  }
+  const threads = obj(obj(prRaw, what, '$.repository.pullRequest').get('reviewThreads'), what, '$...reviewThreads');
+  if (bool(obj(threads.get('pageInfo'), what, '$...reviewThreads.pageInfo'), 'hasNextPage', what, '$...reviewThreads.pageInfo')) {
+    throw new GhError(`${what}: the PR has more than ${THREAD_PAGE} review threads`, 'output_too_large');
+  }
+  const result: ReviewThread[] = [];
+  list(threads.get('nodes'), what, '$...reviewThreads.nodes').forEach((element, index) => {
+    const path = `$...reviewThreads.nodes[${index}]`;
+    const thread = obj(element, what, path);
+    if (bool(thread, 'isResolved', what, path)) {
+      return;
+    }
+    const id = str(thread, 'id', what, path);
+    if (!THREAD_ID.test(id)) {
+      mismatch(what, `${path}.id`);
+    }
+    const comments = obj(thread.get('comments'), what, `${path}.comments`);
+    if (bool(obj(comments.get('pageInfo'), what, `${path}.comments.pageInfo`), 'hasNextPage', what, `${path}.comments.pageInfo`)) {
+      throw new GhError(`${what}: a thread has more than ${THREAD_COMMENT_PAGE} comments`, 'output_too_large');
+    }
+    const parsed = list(comments.get('nodes'), what, `${path}.comments.nodes`).map((raw, at) => {
+      const commentPath = `${path}.comments.nodes[${at}]`;
+      const comment = obj(raw, what, commentPath);
+      const trusted = isTrustedAssociation(comment.get('authorAssociation'));
+      return {
+        id: int(comment, 'databaseId', what, commentPath),
+        trusted,
+        body: trusted ? strOrEmpty(comment, 'body', what, commentPath) : '',
+      };
+    });
+    const first = parsed[0];
+    if (first === undefined) {
+      mismatch(what, `${path}.comments.nodes`);
+    }
+    const line = thread.get('line');
+    result.push({
+      id,
+      path: strOrEmpty(thread, 'path', what, path),
+      line: typeof line === 'number' && Number.isSafeInteger(line) && line >= 0 ? line : null,
+      trusted: first.trusted,
+      comments: parsed,
+    });
+  });
+  return result;
 }

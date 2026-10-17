@@ -39,6 +39,7 @@ import {
   parseOpenPr,
   parseRefName,
   parseReview,
+  parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
 import type {
@@ -58,7 +59,10 @@ import type {
   PostReviewInput,
   PostReviewResult,
   ReadyIssues,
+  ReplyToThreadInput,
+  ReplyToThreadResult,
   ReviewComment,
+  ReviewThread,
   SetStatusResult,
   SettableStatus,
 } from '../types.ts';
@@ -267,6 +271,24 @@ const GATE_QUERY =
   'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){' +
   'headRefOid reviews(first:100){pageInfo{hasNextPage} nodes{state body authorAssociation commit{oid}}} ' +
   'reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved}}}}}';
+
+// The unresolved threads with their comments, read only (#630). Not the merge gate's query: this one carries text.
+const THREADS_QUERY =
+  'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){' +
+  'reviewThreads(first:100){pageInfo{hasNextPage} nodes{id isResolved path line ' +
+  'comments(first:30){pageInfo{hasNextPage} nodes{databaseId authorAssociation body}}}}}}}';
+
+const THREAD_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+function parseReplyInput(raw: unknown): ReplyToThreadInput {
+  const input = inputObject(raw, 'replyToThread input');
+  return {
+    pr: parseIssueNumber(input.get('pr'), 'pr'),
+    threadId: inputText(input, 'threadId', THREAD_ID, 80),
+    key: inputText(input, 'key', KEY, 100),
+    body: inputText(input, 'body', undefined, MAX_TEXT_CHARS),
+  };
+}
 
 function splitRepo(repo: string): { owner: string; name: string } {
   const [owner = '', name = ''] = repo.split('/');
@@ -626,7 +648,51 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     };
   }
 
-  return { listReadyIssues, readIssue, checkIssue, commentIssue, claimIssue, addToBoard, getBoardStatus, setStatus, openPr, postReview, getGateStatus };
+  /** The unresolved review threads of a PR. Text of an untrusted author is not read (parseReviewThreads). */
+  async function listReviewThreads(raw: unknown): Promise<ReviewThread[]> {
+    const number = parseIssueNumber(raw, 'pr');
+    const threads = parseReviewThreads(await gh.graphql(THREADS_QUERY, { owner, name, number }));
+    if (threads === undefined) {
+      throw new GithubRefusal('NotFound', `pull request #${number} does not exist`);
+    }
+    return threads;
+  }
+
+  /**
+   * Replies in a review thread once. The body carries a hidden marker with the idempotency key, and a retry looks for
+   * it in the thread's comments first. A thread that is no longer open gets no reply (`posted: false`). Nothing here
+   * resolves a thread, and the reply is a comment, never a review state.
+   */
+  async function replyToThread(raw: unknown): Promise<ReplyToThreadResult> {
+    const input = parseReplyInput(raw);
+    const marker = `<!-- orchestrator-reply:${input.key} -->`;
+    const thread = (await listReviewThreads(input.pr)).find((candidate) => candidate.id === input.threadId);
+    const first = thread?.comments[0];
+    if (thread === undefined || first === undefined || thread.comments.some((comment) => comment.trusted && comment.body.includes(marker))) {
+      return { posted: false };
+    }
+    await gh.api(`${repoRoute}/pulls/${input.pr}/comments/${first.id}/replies`, {
+      method: 'POST',
+      body: { body: `${input.body}\n\n${marker}` },
+    });
+    return { posted: true };
+  }
+
+  return {
+    listReadyIssues,
+    readIssue,
+    checkIssue,
+    commentIssue,
+    claimIssue,
+    addToBoard,
+    getBoardStatus,
+    setStatus,
+    openPr,
+    postReview,
+    getGateStatus,
+    listReviewThreads,
+    replyToThread,
+  };
 }
 
 /**
@@ -657,6 +723,8 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     openPr: activity((ops, input: OpenPrInput) => ops.openPr(input)),
     postReview: activity((ops, input: PostReviewInput) => ops.postReview(input)),
     getGateStatus: activity((ops, pr: number) => ops.getGateStatus(pr)),
+    listReviewThreads: activity((ops, pr: number) => ops.listReviewThreads(pr)),
+    replyToThread: activity((ops, input: ReplyToThreadInput) => ops.replyToThread(input)),
   };
 }
 

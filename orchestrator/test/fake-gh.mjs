@@ -6,6 +6,8 @@
 // State (JSON, rewritten after each call) holds the raw shapes GitHub answers with, so the activities' parsers see
 // realistic input: `board`, `issues`, `comments`, `blockedBy`, `pulls`, `refs`, `reviews`, `gate`, `rateLimit` (and `addStatus`, the Status
 // `gh project item-add` gives a new item, Backlog when unset; `addStatusAfterReads: n` gives it only after n board reads). A board entry of `type: 'PullRequest'` is a PR's item.
+// `threads` (review threads by PR, raw nodes), `dynamicGate` (compute the gate from `reviews`, `threads` and `heads`): the review loop's (#630).
+// A review POST starts one unresolved thread per inline comment, and a reply POST appends to its thread.
 // Every call is appended to `<state>.calls.jsonl` as { argv, stdin }, which is what the tests assert on.
 // `faults` is a queue of canned answers: the first fault whose `match` is a substring of the joined argv and that
 // still has `times` left (after `skip` calls let through) is answered instead of the real handler (rate limits, malformed output, HTTP errors, a hang
@@ -186,6 +188,38 @@ if (argv[0] === 'api') {
       }
       send(200, { data: { repository: { [key]: { projectItems: { pageInfo: { hasNextPage: false }, nodes } } } } });
     }
+    if (query.includes('databaseId')) {
+      // The thread list of the review loop (#630): `state.threads[<pr>]` holds raw GitHub nodes.
+      if (!state.pulls.some((pr) => pr.number === number) && state.threads?.[number] === undefined) {
+        notFound('pullRequest');
+      }
+      const nodes = (state.threads?.[number] ?? []).map((thread) => ({
+        ...thread,
+        comments: { pageInfo: { hasNextPage: false }, nodes: thread.comments },
+      }));
+      send(200, { data: { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false }, nodes } } } } });
+    }
+    if (query.includes('reviewThreads') && state.dynamicGate) {
+      // The gate computed from the reviews and threads the fake holds: the head is `state.heads[<pr>]`, or the commit
+      // of the latest review. Reviews and threads are what the tests and the review POST below put in the state.
+      const reviews = state.reviews[number] ?? [];
+      const headRefOid = state.heads?.[number] ?? reviews.at(-1)?.commit_id ?? 'a'.repeat(40);
+      const threads = state.threads?.[number] ?? [];
+      send(200, {
+        data: {
+          repository: {
+            pullRequest: {
+              headRefOid,
+              reviews: {
+                pageInfo: { hasNextPage: false },
+                nodes: reviews.map((review) => ({ state: 'COMMENTED', body: review.body, authorAssociation: review.author_association, commit: { oid: review.commit_id } })),
+              },
+              reviewThreads: { pageInfo: { hasNextPage: false }, nodes: threads.map((thread) => ({ isResolved: thread.isResolved })) },
+            },
+          },
+        },
+      });
+    }
     if (query.includes('reviewThreads')) {
       if (state.gate[number] === undefined) {
         notFound('pullRequest');
@@ -245,14 +279,29 @@ if (argv[0] === 'api') {
     save();
     send(201, pr);
   }
+  if ((match = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/comments\/(\d+)\/replies$/.exec(path)) && method === 'POST') {
+    const thread = (state.threads?.[match[1]] ?? []).find((candidate) => candidate.comments.some((comment) => comment.databaseId === Number(match[2])));
+    if (thread === undefined) {
+      respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 });
+    }
+    thread.comments.push({ databaseId: thread.comments.at(-1).databaseId + 1, authorAssociation: 'OWNER', body: JSON.parse(stdin).body });
+    save();
+    send(201, { id: thread.comments.at(-1).databaseId });
+  }
   if ((match = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/reviews$/.exec(path))) {
     const reviews = (state.reviews[match[1]] ??= []);
     if (method === 'GET') {
       send(200, page(reviews, params));
     }
     const sent = JSON.parse(stdin);
-    const review = { id: 5000 + reviews.length + 1, body: sent.body, author_association: 'OWNER', commit_id: sent.commit_id };
+    const review = { id: 5000 + reviews.length + 1, body: sent.body, author_association: 'OWNER', commit_id: sent.commit_id, event: sent.event, comments: sent.comments ?? [] };
     reviews.push(review);
+    // Like GitHub: each inline comment of a review starts an unresolved thread.
+    const threads = ((state.threads ??= {})[match[1]] ??= []);
+    for (const comment of review.comments) {
+      const id = `PRRT_${match[1]}_${threads.length + 1}`;
+      threads.push({ id, isResolved: false, path: comment.path, line: comment.line, comments: [{ databaseId: 7000 + threads.length * 100 + 1, authorAssociation: 'OWNER', body: comment.body }] });
+    }
     save();
     send(200, review);
   }
