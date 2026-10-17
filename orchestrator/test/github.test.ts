@@ -4,7 +4,7 @@
 // out of Backlog or into Ready.
 
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -12,7 +12,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ApplicationFailure } from '@temporalio/activity';
 import { MockActivityEnvironment } from '@temporalio/testing';
 import { createGithubActivities } from '../src/activities/github.ts';
+import { BOARD_ACTIVITY_OPTIONS } from '../src/board-policy.ts';
 import { GITHUB_ACTIVITY_TIMEOUTS } from '../src/gh-config.ts';
+import { GITHUB_ACTIVITY_MAX_ATTEMPTS, GITHUB_ACTIVITY_OPTIONS } from '../src/github-policy.ts';
 import {
   NOW_MS,
   createFake,
@@ -807,6 +809,20 @@ test('the start-to-close timeout for these activities outlasts three ten-minute 
   const minutes = Number.parseInt(GITHUB_ACTIVITY_TIMEOUTS.startToCloseTimeout, 10);
   assert.ok(minutes > 30, 'three waits of ten minutes, plus the requests');
   assert.equal(GITHUB_ACTIVITY_TIMEOUTS.heartbeatTimeout, '2 minutes');
+});
+
+test('the policy file for workflow code: the same timeouts, bounded attempts, and nothing imported from Node or config', async () => {
+  assert.equal(GITHUB_ACTIVITY_OPTIONS.startToCloseTimeout, GITHUB_ACTIVITY_TIMEOUTS.startToCloseTimeout);
+  assert.equal(GITHUB_ACTIVITY_OPTIONS.heartbeatTimeout, '2 minutes');
+  assert.equal(GITHUB_ACTIVITY_OPTIONS.retry?.maximumAttempts, GITHUB_ACTIVITY_MAX_ATTEMPTS);
+  assert.ok(GITHUB_ACTIVITY_MAX_ATTEMPTS >= 1 && GITHUB_ACTIVITY_MAX_ATTEMPTS <= 10, 'not Temporal\'s unlimited default');
+  assert.equal(BOARD_ACTIVITY_OPTIONS.startToCloseTimeout, GITHUB_ACTIVITY_OPTIONS.startToCloseTimeout);
+  for (const type of ['InvalidInput', 'InvalidState', 'NotFound', 'UntrustedAuthor', 'GitHubClientError']) {
+    assert.ok(GITHUB_ACTIVITY_OPTIONS.retry?.nonRetryableErrorTypes?.includes(type), type);
+  }
+  const source = await readFile(new URL('../src/github-policy.ts', import.meta.url), 'utf8');
+  const imports = [...source.matchAll(/^import .* from '([^']+)';$/gm)].map((match) => match[1]);
+  assert.deepEqual(imports, ['@temporalio/workflow'], 'workflow code imports it, so it may import nothing from node: or config.ts');
 });
 
 test('a missing issue is a non-retryable NotFound and a server error stays retryable', async () => {
