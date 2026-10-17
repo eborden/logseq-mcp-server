@@ -2,7 +2,7 @@
 // SIGINT and SIGTERM shut it down gracefully; a SIGKILL is a crash, which is what the crash test relies on.
 //
 // Activities registered: `hello` (the engine check of #626, kept on purpose: `npm run run-hello` and the crash test
-// use it), `runClaudeSession` (#627), the GitHub activities (#628, #635, #629), `guardBranch` and `pushBranch` (the only push) and `runImplementerSession` (#629).
+// use it), `runClaudeSession` (#627), the GitHub activities (#628, #635, #629), `guardBranch` and `pushBranch` (the only push) `runImplementerSession` (#629), and the review activities (#630: a fresh reviewer, a fixer, the posting of their output).
 // Their settings are read once here, from the environment, and a bad value stops the worker before it polls.
 
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,7 @@ import { createClaudeSessionActivities } from './activities/claude-session.ts';
 import { createGithubActivities } from './activities/github.ts';
 import * as hello from './activities/hello.ts';
 import { createImplementerActivities } from './activities/implementer.ts';
+import { createReviewActivities } from './activities/review.ts';
 import { loadClaudeConfig, loadConfig } from './config.ts';
 import { loadGhConfig } from './gh-config.ts';
 
@@ -27,6 +28,14 @@ async function main(): Promise<void> {
     runClaudeSession: claude.runClaudeSession,
     repo: ghConfig.repo,
   });
+  const review = createReviewActivities({
+    readIssue: github.readIssue,
+    listReviewThreads: github.listReviewThreads,
+    replyToThread: github.replyToThread,
+    postReview: github.postReview,
+    repo: ghConfig.repo,
+    claude: claudeConfig,
+  });
 
   const connection = await NativeConnection.connect({ address: config.address });
   const worker = await Worker.create({
@@ -34,7 +43,7 @@ async function main(): Promise<void> {
     namespace: config.namespace,
     taskQueue: config.taskQueue,
     workflowsPath: fileURLToPath(new URL('./workflows/index.ts', import.meta.url)),
-    activities: { ...hello, ...claude, ...github, ...branches, ...implementer },
+    activities: { ...hello, ...claude, ...github, ...branches, ...implementer, ...review },
   });
 
   const shutdown = (): void => worker.shutdown();
