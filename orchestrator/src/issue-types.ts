@@ -19,14 +19,24 @@ export function issueBranch(issueNumber: number): string {
   return `claude/${issueNumber}`;
 }
 
-/** The longest the whole run may take. The client sets it as the workflow execution timeout. */
-export const ISSUE_RUN_TIMEOUT = '8 hours';
+/**
+ * The longest the whole run may take. The client sets it as the workflow execution timeout. The work to an open PR
+ * and its review loop are bounded at 8 hours; the maintainer's decision and the merge after it each get at most
+ * MAX_DECISION_TIMEOUT_MS (10 days, #631), so 21 days covers the longest run the input can ask for.
+ */
+export const ISSUE_RUN_TIMEOUT = '21 days';
 /** The longest any one step may take, retries included (`scheduleToCloseTimeout` of its activities). */
 export const ISSUE_STEP_TIMEOUT = '2 hours';
 /** How many times the workflow reads the board to confirm an item shows a Status it was just given, and the wait between. */
 export const BOARD_CONFIRM_READS = 3;
 export const BOARD_CONFIRM_WAIT = '5 seconds';
 
+import {
+  MAX_DECISION_POLL_MS,
+  MAX_DECISION_TIMEOUT_MS,
+  MIN_DECISION_POLL_MS,
+  MIN_DECISION_TIMEOUT_MS,
+} from './approval-types.ts';
 import { MAX_FIX_ROUNDS_LIMIT, MAX_REVIEW_LOOP_TIMEOUT_MS, MIN_REVIEW_LOOP_TIMEOUT_MS } from './review-policy.ts';
 
 export interface IssueWorkflowInput {
@@ -41,6 +51,15 @@ export interface IssueWorkflowInput {
   readonly maxFixRounds?: number;
   /** The longest the review loop may take, in milliseconds. Absent means DEFAULT_REVIEW_LOOP_TIMEOUT_MS. */
   readonly reviewLoopTimeoutMs?: number;
+  /**
+   * False ends the run where #630 ended it: at the gate, with no wait for the maintainer. Absent means true: the run
+   * waits for the `maintainerDecision` signal (#631). The tests of the review loop use false.
+   */
+  readonly awaitDecision?: boolean;
+  /** The longest the run waits for the decision, and again for the merge, in milliseconds. Absent means DEFAULT_DECISION_TIMEOUT_MS. */
+  readonly decisionTimeoutMs?: number;
+  /** How often the run reads GitHub while it waits, in milliseconds. Absent means DEFAULT_DECISION_POLL_MS. */
+  readonly decisionPollMs?: number;
 }
 
 export class InvalidIssueInputError extends Error {
@@ -77,6 +96,12 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
   }
   const maxFixRounds = optionalWholeNumber(raw, 'maxFixRounds', 1, MAX_FIX_ROUNDS_LIMIT);
   const reviewLoopTimeoutMs = optionalWholeNumber(raw, 'reviewLoopTimeoutMs', MIN_REVIEW_LOOP_TIMEOUT_MS, MAX_REVIEW_LOOP_TIMEOUT_MS);
+  const decisionTimeoutMs = optionalWholeNumber(raw, 'decisionTimeoutMs', MIN_DECISION_TIMEOUT_MS, MAX_DECISION_TIMEOUT_MS);
+  const decisionPollMs = optionalWholeNumber(raw, 'decisionPollMs', MIN_DECISION_POLL_MS, MAX_DECISION_POLL_MS);
+  const awaitDecision: unknown = 'awaitDecision' in raw ? raw.awaitDecision : undefined;
+  if (awaitDecision !== undefined && typeof awaitDecision !== 'boolean') {
+    throw new InvalidIssueInputError('awaitDecision must be true or false');
+  }
   return {
     issueNumber,
     repoDir: absolutePath('repoDir', repoDir),
@@ -84,6 +109,9 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
     base,
     ...(maxFixRounds === undefined ? {} : { maxFixRounds }),
     ...(reviewLoopTimeoutMs === undefined ? {} : { reviewLoopTimeoutMs }),
+    ...(awaitDecision === undefined ? {} : { awaitDecision }),
+    ...(decisionTimeoutMs === undefined ? {} : { decisionTimeoutMs }),
+    ...(decisionPollMs === undefined ? {} : { decisionPollMs }),
   };
 }
 
@@ -134,7 +162,29 @@ export type IssueRunResult =
       readonly advisory: number;
       readonly advisoryOmitted: number;
     }
-  | { readonly outcome: 'skipped'; readonly issueNumber: number; readonly reason: SkipReason };
+  | { readonly outcome: 'skipped'; readonly issueNumber: number; readonly reason: SkipReason }
+  /** The maintainer asked for changes (#631). The run commented and stopped; nothing else moved. */
+  | {
+      readonly outcome: 'changes_requested';
+      readonly issueNumber: number;
+      readonly pr: number;
+      readonly headSha: string;
+      readonly ignoredSignals: number;
+    }
+  /** No decision came in time (#631), or the gate never cleared. The run commented on the PR and stopped. Never an approval. */
+  | { readonly outcome: 'decision_timeout'; readonly issueNumber: number; readonly pr: number; readonly headSha: string; readonly ignoredSignals: number }
+  /** The maintainer approved, the PR was merged by them, and the run moved the PR and the issue to Done and checked the issue is closed (#631). */
+  | {
+      readonly outcome: 'merged';
+      readonly issueNumber: number;
+      readonly pr: number;
+      readonly headSha: string;
+      /** True when the issue was still open after the PR merged and the run closed it. */
+      readonly issueClosedByRun: boolean;
+      readonly ignoredSignals: number;
+    }
+  /** The maintainer approved and the PR did not merge in time (#631). Nothing was moved to Done. */
+  | { readonly outcome: 'merge_timeout'; readonly issueNumber: number; readonly pr: number; readonly headSha: string; readonly ignoredSignals: number };
 
 /** The steps a run can stop at. Part of the failure comment and of the failure the run ends with. */
 export type IssueStep =
@@ -155,7 +205,12 @@ export type IssueStep =
   | 'fix_guard'
   | 'fix_push'
   | 'fix_reply'
-  | 'review_loop';
+  | 'review_loop'
+  | 'decision_gate'
+  | 'decision_comment'
+  | 'merge_wait'
+  | 'board_done'
+  | 'issue_close';
 
 /**
  * The key of the comment a stop leaves: the step and the reason, both identifiers. With the reason in it, a restarted

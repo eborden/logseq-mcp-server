@@ -21,8 +21,10 @@
 //   open_pr      openPr
 //   board_pr     addToBoard, setStatus In review, getBoardStatus: the PR is In review with no manual step
 //   board_issue  setStatus In review for the issue, getBoardStatus
-//   review loop  the second half, in review-loop.ts (#630): reviews, a bounded fix loop and the gate. The run ends at
-//                "gate clear, waiting for the maintainer", or at "waiting for threads to be resolved by the maintainer".
+//   review loop  the second half, in review-loop.ts (#630): reviews, a bounded fix loop and the gate.
+//   decision     the third part, in decision.ts (#631): the `maintainerDecision` signal, held until the gate is clear,
+//                the decision comment, then the merge the maintainer makes, Done, and the issue's closed check.
+//                `awaitDecision: false` ends the run after the review loop, as #630 did.
 // It never merges, never labels, never resolves a thread and never moves an item to Ready or Backlog.
 
 import {
@@ -32,6 +34,7 @@ import {
   TimeoutFailure,
   isCancellation,
   proxyActivities,
+  setHandler,
   sleep,
 } from '@temporalio/workflow';
 import type { GithubActivities } from '../activities/github.ts';
@@ -42,6 +45,8 @@ import { IMPLEMENTER_ACTIVITY_OPTIONS } from '../claude-session-policy.ts';
 import { BRANCH_ACTIVITY_OPTIONS } from '../branch-types.ts';
 import { GITHUB_ACTIVITY_OPTIONS } from '../github-policy.ts';
 import { DEFAULT_REVIEW_LOOP_TIMEOUT_MS } from '../review-policy.ts';
+import { maintainerDecisionSignal } from '../approval-types.ts';
+import { createDecisionInbox, decisionStage } from './decision.ts';
 import { reviewLoop } from './review-loop.ts';
 import {
   BOARD_CONFIRM_READS,
@@ -105,6 +110,10 @@ function failureReason(error: unknown): StopReason {
 }
 
 export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> {
+  // Registered before the first await, so a decision signalled early is kept (held until the gate clears, #631).
+  const inbox = createDecisionInbox();
+  setHandler(maintainerDecisionSignal, inbox.receive);
+
   let input;
   try {
     input = parseIssueWorkflowInput(rawInput);
@@ -209,8 +218,9 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
     },
     () => undefined,
   );
+  let looped: IssueRunResult;
   try {
-    return await loopScope.run(() => reviewLoop({ input, pr: opened.number, branch, headSha: checked.headSha, step, stop }));
+    looped = await loopScope.run(() => reviewLoop({ input, pr: opened.number, branch, headSha: checked.headSha, step, stop }));
   } catch (error) {
     if (timedOut && isCancellation(error)) {
       return await CancellationScope.nonCancellable(() => stop('review_loop', 'ReviewLoopTimeout'));
@@ -219,4 +229,9 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   } finally {
     timerScope.cancel();
   }
+  // The third part (#631): wait for the maintainer's decision, then the merge. `awaitDecision: false` ends the run here.
+  if (input.awaitDecision === false) {
+    return looped;
+  }
+  return await decisionStage({ input, pr: opened.number, inbox, step, stop });
 }
