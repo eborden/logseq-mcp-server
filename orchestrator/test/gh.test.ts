@@ -211,6 +211,47 @@ test('arguments go to gh as an argv array: shell characters in them are never in
   await assert.rejects(access(marker), { code: 'ENOENT' });
 });
 
+test('an error message never carries the stderr text, which can echo what the call sent', async () => {
+  const state = emptyState();
+  state.faults = [
+    {
+      match: 'issues/123',
+      times: 1,
+      stdout: httpAnswer(422, { message: 'x' }),
+      stderr: 'gh: Validation Failed: head claude/123-SECRET-BRANCH is invalid (HTTP 422)\n',
+      exit: 1,
+    },
+  ];
+  const fake = await createFake(dir, 'no-stderr', state);
+
+  await assert.rejects(new GhCli(fake.config, recordedSleep()).api(ISSUE_ROUTE), (error: unknown) => {
+    assert.ok(error instanceof GhError);
+    assert.equal(error.httpStatus, 422);
+    assert.match(error.message, /gh api failed \(exit 1, HTTP 422\)/);
+    assert.ok(!error.message.includes('SECRET-BRANCH'));
+    return true;
+  });
+});
+
+test('the wait budget belongs to one wrapper (one attempt): a second call inherits what the first used', async () => {
+  const state = emptyState();
+  state.issues['123'] = rawIssue(123);
+  state.faults = [
+    { ...secondaryFault(0), match: 'a=1', times: 2 },
+    { ...secondaryFault(0), match: 'b=1', times: 9 },
+  ];
+  const fake = await createFake(dir, 'budget', state);
+  const clock = recordedSleep();
+  const cli = new GhCli(fake.config, clock);
+
+  await cli.api(`${ISSUE_ROUTE}?a=1`); // two waits, then it works
+  await assert.rejects(
+    cli.api(`${ISSUE_ROUTE}?b=1`), // one wait left, and the doubling carries on
+    (error: unknown) => error instanceof GhError && error.kind === 'rate_limit_exhausted',
+  );
+  assert.deepEqual(clock.waits, [60_000, 120_000, 240_000]);
+});
+
 test('a gh that hangs is killed at the timeout', async () => {
   const state = emptyState();
   state.faults = [{ match: 'item-list', times: 1, delayMs: 3000 }];

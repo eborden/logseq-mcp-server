@@ -11,6 +11,7 @@
 //   least a minute, doubling on each repeat. Nothing here retries in a tight loop.
 // - A wait longer than `maxWaitMs`, or more waits than `maxWaits`, fails the call with a clear message instead of
 //   sleeping. The caller (the workflow's retry policy) decides what happens next.
+// One GhCli is one attempt of one activity: its waits are counted over all its calls (see `waits`).
 // Only a rate-limited call is retried here, and only after its wait. A rate-limited request was rejected, so
 // repeating it cannot apply it twice. Any other failure propagates, and the activity's own retry policy and
 // idempotent re-check handle it.
@@ -119,11 +120,6 @@ export function classifyRateLimit(stdout: string, stderr: string): RateLimitSign
   return undefined;
 }
 
-function firstLine(text: string): string {
-  const line = text.split(/\r?\n/).find((candidate) => candidate.trim() !== '') ?? '';
-  return line.trim().slice(0, 200);
-}
-
 function parseJson(text: string, what: string): unknown {
   try {
     return JSON.parse(text);
@@ -154,6 +150,11 @@ export interface ApiOptions {
 export class GhCli {
   readonly config: GhConfig;
   private readonly deps: GhDeps;
+  /**
+   * Rate-limit waits made so far. They count over the whole life of this instance, not per call, so one instance
+   * (the activities make one per attempt) never waits more than `maxWaits` times in all, and the doubling carries on.
+   */
+  private waits = 0;
 
   constructor(config: GhConfig, deps: GhDeps = defaultGhDeps) {
     this.config = config;
@@ -211,7 +212,6 @@ export class GhCli {
 
   private async exec(args: readonly string[], input: string | undefined): Promise<string> {
     const policy = this.config.rateLimit;
-    let waits = 0;
     for (;;) {
       const raw = await this.spawnOnce(args, input);
       if (raw.exitCode === 0) {
@@ -222,18 +222,19 @@ export class GhCli {
         const status =
           splitHttpResponse(raw.stdout)?.status ?? Number(/\(HTTP (\d{3})\)/.exec(raw.stderr)?.[1] ?? Number.NaN);
         throw new GhError(
-          `${describe(args)} failed (exit ${raw.exitCode ?? 'signal'}): ${firstLine(raw.stderr)}`,
+          // No stderr text: it holds GitHub's `message`, which can echo what the call sent.
+          `${describe(args)} failed (exit ${raw.exitCode ?? 'signal'}${Number.isNaN(status) ? '' : `, HTTP ${status}`})`,
           'exit',
           Number.isNaN(status) ? undefined : status,
         );
       }
-      if (waits >= policy.maxWaits) {
+      if (this.waits >= policy.maxWaits) {
         throw new GhError(
-          `${describe(args)} is still rate limited after ${waits} waits; stopping instead of polling`,
+          `${describe(args)} is still rate limited after ${this.waits} waits; stopping instead of polling`,
           'rate_limit_exhausted',
         );
       }
-      const waitMs = await this.waitFor(signal, waits);
+      const waitMs = await this.waitFor(signal, this.waits);
       if (waitMs > policy.maxWaitMs) {
         throw new GhError(
           `${describe(args)} hit a ${signal.kind} GitHub rate limit that needs a wait of about ${Math.ceil(waitMs / 60_000)} minutes, ` +
@@ -241,7 +242,7 @@ export class GhCli {
           'rate_limit_wait_too_long',
         );
       }
-      waits += 1;
+      this.waits += 1;
       await this.deps.sleep(waitMs);
     }
   }
