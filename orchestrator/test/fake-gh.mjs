@@ -238,6 +238,28 @@ if (argv[0] === 'api') {
     const issue = state.issues[match[1]] ?? (pr === undefined ? undefined : { number: pr.number, author_association: pr.author_association, pull_request: {} });
     issue === undefined ? respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 }) : send(200, issue);
   }
+  if ((match = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(path)) && method === 'PATCH') {
+    // Closing an issue (#631). `state.patchIgnored` lists the issues whose PATCH answers 200 and changes nothing.
+    const issue = state.issues[match[1]];
+    if (issue === undefined) {
+      respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 });
+    }
+    const sent = JSON.parse(stdin);
+    if (!(state.patchIgnored ?? []).includes(Number(match[1]))) {
+      issue.state = sent.state;
+      issue.state_reason = sent.state_reason;
+    }
+    save();
+    send(200, issue);
+  }
+  if ((match = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)$/.exec(path)) && method === 'GET') {
+    // A PR's state (#631): `state.prStates` by number.
+    const found = (state.prStates ?? {})[match[1]];
+    found === undefined ? respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 }) : send(200, found);
+  }
+  if ((match = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/files$/.exec(path))) {
+    send(200, page(((state.prFiles ?? {})[match[1]] ?? []).map((filename) => ({ filename })), params));
+  }
   if ((match = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(path))) {
     if (method === 'POST') {
       // Like GitHub: commenting on an issue that does not exist is a 404. The comment is by the token's own account.
