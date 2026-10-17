@@ -41,6 +41,10 @@ export interface FakeState {
   refs: { ref: string }[];
   reviews: Record<string, unknown[]>;
   gate: Record<string, unknown>;
+  /** Raw review thread nodes by PR (#630), and the switch that makes the gate follow `reviews`, `threads` and `heads`. */
+  threads?: Record<string, unknown[]>;
+  dynamicGate?: boolean;
+  heads?: Record<string, string>;
   rateLimit: unknown;
   /** The Status a newly added board item gets (the board's default). Backlog when unset. */
   addStatus?: string;
@@ -191,4 +195,16 @@ export function httpAnswer(status: number, body: unknown, headers: Record<string
     .map(([key, value]) => `${key}: ${value}`)
     .join('\r\n');
   return `HTTP/2.0 ${status} Status\r\n${head}\r\n\r\n${typeof body === 'string' ? body : JSON.stringify(body)}`;
+}
+
+/** A raw review thread node (#630): made-up names only. */
+export function rawThread(id: string, comments: { id: number; association: string | undefined; body: string }[], overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id,
+    isResolved: false,
+    path: 'src/atlas.ts',
+    line: 12,
+    comments: comments.map((comment) => ({ databaseId: comment.id, ...(comment.association === undefined ? {} : { authorAssociation: comment.association }), body: comment.body })),
+    ...overrides,
+  };
 }
