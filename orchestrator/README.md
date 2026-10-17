@@ -86,19 +86,53 @@ Temporal runs an activity at least once: a worker can die after the side effect 
 
 ## GitHub activities (#628)
 
-`src/activities/github.ts` holds the activities the workflow will call, built by `createGithubActivities(config)`: `listReadyIssues`, `readIssue`, `claimIssue`, `setStatus`, `openPr`, `postReview` and `getGateStatus`. Each is a thin wrapper over `gh` (`src/gh.ts`): one process per call, an argv array and never a shell string, a timeout (30 s) and an output cap, and an answer parsed at the boundary (`src/github-parse.ts`). A malformed answer fails with the path of the first mismatch, never a value and never a partial result.
+`src/activities/github.ts` holds the activities the workflow will call, built by `createGithubActivities(config)`: `listReadyIssues`, `readIssue`, `claimIssue`, `addToBoard`, `getBoardStatus`, `setStatus`, `openPr`, `postReview` and `getGateStatus`. Each is a thin wrapper over `gh` (`src/gh.ts`): one process per call, an argv array and never a shell string, a timeout (30 s) and an output cap, and an answer parsed at the boundary (`src/github-parse.ts`). A malformed answer fails with the path of the first mismatch, never a value and never a partial result.
 
 - **Trust.** `readIssue` drops, while listing, every comment whose `author_association` is not `OWNER`, `MEMBER` or `COLLABORATOR`, and refuses an issue written by anyone else. The same filter applies to the PRs and reviews the claim and review activities scan. A session never receives the text of a stranger.
-- **Idempotent writes.** `claimIssue` and `setStatus` read the item's Status and write only when it differs. `openPr` looks for an open PR with the same head and base first. `postReview` looks for its idempotency key (a hidden comment in the body) first. A repeat changes nothing. `setStatus` makes only the forward steps In progress to In review and In review to Done (it refuses a Ready item, which is `claimIssue`'s, a Backlog item, and any move out of Done).
+- **Idempotent writes.** `claimIssue` and `setStatus` read the item's Status and write only when it differs. `openPr` looks for an open PR with the same head and base first. `postReview` looks for its idempotency key (a hidden comment in the body) first. A repeat changes nothing. `setStatus` makes only the forward steps In progress to In review and In review to Done for an issue (it refuses a Ready item, which is `claimIssue`'s, a Backlog item, and any move out of Done), plus a PR's own first move, Backlog to In review; it reads the board back after a write and fails if the board disagrees (see "Board items for PRs (#635)" below).
 - **Gate.** `getGateStatus` runs the query of CLAUDE.md "Code review" step 5 and counts only submitted reviews (COMMENTED, APPROVED or CHANGES_REQUESTED, not a PENDING draft or a DISMISSED one) with a non-empty body, by a trusted author, on the head commit. The step 5 query itself counts a review of any state; the activity is stricter. A PR with more than 100 reviews or threads fails rather than being counted from part of its list.
 - **Rate limits.** A primary limit waits until the reset time. A secondary limit waits `Retry-After`, or at least 60 seconds, doubling on each repeat. Three waits at most per call, and a wait longer than 10 minutes fails the activity (`GitHubRateLimitTooLong`, non-retryable) instead of sleeping. The workflow must give these activities a start-to-close timeout above the longest wait.
-- **Never.** It cannot merge, apply a label (`golden-change` included), resolve a thread, or move an item into Ready or out of Backlog. `setStatus` accepts only In progress, In review and Done.
+- **Never.** It cannot merge, apply a label (`golden-change` included), resolve a thread, or move an item into Ready or out of Backlog. `setStatus` accepts only In progress, In review and Done. `addToBoard` only adds an item to the board.
 
 ### What the workflow (#629) must do with them
 
 - **The workflow ID is the claim.** `claimIssue` is read, then write, so two concurrent claims can both answer `claimed: true`, and an activity cannot see whether another workflow runs for the issue. Start one workflow per issue with a deterministic ID built from the issue number, and a reuse policy that rejects a duplicate (Temporal's `REJECT_DUPLICATE` for a closed one, and a start that fails when one is running). That, not the board, keeps two runs off one issue.
 - **Act on `proceed`, never on `claimed` alone.** If the worker dies after `claimIssue` moved the item and before its answer was recorded, the retry reads In progress and answers `claimed: false, reason: already_in_progress, proceed: true`. That means carry on. `proceed: false` (an open PR, a `claude/` branch, or an item already In review or Done) means stop.
 - **Timeouts.** Give every GitHub activity `GITHUB_ACTIVITY_TIMEOUTS` (`src/gh-config.ts`): a start-to-close of 45 minutes and a heartbeat timeout of 2 minutes. One attempt can wait out three rate limits of up to ten minutes each (the waits are counted over the whole attempt, not per request), which is 30 minutes before the requests' own time. The wait heartbeats every 5 seconds and stops when the activity is cancelled.
+
+### Board items for PRs (#635): what #629 and #631 call
+
+A PR is not on the board until something adds it, and the board puts a new item in Backlog. Three activities cover that, and none of them assumes a board write happened (foundations 4.10).
+
+| Activity | Input | Does | Answer |
+|---|---|---|---|
+| `addToBoard(target)` | an issue or PR URL of the configured repo, `{ kind: 'issue' \| 'pr', number }`, or a bare number (an issue) | Reads the board first. Adds the item only when it is not there, then reads the board again | `{ kind, number, itemId, added, status }`. `added: false` means it was already there and nothing was written, its Status included. `status` is what the board shows now (`null` for none) |
+| `getBoardStatus(target)` | the same | One read | `{ kind, number, onBoard, status }`, `status: null` when off the board or without one |
+| `setStatus(target, status)` | the same, plus In progress, In review or Done | Reads, writes only if the Status differs and the move is allowed, then reads the board again | `{ changed, status }`. Fails if the board does not show `status` afterwards |
+
+**The calls, in order.**
+
+- **After `openPr` (#629):** `addToBoard(pr.url)`, then `setStatus(pr.url, 'In review')`, then `getBoardStatus(pr.url)` and compare it with In review. `setStatus` already fails when its own read-back disagrees, and the extra `getBoardStatus` is the workflow's independent check. Then `setStatus(issueNumber, 'In review')` for the issue (In progress to In review).
+- **On merge (#631):** `setStatus(pr.url, 'Done')` and `setStatus(issueNumber, 'Done')`, then `getBoardStatus` for each. Closing the issue, if the merge did not, is #631's own step and not in these activities.
+- **Every call is safe to run again.** A repeat of the whole sequence adds and writes nothing.
+
+**A failed read-back is retryable, and bounded by the workflow.** If an add or a move exits 0 and the board does not show it, the activity fails as `BoardReadbackMismatch` (retryable). The message says what the board shows (a Status name or "no item", never a raw answer). The retry reads the board first and writes only what is still missing, so a board that was slow to show the change passes on the next attempt. Give these activities a retry policy with a maximum number of attempts, so a board that never shows it fails the step instead of looping. Do not catch `BoardReadbackMismatch` and carry on.
+
+**Which moves are allowed.** `setStatus` keys its moves by the item's current Status, once for an issue and once for a PR.
+
+| Current Status | Issue may go to | PR may go to |
+|---|---|---|
+| Backlog | nothing (Backlog to Ready is the maintainer's) | In review (the PR's own first move) |
+| Ready | nothing (`claimIssue` claims a Ready item) | nothing |
+| In progress | In review | In review |
+| In review | Done | Done |
+| Done, or no Status | nothing | nothing |
+
+The one difference is Backlog to In review, and it is for a PR only: a PR is added in Backlog and never passes through Ready or In progress, while for an issue that move would skip the maintainer's gate. Everything else is the issue rule for both: a repeat is a no-op, a skipped step (Backlog to Done), a move back and anything out of Done are refused (`InvalidState`, non-retryable), and Ready and Backlog are never a target (`InvalidInput`).
+
+**Trust.** `addToBoard` checks the item's `author_association` before it adds: an item by anyone but an OWNER, MEMBER or COLLABORATOR is refused as `UntrustedAuthor` and none of its text is read. An item that is already on the board is not checked, since nothing is written for it. `setStatus` and `getBoardStatus` never add an item: a PR that is off the board fails `setStatus` as `InvalidState`, so call `addToBoard` first.
+
+**What the board's default is not ours to set.** `addToBoard` does not set a Status. The "Backlog" a new PR shows comes from the board's own default, which this code only reads. If a board ever adds an item with no Status, `setStatus` refuses it (`InvalidState`, "without a status") and the step fails visibly rather than guessing. `claimIssue` still does not read back after its write; only `setStatus` and `addToBoard` do.
 
 Settings (all optional, read once in `src/gh-config.ts`): `ORCHESTRATOR_GH_PATH` (default `gh`), `ORCHESTRATOR_GITHUB_REPO` (`eborden/logseq-mcp-server`), `ORCHESTRATOR_PROJECT_OWNER` (`eborden`), `ORCHESTRATOR_PROJECT_NUMBER` (`1`), `ORCHESTRATOR_GH_TIMEOUT_MS` (`30000`). `npm run test:github` runs the tests against a fake `gh` (`test/fake-gh.mjs`), so it makes no GitHub call. The GitHub token is whatever `gh auth` holds, and it needs the `repo` and `project` scopes.
 
