@@ -28,6 +28,7 @@ import {
   parseBlocker,
   parseBoardItems,
   parseComment,
+  parseCreatedCommentId,
   parseCreatedPr,
   parseCreatedReviewId,
   parseGate,
@@ -46,7 +47,10 @@ import type {
   BoardStatusResult,
   BoardTarget,
   ClaimResult,
+  CommentIssueInput,
+  CommentIssueResult,
   GateStatus,
+  IssueCheck,
   IssueView,
   ItemKind,
   OpenPrInput,
@@ -201,6 +205,15 @@ function parseOpenPrInput(raw: unknown): OpenPrInput {
     head: inputText(input, 'head', HEAD, 200),
     base: inputText(input, 'base', BASE, 100),
     title: inputText(input, 'title', /^[^\r\n]+$/, 256),
+    body: inputText(input, 'body', undefined, MAX_TEXT_CHARS),
+  };
+}
+
+function parseCommentIssueInput(raw: unknown): CommentIssueInput {
+  const input = inputObject(raw, 'commentIssue input');
+  return {
+    issue: parseIssueNumber(input.get('issue'), 'issue'),
+    key: inputText(input, 'key', KEY, 100),
     body: inputText(input, 'body', undefined, MAX_TEXT_CHARS),
   };
 }
@@ -389,6 +402,20 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
   }
 
   /**
+   * The read of an issue the workflow makes before it claims one: the same trusted-only read as `readIssue`, answered
+   * as numbers and flags. The workflow records every result in its history, so the text stays out of it.
+   */
+  async function checkIssue(raw: unknown): Promise<IssueCheck> {
+    const issue = await readIssue(raw);
+    return {
+      number: issue.number,
+      open: issue.state === 'open',
+      trustedComments: issue.comments.length,
+      droppedUntrustedComments: issue.droppedUntrustedComments,
+    };
+  }
+
+  /**
    * Moves a Ready item to In progress, unless a PR or a `claude/` branch for it exists. Read, then write.
    *
    * What the workflow (#629) must do with the answer: carry on when `proceed` is true, never when only `claimed` is
@@ -561,6 +588,27 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     return { reviewId: parseCreatedReviewId(created), posted: true };
   }
 
+  /**
+   * Comments on an issue once. The body carries a hidden marker with the idempotency key, and a retry looks for it
+   * first, among the comments of trusted authors only (a stranger's comment that copies the marker cannot stop ours).
+   * It assumes this account's comments count as trusted (an OWNER, MEMBER or COLLABORATOR); for any other account the
+   * lookup would miss them and a retry could comment twice. The caller writes `body` from fixed text and identifiers.
+   */
+  async function commentIssue(raw: unknown): Promise<CommentIssueResult> {
+    const input = parseCommentIssueInput(raw);
+    const marker = `<!-- orchestrator-comment:${input.key} -->`;
+    const { items } = await listAll(`${repoRoute}/issues/${input.issue}/comments`, 'issue comments', parseComment);
+    const earlier = items.find((comment) => comment.body.includes(marker));
+    if (earlier !== undefined) {
+      return { commentId: earlier.id, posted: false };
+    }
+    const created = await gh.api(`${repoRoute}/issues/${input.issue}/comments`, {
+      method: 'POST',
+      body: { body: `${input.body}\n\n${marker}` },
+    });
+    return { commentId: parseCreatedCommentId(created), posted: true };
+  }
+
   async function getGateStatus(raw: unknown): Promise<GateStatus> {
     const number = parseIssueNumber(raw, 'pr');
     const facts = parseGate(await gh.graphql(GATE_QUERY, { owner, name, number }));
@@ -578,11 +626,11 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     };
   }
 
-  return { listReadyIssues, readIssue, claimIssue, addToBoard, getBoardStatus, setStatus, openPr, postReview, getGateStatus };
+  return { listReadyIssues, readIssue, checkIssue, commentIssue, claimIssue, addToBoard, getBoardStatus, setStatus, openPr, postReview, getGateStatus };
 }
 
 /**
- * The activities. Give each of them `GITHUB_ACTIVITY_TIMEOUTS` (src/gh-config.ts) in the workflow: one attempt can
+ * The activities. Give each of them `GITHUB_ACTIVITY_TIMEOUTS` (src/github-policy.ts) in the workflow: one attempt can
  * wait out up to three rate limits of ten minutes each.
  */
 export function createGithubActivities(config: GhConfig, deps: GhDeps = activityDeps) {
@@ -600,6 +648,8 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
   return {
     listReadyIssues: activity((ops) => ops.listReadyIssues()),
     readIssue: activity((ops, issue: number) => ops.readIssue(issue)),
+    checkIssue: activity((ops, issue: number) => ops.checkIssue(issue)),
+    commentIssue: activity((ops, input: CommentIssueInput) => ops.commentIssue(input)),
     claimIssue: activity((ops, issue: number) => ops.claimIssue(issue)),
     addToBoard: activity((ops, url: BoardTarget) => ops.addToBoard(url)),
     getBoardStatus: activity((ops, url: BoardTarget) => ops.getBoardStatus(url)),
