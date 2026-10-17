@@ -55,7 +55,7 @@ npm run test:server  # runs start-server as a child process: it must stay up, ac
 npm run test:unit    # no server needed: activity idempotency (repeat, overlap, partial line, stale lock), input parsing, workflow bundling
 ```
 
-`test:crash` and `test:server` start servers on free ports, so they do not touch `.temporal/dev.sqlite`. Both need the Temporal CLI. If the SDK cannot download it, `test:server` prints a loud SKIPPED line and reports the test as skipped; any other startup failure fails it. `test:crash` fails.
+`test:crash` and `test:server` start servers on free ports, so they do not touch `.temporal/dev.sqlite`. Both need the Temporal CLI, and both fail (never skip) when it is missing. If the SDK cannot download it, check the network (a VPN can break the download) or install the CLI and set `TEMPORAL_CLI_PATH` to it. On a failed assertion `test:server` stops its child with SIGTERM first, so the `temporal` process does not outlive the test.
 
 ## Configuration
 
