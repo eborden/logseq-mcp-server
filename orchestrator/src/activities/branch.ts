@@ -13,7 +13,8 @@ import { promisify } from 'node:util';
 import { ApplicationFailure } from '@temporalio/activity';
 import { InvalidBranchInputError, parseBranchInput } from '../branch-types.ts';
 import type { BranchInput, GuardResult, PushResult } from '../branch-types.ts';
-import { checkChangedPaths } from '../diff-guard.ts';
+import { checkBranchChanges, parseRawDiff, RawDiffError } from '../diff-guard.ts';
+import type { ChangedFile } from '../diff-guard.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -84,25 +85,42 @@ export function createBranchActivities(options: BranchActivityOptions = {}) {
     }
   }
 
+  /** The raw change list of a git command, parsed. A non-zero exit is an error the retry policy tries again. */
+  async function changes(input: BranchInput, args: readonly string[]): Promise<ChangedFile[]> {
+    const result = await git(input.repoDir, args, DIFF_TIMEOUT_MS);
+    if (result.code !== 0) {
+      throw new Error(`git ${args[0] ?? ''} failed (exit ${result.code})`);
+    }
+    try {
+      return parseRawDiff(result.stdout);
+    } catch (error) {
+      if (error instanceof RawDiffError) {
+        throw ApplicationFailure.nonRetryable(error.message, 'MalformedGitOutput');
+      }
+      throw error;
+    }
+  }
+
   async function guardBranch(raw: unknown): Promise<GuardResult> {
     const input = parseOrFail(raw);
     await requireTip(input);
-    // `--no-renames` lists both ends of a rename, so a file moved out of a protected directory is still seen.
-    // `-z` keeps odd file names exact. The base and the SHA are validated, and `--` ends the options.
-    const diff = await git(
-      input.repoDir,
-      ['diff', '--name-only', '-z', '--no-renames', `origin/${input.base}...${input.headSha}`, '--'],
-      DIFF_TIMEOUT_MS,
-    );
-    if (diff.code !== 0) {
-      throw new Error(`git diff failed (exit ${diff.code})`);
-    }
-    const paths = diff.stdout.split('\0').filter((path) => path !== '');
-    const verdict = checkChangedPaths(paths);
+    // Two ranges, and both are the ones the push is about to publish:
+    // - HISTORY, `origin/<base>..<sha>`: every commit reachable from the head and not already on the base. This is
+    //   exactly what `git push` of the branch sends, so a protected change in ANY of those commits refuses the branch,
+    //   even if a later commit undoes it.
+    // - NET, `origin/<base>...<sha>`: the merge base of the base and the head, against the head. This is the change the
+    //   PR shows, so it decides whether there is anything to push and whether it is too big. A base that moved on, or
+    //   that the branch merged or was rebased onto, adds nothing to either range that is not the session's own.
+    // `--no-renames` lists both ends of a rename, `-z` keeps odd names exact and `--raw` carries the modes. The base and
+    // the SHA are validated, and `--` ends the options. The base ref is the worktree's `origin/<base>` as the worker has
+    // it; the activity does not fetch, and a stale one can only widen HISTORY, never narrow it.
+    const history = await changes(input, ['log', '--raw', '-z', '--no-renames', '--no-abbrev', '--format=', `origin/${input.base}..${input.headSha}`, '--']);
+    const net = await changes(input, ['diff', '--raw', '-z', '--no-renames', '--no-abbrev', `origin/${input.base}...${input.headSha}`, '--']);
+    const verdict = checkBranchChanges(net, history);
     if (!verdict.ok) {
       // Counts only: the comment and the history carry no path. The paths are in the worktree for a person.
       throw ApplicationFailure.nonRetryable(
-        `the branch changes ${verdict.files} file(s), ${verdict.protectedPaths} of them protected`,
+        `the branch changes ${verdict.files} file(s), ${verdict.protectedPaths} protected path(s) and ${verdict.specialFiles} special file(s) in its commits`,
         verdict.reason,
       );
     }

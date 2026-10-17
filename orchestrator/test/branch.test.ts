@@ -13,79 +13,244 @@ import { ApplicationFailure } from '@temporalio/activity';
 import { MockActivityEnvironment } from '@temporalio/testing';
 import { createBranchActivities } from '../src/activities/branch.ts';
 import { BRANCH_ACTIVITY_OPTIONS, isPushableBranch, NON_RETRYABLE_BRANCH_FAILURES } from '../src/branch-types.ts';
-import { checkChangedPaths, isProtectedPath, MAX_CHANGED_FILES } from '../src/diff-guard.ts';
+import {
+  checkBranchChanges,
+  isProtectedPath,
+  MAX_CHANGED_FILES,
+  normalizePath,
+  parseRawDiff,
+  PROTECTED_BASENAMES,
+  PROTECTED_PREFIXES,
+  protectedDenyRules,
+  RawDiffError,
+} from '../src/diff-guard.ts';
+import type { ChangedFile } from '../src/diff-guard.ts';
 
 const execFileAsync = promisify(execFile);
 
+// Every entry of the protected set, by the principle in src/diff-guard.ts: what an allowed command, the worker or CI
+// executes, what configures git, npm, cargo, node or claude, CI and release files, and the orchestrator itself.
 const PROTECTED = [
+  // CI and release
   '.github/workflows/ci.yml',
   '.github/pull_request_template.md',
+  'about.toml',
+  'about.hbs',
+  'Dockerfile',
+  'Dockerfile.dev',
+  'docker-compose.yml',
+  'Makefile',
+  // executed by an allowed command: manifests, lockfiles, build scripts, scripts, hooks, tool configs
+  'package.json',
+  'orchestrator/package.json',
+  'sub/dir/package.json',
+  'package-lock.json',
+  'orchestrator/package-lock.json',
+  'npm-shrinkwrap.json',
+  'Cargo.toml',
+  'Cargo.lock',
+  'crates/x/Cargo.toml',
+  'build.rs',
+  'crates/x/build.rs',
+  'rust-toolchain.toml',
+  'rust-toolchain',
+  'scripts/cloud-setup.sh',
+  'scripts/measure-api-calls.ts',
+  '.husky/pre-commit',
+  '.githooks/pre-push',
+  'vitest.config.ts',
+  'orchestrator/vite.config.mjs',
+  'jest.config.js',
+  'webpack.config.cjs',
+  '.eslintrc.json',
+  '.babelrc',
+  '.mocharc.yml',
+  '.pre-commit-config.yaml',
+  // configuration of git, npm, cargo, node and claude
+  '.npmrc',
+  'orchestrator/.npmrc',
+  '.cargo/config.toml',
+  '.gitattributes',
+  'sub/.gitattributes',
+  '.gitmodules',
+  '.mcp.json',
+  'sub/.mcp.json',
+  '.claude/settings.json',
+  '.claude/skills/x/SKILL.md',
+  '.devcontainer/devcontainer.json',
+  '.vscode/tasks.json',
   'CLAUDE.md',
   'docs/CLAUDE.md',
   'CLAUDE.local.md',
-  '.claude/settings.json',
-  '.claude/skills/x/SKILL.md',
+  '.git/hooks/pre-push',
+  'sub/.git/config',
+  // rules CI enforces
   'docs/adr/0099-x.md',
   'docs/business-rules/0099-x.md',
+  'tests/guards/privacy.test.ts',
+  'tests/rust-guards/version.test.ts',
+  // secrets and databases
   '.env',
   '.env.local',
   'orchestrator/.env.production',
-  'orchestrator/src/config.ts',
-  'orchestrator/src/claude-session-policy.ts',
-  'orchestrator/src/activities/claude-session.ts',
-  'orchestrator/src/activities/branch.ts',
-  'orchestrator/src/diff-guard.ts',
-  'orchestrator/src/branch-types.ts',
-  'orchestrator/.temporal/dev.sqlite',
   'keys/server.pem',
   'x/id.key',
-  // The same paths on a case-insensitive disk.
+  'x/cert.p12',
+  'orchestrator/.temporal/dev.sqlite',
+  'x/data.sqlite-journal',
+  // the orchestrator itself
+  'orchestrator/src/config.ts',
+  'orchestrator/src/brief.ts',
+  'orchestrator/src/workflows/issue.ts',
+  'orchestrator/src/activities/github.ts',
+  'orchestrator/src/activities/branch.ts',
+  'orchestrator/src/diff-guard.ts',
+  // the same on a case-insensitive disk
   '.GitHub/workflows/ci.yml',
   'claude.MD',
   'Docs/ADR/0099-x.md',
   'Orchestrator/Src/Config.ts',
-  // Not inside the work tree.
+  'PACKAGE.JSON',
+  'cargo.toml',
+  'Scripts/x.sh',
+  // paths that need normalising, or are not inside the work tree
+  'docs/./adr/x.md',
+  'docs//adr/x.md',
+  'src/../.github/x.yml',
+  'src/../../outside.txt',
   '../outside.txt',
   '/etc/passwd',
-  'a/../b',
-  '.git/hooks/pre-push',
+  'a/../b/../..',
+  '.github\\workflows\\ci.yml',
+  '.',
+  '',
 ];
 
 const ALLOWED = [
   'src/tools/find_blocks/mod.rs',
   'tests/data/parity/find_blocks.json',
+  'tests/integration/x.test.ts',
   'docs/architecture.md',
   'docs/adr-notes.md',
-  'orchestrator/src/brief.ts',
   'orchestrator/test/brief.test.ts',
   'orchestrator/README.md',
   'README.md',
-  'scripts/x.sh',
   'claude-notes.md',
   'my.environment.ts',
+  'src/package.json.md',
+  'src/build.rs.txt',
+  'notes/scripts-overview.md',
+  'src/github/mod.rs',
 ];
 
-test('every protected path fails the guard, whatever its case, and every ordinary path passes', () => {
+function file(path: string, oldMode = '000000', newMode = '100644'): ChangedFile {
+  return { path, oldMode, newMode };
+}
+
+test('every protected path fails the guard, whatever its case or spelling, and every ordinary path passes', () => {
   for (const path of PROTECTED) {
-    assert.equal(isProtectedPath(path), true, path);
-    const verdict = checkChangedPaths(['src/ok.ts', path]);
-    assert.deepEqual({ ok: verdict.ok, reason: verdict.ok ? undefined : verdict.reason }, { ok: false, reason: 'ProtectedPath' }, path);
+    assert.equal(isProtectedPath(path), true, JSON.stringify(path));
+    const verdict = checkBranchChanges([file('src/ok.ts')], [file('src/ok.ts'), file(path)]);
+    assert.deepEqual({ ok: verdict.ok, reason: verdict.ok ? undefined : verdict.reason }, { ok: false, reason: 'ProtectedPath' }, JSON.stringify(path));
   }
   for (const path of ALLOWED) {
     assert.equal(isProtectedPath(path), false, path);
   }
-  assert.deepEqual(checkChangedPaths(ALLOWED), { ok: true, files: ALLOWED.length });
+  const ordinary = ALLOWED.map((path) => file(path));
+  assert.deepEqual(checkBranchChanges(ordinary, ordinary), { ok: true, files: ALLOWED.length });
+});
+
+test('every entry of the protected set is in the test list, so a new one cannot be added without a test', () => {
+  for (const prefix of PROTECTED_PREFIXES) {
+    assert.ok(PROTECTED.some((path) => path.toLowerCase().startsWith(prefix)), `no test path under ${prefix}`);
+  }
+  for (const name of PROTECTED_BASENAMES) {
+    assert.ok(
+      PROTECTED.some((path) => path.toLowerCase().split('/').pop() === name.toLowerCase()),
+      `no test path named ${name}`,
+    );
+  }
+});
+
+test('paths are normalised before they are compared', () => {
+  assert.equal(normalizePath('docs/./adr/x.md'), 'docs/adr/x.md');
+  assert.equal(normalizePath('Docs//ADR/x.md'), 'docs/adr/x.md');
+  assert.equal(normalizePath('src/../.github/x'), '.github/x');
+  assert.equal(normalizePath('.github\\x'), '.github/x');
+  assert.equal(normalizePath('../x'), undefined);
+  assert.equal(normalizePath('a/../../x'), undefined);
+  assert.equal(normalizePath('/abs'), undefined);
+});
+
+test('the same set is the deny rules for the file tools: every prefix, name and extension has an Edit and a Write rule', () => {
+  const rules = protectedDenyRules();
+  for (const glob of ['.github/**', 'docs/adr/**', 'scripts/**', 'orchestrator/src/**', '**/.git/**', '**/CLAUDE.md', '**/package.json', '**/.mcp.json', '**/.env*', '**/*.pem', '**/Cargo.toml', '**/build.rs', '**/.npmrc']) {
+    assert.ok(rules.includes(`Edit(${glob})`), `Edit(${glob})`);
+    assert.ok(rules.includes(`Write(${glob})`), `Write(${glob})`);
+  }
+  for (const prefix of PROTECTED_PREFIXES) {
+    assert.ok(rules.includes(`Edit(${prefix}**)`), prefix);
+  }
+  for (const name of PROTECTED_BASENAMES) {
+    assert.ok(rules.includes(`Write(**/${name})`), name);
+  }
+});
+
+test('the raw change list parses, with modes, and anything else is refused without being quoted', () => {
+  const sha = 'a'.repeat(40);
+  const entry = (old: string, now: string, status: string, path: string) => `:${old} ${now} ${sha} ${sha} ${status}\0${path}\0`;
+  // Two commits as `git log --raw -z --format=` prints them: an empty token separates them.
+  assert.deepEqual(parseRawDiff(`${entry('100644', '100644', 'M', 'src/a.ts')}\0${entry('000000', '120000', 'A', 'src/link')}`), [
+    { path: 'src/a.ts', oldMode: '100644', newMode: '100644' },
+    { path: 'src/link', oldMode: '000000', newMode: '120000' },
+  ]);
+  assert.deepEqual(parseRawDiff(''), []);
+  for (const bad of ['SECRET-TEXT', `${entry('100644', '100644', 'M', 'a')}stray`, ':12 34 x', `:100644 100644 ${sha} ${sha} M\0`]) {
+    assert.throws(
+      () => parseRawDiff(bad),
+      (error: unknown) => error instanceof RawDiffError && !error.message.includes('SECRET'),
+      bad.slice(0, 20),
+    );
+  }
+});
+
+test('a symlink, a submodule or a file mode change is refused, before or after, and an executable file with it', () => {
+  const plain = file('src/a.ts', '100644', '100644');
+  assert.equal(checkBranchChanges([plain], [plain]).ok, true);
+  for (const [oldMode, newMode] of [
+    ['000000', '120000'], // a new symlink
+    ['120000', '100644'], // a symlink replaced by a file
+    ['120000', '000000'], // a symlink deleted
+    ['000000', '160000'], // a new submodule
+    ['000000', '100755'], // a new executable
+    ['100644', '100755'], // the executable bit set
+    ['100755', '100644'], // the executable bit cleared
+    ['100644', '120000'], // a file replaced by a symlink
+  ]) {
+    const special = file('src/x', oldMode, newMode);
+    for (const [net, history] of [[[special], [special]], [[plain], [plain, special]]] as const) {
+      const verdict = checkBranchChanges(net, history);
+      assert.deepEqual({ ok: verdict.ok, reason: verdict.ok ? undefined : verdict.reason }, { ok: false, reason: 'SpecialFile' }, `${oldMode} to ${newMode}`);
+    }
+  }
+});
+
+test('a protected path in any commit refuses the branch even when the net change is clean, and the verdict carries counts, not paths', () => {
+  // A workflow added in one commit and removed in the next: the net change is clean, the push still publishes it.
+  const verdict = checkBranchChanges([file('src/a.ts')], [file('.github/workflows/x.yml'), file('.github/workflows/x.yml', '100644', '000000'), file('src/a.ts')]);
+  assert.deepEqual(verdict, { ok: false, reason: 'ProtectedPath', files: 1, protectedPaths: 1, specialFiles: 0 });
+  assert.ok(!JSON.stringify(verdict).includes('.github'));
 });
 
 test('an empty diff and an unexpectedly large one fail, and the failure carries counts, not paths', () => {
-  assert.deepEqual(checkChangedPaths([]), { ok: false, reason: 'EmptyDiff', files: 0, protectedPaths: 0 });
-  const many = Array.from({ length: MAX_CHANGED_FILES }, (_, index) => `src/file-${index}.ts`);
-  assert.equal(checkChangedPaths(many).ok, true, 'exactly the limit passes');
-  assert.deepEqual(checkChangedPaths([...many, 'src/one-more.ts']), { ok: false, reason: 'DiffTooLarge', files: MAX_CHANGED_FILES + 1, protectedPaths: 0 });
-  // A protected path outranks size, and the verdict names none of them.
-  const verdict = checkChangedPaths([...many, '.github/x.yml']);
-  assert.deepEqual(verdict, { ok: false, reason: 'ProtectedPath', files: MAX_CHANGED_FILES + 1, protectedPaths: 1 });
-  assert.ok(!JSON.stringify(verdict).includes('.github'));
+  assert.deepEqual(checkBranchChanges([], []), { ok: false, reason: 'EmptyDiff', files: 0, protectedPaths: 0, specialFiles: 0 });
+  const many = Array.from({ length: MAX_CHANGED_FILES }, (_, index) => file(`src/file-${index}.ts`));
+  assert.equal(checkBranchChanges(many, many).ok, true, 'exactly the limit passes');
+  const over = [...many, file('src/one-more.ts')];
+  assert.deepEqual(checkBranchChanges(over, over), { ok: false, reason: 'DiffTooLarge', files: MAX_CHANGED_FILES + 1, protectedPaths: 0, specialFiles: 0 });
+  // A protected path outranks size.
+  const withProtected = [...many, file('.github/x.yml')];
+  assert.equal((checkBranchChanges(withProtected, withProtected) as { reason: string }).reason, 'ProtectedPath');
 });
 
 test('only claude/<number> is a branch the push accepts', () => {
@@ -120,7 +285,7 @@ test('only claude/<number> is a branch the push accepts', () => {
 
 test('the policy: bounded attempts, and the failures a retry cannot fix are not retried', () => {
   assert.equal(BRANCH_ACTIVITY_OPTIONS.retry?.maximumAttempts, 3);
-  for (const type of ['InvalidInput', 'ProtectedPath', 'DiffTooLarge', 'EmptyDiff', 'BranchMoved', 'PushRejected']) {
+  for (const type of ['InvalidInput', 'ProtectedPath', 'DiffTooLarge', 'EmptyDiff', 'SpecialFile', 'MalformedGitOutput', 'BranchMoved', 'PushRejected']) {
     assert.ok(NON_RETRYABLE_BRANCH_FAILURES.includes(type), type);
     assert.ok(BRANCH_ACTIVITY_OPTIONS.retry?.nonRetryableErrorTypes?.includes(type), type);
   }
@@ -228,7 +393,7 @@ test('guardBranch refuses a branch that changes a protected path, for each path,
     const failure = await failureOf(guard(input(name, sha)));
     assert.equal(failure.type, 'ProtectedPath', path);
     assert.equal(failure.nonRetryable, true, path);
-    assert.match(failure.message, /changes 2 file\(s\), 1 of them protected/);
+    assert.match(failure.message, /changes 2 file\(s\), 1 protected path\(s\) and 0 special file\(s\)/);
     assert.ok(!failure.message.includes(path), 'no path in the failure');
   }
 });
@@ -331,4 +496,126 @@ test('a remote that refuses the push is a PushRejected failure that is not retri
   assert.equal(failure.type, 'PushRejected');
   assert.equal(failure.nonRetryable, true);
   assert.ok(!failure.message.includes('elsewhere'));
+});
+
+// ---- the range: every commit the push would publish -----------------------------------------------------------------
+
+interface Commit {
+  readonly files?: Record<string, string>;
+  readonly remove?: string[];
+  readonly empty?: boolean;
+}
+
+/** A branch off main with one commit per entry, in order. The branch is left, and main is checked out again. */
+async function branchWithCommits(name: string, commits: Commit[]): Promise<string> {
+  const { repo } = scenario;
+  await git(repo, 'checkout', '-q', '-b', name, 'main');
+  for (const commit of commits) {
+    await writeIn(repo, commit.files ?? {});
+    for (const path of commit.remove ?? []) {
+      await rm(join(repo, path));
+    }
+    await git(repo, 'add', '-A');
+    await git(repo, 'commit', '-q', '-m', 'work', ...(commit.empty === true ? ['--allow-empty'] : []));
+  }
+  const sha = await git(repo, 'rev-parse', 'HEAD');
+  await git(repo, 'checkout', '-q', 'main');
+  return sha;
+}
+
+test('a protected change in the FIRST of several commits refuses the branch, however the later commits look', async () => {
+  const protectedFiles: Record<string, string>[] = [{ '.github/workflows/x.yml': 'x\n' }, { 'package.json': '{}\n' }, { '.env': 'KEY=1\n' }, { 'scripts/run.sh': 'x\n' }];
+  for (const [index, files] of protectedFiles.entries()) {
+    for (const [offset, later] of [1, 2].entries()) {
+      const name = `claude/${500 + index * 10 + offset}`;
+      const commits: Commit[] = [{ files: { 'src/first.ts': 'x\n', ...files } }, ...Array.from({ length: later }, (_, n) => ({ files: { [`src/later-${n}.ts`]: 'x\n' } }))];
+      const sha = await branchWithCommits(name, commits);
+      const failure = await failureOf(guard(input(name, sha)));
+      assert.equal(failure.type, 'ProtectedPath', `${Object.keys(files)[0]} first of ${later + 1} commits`);
+      assert.equal(failure.nonRetryable, true);
+    }
+  }
+});
+
+test('a protected file added in one commit and removed in the next is still refused: the push publishes both commits', async () => {
+  const sha = await branchWithCommits('claude/520', [{ files: { 'src/a.ts': 'a\n', '.env': 'SECRET=1\n' } }, { remove: ['.env'] }, { files: { 'src/b.ts': 'b\n' } }]);
+  // The net change is clean (src/a.ts and src/b.ts), and only the range of commits sees the secret.
+  assert.equal((await failureOf(guard(input('claude/520', sha)))).type, 'ProtectedPath');
+});
+
+test('a clean branch of several commits passes, and the net change is counted once even when the last commit is empty', async () => {
+  const sha = await branchWithCommits('claude/530', [{ files: { 'src/a.ts': 'a\n' } }, { files: { 'src/a.ts': 'a2\n', 'src/b.ts': 'b\n' } }, { empty: true }]);
+  assert.deepEqual(await guard(input('claude/530', sha)), { branch: 'claude/530', headSha: sha, files: 2 });
+  // Pushed as it is: the same commits the guard read.
+  assert.deepEqual(await push(input('claude/530', sha)), { branch: 'claude/530', headSha: sha });
+});
+
+test('a base that moved is not the session: a protected change on main does not refuse a branch, however the branch carries it', async () => {
+  const sha = await branchWithCommits('claude/540', [{ files: { 'src/a.ts': 'a\n' } }, { files: { 'src/b.ts': 'b\n' } }]);
+  // main moves on with a protected change, and the branch is not updated.
+  await git(scenario.repo, 'checkout', '-q', 'main');
+  await writeIn(scenario.repo, { '.github/workflows/new.yml': 'on: push\n', 'package.json': '{}\n' });
+  await git(scenario.repo, 'add', '-A');
+  await git(scenario.repo, 'commit', '-q', '-m', 'main moves on');
+  await git(scenario.repo, 'push', '-q', 'origin', 'main');
+  assert.deepEqual(await guard(input('claude/540', sha)), { branch: 'claude/540', headSha: sha, files: 2 }, 'not updated');
+
+  // Rebased onto the new main.
+  await git(scenario.repo, 'checkout', '-q', '-b', 'claude/541', 'claude/540');
+  await git(scenario.repo, 'rebase', '-q', 'main');
+  const rebased = await git(scenario.repo, 'rev-parse', 'HEAD');
+  await git(scenario.repo, 'checkout', '-q', 'main');
+  assert.notEqual(rebased, sha);
+  assert.deepEqual(await guard(input('claude/541', rebased)), { branch: 'claude/541', headSha: rebased, files: 2 }, 'rebased');
+
+  // Merged with the new main.
+  await git(scenario.repo, 'checkout', '-q', '-b', 'claude/542', 'claude/540');
+  await git(scenario.repo, 'merge', '-q', '--no-edit', 'main');
+  const merged = await git(scenario.repo, 'rev-parse', 'HEAD');
+  await git(scenario.repo, 'checkout', '-q', 'main');
+  assert.deepEqual(await guard(input('claude/542', merged)), { branch: 'claude/542', headSha: merged, files: 2 }, 'merged');
+});
+
+test('a symlink, an executable file or a mode change in any commit is refused as a special file', async () => {
+  const { repo } = scenario;
+  await git(repo, 'checkout', '-q', '-b', 'claude/550', 'main');
+  await writeIn(repo, { 'src/a.ts': 'a\n' });
+  await execFileAsync('ln', ['-s', '../.github', join(repo, 'src', 'link')]);
+  await git(repo, 'add', '-A');
+  await git(repo, 'commit', '-q', '-m', 'link');
+  const link = await git(repo, 'rev-parse', 'HEAD');
+  await git(repo, 'checkout', '-q', 'main');
+  assert.equal((await failureOf(guard(input('claude/550', link)))).type, 'SpecialFile', 'a symlink');
+
+  await git(repo, 'checkout', '-q', '-b', 'claude/551', 'main');
+  await writeIn(repo, { 'src/run.ts': 'x\n' });
+  await chmod(join(repo, 'src', 'run.ts'), 0o755);
+  await git(repo, 'add', '-A');
+  await git(repo, 'commit', '-q', '-m', 'exec');
+  const exec = await git(repo, 'rev-parse', 'HEAD');
+  await git(repo, 'checkout', '-q', 'main');
+  assert.equal((await failureOf(guard(input('claude/551', exec)))).type, 'SpecialFile', 'an executable file');
+
+  await git(repo, 'checkout', '-q', '-b', 'claude/552', 'main');
+  await chmod(join(repo, 'README.md'), 0o755);
+  await git(repo, 'add', '-A');
+  await git(repo, 'commit', '-q', '-m', 'mode');
+  const mode = await git(repo, 'rev-parse', 'HEAD');
+  await git(repo, 'checkout', '-q', 'main');
+  assert.equal((await failureOf(guard(input('claude/552', mode)))).type, 'SpecialFile', 'a mode change');
+
+  await git(repo, 'checkout', '-q', '-b', 'claude/553', 'main');
+  await git(repo, 'update-index', '--add', '--cacheinfo', `160000,${link},src/sub`);
+  await git(repo, 'commit', '-q', '-m', 'gitlink');
+  const gitlink = await git(repo, 'rev-parse', 'HEAD');
+  await git(repo, 'checkout', '-q', 'main');
+  assert.equal((await failureOf(guard(input('claude/553', gitlink)))).type, 'SpecialFile', 'a submodule');
+});
+
+test('new protected entries are refused by the guard on a real branch too: a manifest, a build script and the orchestrator', async () => {
+  for (const [index, path] of ['package.json', 'orchestrator/package.json', 'crates/x/build.rs', 'Cargo.toml', '.npmrc', '.mcp.json', 'orchestrator/src/workflows/issue.ts', '.husky/pre-commit'].entries()) {
+    const name = `claude/${600 + index}`;
+    const sha = await branchWithCommits(name, [{ files: { 'src/ok.ts': 'x\n', [path]: 'x\n' } }]);
+    assert.equal((await failureOf(guard(input(name, sha)))).type, 'ProtectedPath', path);
+  }
 });
