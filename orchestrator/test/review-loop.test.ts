@@ -38,6 +38,7 @@ import { DEFAULT_MAX_FIX_ROUNDS } from '../src/review-policy.ts';
 import type { ReviewStepInput } from '../src/review-types.ts';
 import type { BoardItemRef, BoardStatus } from '../src/types.ts';
 import { createFake, emptyState, rawComment, rawIssue } from './github-support.ts';
+import { forbiddenCalls } from './invariants.ts';
 import { freePort } from './support.ts';
 
 const execFileAsync = promisify(execFile);
@@ -289,7 +290,7 @@ function fakeActivities() {
         }
       }
       w.maybeLose('postSessionReview');
-      return { reviewId: 5000 + input.round, posted: true, comments: findings };
+      return { reviewId: 5000 + input.round, posted: true, comments: findings, advisory: 0, omitted: 0 };
     },
     getGateStatus: async (pr: number) => {
       const w = world(pr - PR_OFFSET);
@@ -699,23 +700,52 @@ async function sourceFiles(root: string): Promise<{ name: string; text: string }
   return found;
 }
 
-// A tripwire, not a proof: a literal search of the source for the forms such a call takes (a GraphQL name, a `gh`
-// argv, a REST route). A call built some other way would not match.
-test('nothing in the orchestrator resolves a thread, approves, requests changes, merges or labels', async () => {
-  const forbidden = [/resolveReviewThread/i, /unresolveReviewThread/i, /\/resolve['"`]/, /event:\s*['"](APPROVE|REQUEST_CHANGES)/, /gh pr merge/, /pulls\/\$\{[^}]*\}\/merge/, /--add-label/, /addLabelsToLabelable/, /mergePullRequest/, /'pr',\s*'merge'/, /--approve/, /\/labels['"`]/, /updateProjectV2ItemFieldValue/];
-  for (const { name, text } of await sourceFiles(SRC_DIR)) {
-    const code = text
-      .split('\n')
-      .filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*') && !line.trim().startsWith('/*'))
-      .join('\n');
-    for (const pattern of forbidden) {
-      // Strings that only warn a session ("never resolve a review thread") are not calls: the patterns above name calls.
-      assert.ok(!pattern.test(code), `${name} must not contain ${pattern}`);
-    }
-  }
+test('nothing in the orchestrator resolves a thread, approves, requests changes, merges, labels or writes to the board outside the GitHub activities', async () => {
+  const sources = await sourceFiles(SRC_DIR);
+  assert.deepEqual(forbiddenCalls(sources), []);
   // The review is posted with the one event the repo allows. A second place that names an event would be a second path.
   const github = (await readFile(join(SRC_DIR, 'activities/github.ts'), 'utf8')).match(/event: '[A-Z_]+'/g);
   assert.deepEqual(github, ["event: 'COMMENT'"]);
+});
+
+test('the invariant check fails for each form a call could take, added to a scratch copy of the review activity', async () => {
+  const sources = await sourceFiles(SRC_DIR);
+  const review = sources.find((file) => file.name === 'activities/review.ts');
+  assert.ok(review !== undefined);
+  const others = sources.filter((file) => file !== review);
+  const forms: [string, string][] = [
+    ['a thread resolve string', "const q = 'mutation { resolveReviewThread(input: {}) { thread { id } } }';"],
+    ['a thread resolve by concatenation', "const q = 'resolve' + 'ReviewThread';"],
+    ['a thread resolve through a template', "const q = `resolve${'Review'}Thread`;"],
+    ['a thread resolve through join', "const q = ['resolve', 'ReviewThread'].join('');"],
+    ['a thread resolve route', "const route = `${repo}/pulls/${pr}/threads/${id}/resolve`;"],
+    ['a merge argv', "const argv = ['pr', 'merge', '--squash'];"],
+    ['a merge mutation', "const q = 'mutation { mergePullRequest(input: {}) { clientMutationId } }';"],
+    ['a merge route', 'const route = `${repo}/pulls/${pr}/merge`;'],
+    ['a merge method', 'await github.merge(pr);'],
+    ['an approve argv', "const argv = ['pr', 'review', '--approve'];"],
+    ['an approve event', "const event = 'APPROVE';"],
+    ['an approve method', 'await github.approvePr(pr);'],
+    ['a request-changes event', "const body = { event: 'REQUEST_CHANGES' };"],
+    ['a label route', 'const route = `${repo}/issues/${n}/labels`;'],
+    ['a label argv', "const argv = ['issue', 'edit', '--add-label', 'golden-change'];"],
+    ['a label mutation', "const q = 'mutation { addLabelsToLabelable(input: {}) { clientMutationId } }';"],
+    ['a label method', "await github.addLabels(pr, ['golden-change']);"],
+    ['a Ready move by mutation', "const q = 'mutation { updateProjectV2ItemFieldValue(input: { value: { singleSelectOptionId: \"Ready\" } }) { clientMutationId } }';"],
+    ['a board write by gh project outside the board activities', "await gh.project(['item-edit', '--id', id]);"],
+    ['dynamic code', "eval('x');"],
+  ];
+  for (const [name, line] of forms) {
+    const scratch = { name: review.name, text: `${review.text}\n${line}\n` };
+    assert.notDeepEqual(forbiddenCalls([...others, scratch]), [], `${name} must be caught`);
+  }
+  // The board activities may edit the board; nothing else may.
+  const github = sources.find((file) => file.name === 'activities/github.ts');
+  assert.ok(github !== undefined);
+  assert.deepEqual(forbiddenCalls([github]), []);
+  assert.notDeepEqual(forbiddenCalls([{ name: 'workflows/review-loop.ts', text: "await gh.project(['item-edit', '--id', id]);" }]), []);
+  // What it says about itself: a literal text scan, so a name built at run time is not seen. That is why it is a tripwire.
+  assert.deepEqual(forbiddenCalls([{ name: 'x.ts', text: "const name = ['resolve', suffix].join('');" }]), [], 'a name built from a variable is out of reach of a text scan');
 });
 
 // ---- layer 2: the real review activities against the fake gh and the fake claude ---------------------------------
