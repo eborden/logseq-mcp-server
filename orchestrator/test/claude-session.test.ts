@@ -27,12 +27,14 @@ import {
   BYPASS_OPT_IN_VARIABLE,
   ConfigError,
   DEFAULT_ALLOWED_TOOLS,
+  DEFAULT_DISALLOWED_TOOLS,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_PERMISSION_PROMPTS,
   loadClaudeConfig,
 } from '../src/config.ts';
 import { InvalidSessionInputError, MalformedSessionOutputError, parseClaudeOutput, parseSessionInput, parseSessionResult } from '../src/types.ts';
 import type { SessionInput, SessionResult } from '../src/types.ts';
+import { commandAllowed } from './tool-rules.ts';
 
 const FAKE_CLAUDE = fileURLToPath(new URL('./fake-claude.sh', import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -108,7 +110,10 @@ function input(overrides: Partial<SessionInput> = {}): SessionInput {
 }
 
 function activities(limits: SessionLimits = FAST, claudeBin: string = FAKE_CLAUDE) {
-  return createClaudeSessionActivities({ claudeBin, permissionMode: undefined, permissionPrompts: undefined, allowedTools: [] }, limits);
+  return createClaudeSessionActivities(
+    { claudeBin, permissionMode: undefined, permissionPrompts: undefined, allowedTools: [], disallowedTools: [], settingSources: [], strictMcpConfig: false },
+    limits,
+  );
 }
 
 async function run(args: unknown = input(), limits: SessionLimits = FAST): Promise<SessionResult> {
@@ -453,12 +458,15 @@ test('the error for a malformed session never quotes its output', () => {
 });
 
 test('the claude config is parsed once, with a clear error for a bad value', () => {
-  // Unset means the unattended defaults (#629): acceptEdits, prompts denied at once, the explicit tool list.
+  // Unset means the unattended defaults (#629): acceptEdits, prompts denied at once, the explicit lists, project settings only.
   assert.deepEqual(loadClaudeConfig({}), {
     claudeBin: 'claude',
     permissionMode: DEFAULT_PERMISSION_MODE,
     permissionPrompts: DEFAULT_PERMISSION_PROMPTS,
     allowedTools: DEFAULT_ALLOWED_TOOLS,
+    disallowedTools: DEFAULT_DISALLOWED_TOOLS,
+    settingSources: ['project'],
+    strictMcpConfig: true,
   });
   assert.equal(DEFAULT_PERMISSION_MODE, 'acceptEdits');
   assert.equal(DEFAULT_PERMISSION_PROMPTS, 'none');
@@ -474,26 +482,90 @@ test('the claude config is parsed once, with a clear error for a bad value', () 
   assert.throws(() => loadClaudeConfig({ CLAUDE_PERMISSION_MODE: 'yolo' }), /CLAUDE_PERMISSION_MODE/);
 });
 
-test('the permission prompts and the allowed tools are configurable, and a bad value fails fast', () => {
+test('the permission prompts, the tool lists and the setting sources are configurable, and a bad value fails fast', () => {
   assert.equal(loadClaudeConfig({ CLAUDE_PERMISSION_PROMPTS: 'host' }).permissionPrompts, 'host');
   assert.throws(() => loadClaudeConfig({ CLAUDE_PERMISSION_PROMPTS: 'always' }), /CLAUDE_PERMISSION_PROMPTS/);
   assert.deepEqual(loadClaudeConfig({ CLAUDE_ALLOWED_TOOLS: 'Read, Edit,Bash(ls *)' }).allowedTools, ['Read', 'Edit', 'Bash(ls *)']);
   for (const bad of ['Read,,Edit', 'Bash(ls', 'has space', 'Bash(a,b)', 'Edit;rm', 'Bash()']) {
     assert.throws(() => loadClaudeConfig({ CLAUDE_ALLOWED_TOOLS: bad }), /CLAUDE_ALLOWED_TOOLS/, bad);
+    assert.throws(() => loadClaudeConfig({ CLAUDE_DISALLOWED_TOOLS: bad }), /CLAUDE_DISALLOWED_TOOLS/, bad);
+  }
+  // Extra denials add to the defaults: a deny rule can only make a session safer, so it never replaces them.
+  assert.deepEqual(loadClaudeConfig({ CLAUDE_DISALLOWED_TOOLS: 'Bash(rm *)' }).disallowedTools, [...DEFAULT_DISALLOWED_TOOLS, 'Bash(rm *)']);
+  assert.deepEqual(loadClaudeConfig({ CLAUDE_SETTING_SOURCES: 'project, local' }).settingSources, ['project', 'local']);
+  assert.throws(() => loadClaudeConfig({ CLAUDE_SETTING_SOURCES: 'project,global' }), /CLAUDE_SETTING_SOURCES/);
+});
+
+test('the default allowed list has no push, no code runner and no GitHub read, and keeps what an implementer needs', () => {
+  const allowed = DEFAULT_ALLOWED_TOOLS;
+  for (const needed of ['Edit', 'Write', 'Bash(git commit -m *)', 'Bash(git add *)', 'Bash(npm run typecheck)', 'Bash(npm run test:unit)', 'Bash(cargo test *)']) {
+    assert.ok(allowed.includes(needed), needed);
+  }
+  // No rule of any kind that pushes, or that runs a program given on the command line.
+  for (const rule of allowed) {
+    assert.doesNotMatch(rule, /git push|npx|node |rebase|fetch|npm exec|npm \*|cargo \*|gh api|gh pr|gh issue view|--body-file/, rule);
+  }
+  for (const wide of ['Bash', 'Bash(*)', 'Bash(git *)', 'Bash(gh *)', 'Bash(rm *)', 'Bash(curl *)', 'Bash(sh *)', 'Bash(bash *)', 'Skill', 'WebFetch', 'Task']) {
+    assert.ok(!allowed.includes(wide), `${wide} must not be allowed`);
   }
 });
 
-test('the default tool list lets an implementer edit, commit, push a claude/ branch and run the repo checks, and nothing wider', () => {
-  const rules = new Set(DEFAULT_ALLOWED_TOOLS);
-  for (const needed of ['Edit', 'Write', 'Bash(git commit *)', 'Bash(git push -u origin claude/*)', 'Bash(cargo *)', 'Bash(npm *)', 'Bash(gh issue comment *)']) {
-    assert.ok(rules.has(needed), needed);
+test('commands that reach further than the session may are refused by the lists, and the ones it needs are allowed (a model of the rules)', () => {
+  const allow = (command: string): boolean => commandAllowed(DEFAULT_ALLOWED_TOOLS, DEFAULT_DISALLOWED_TOOLS, command);
+  for (const command of [
+    'git push origin claude/x:main',
+    'git push origin claude/x HEAD:main',
+    'git push -u origin claude/x --delete',
+    'git push --force origin main',
+    'git rebase --exec "sh x" main',
+    'git fetch --upload-pack=x origin',
+    'git config core.hooksPath /tmp/x',
+    'git commit --amend --no-edit',
+    'node -e "process.exit()"',
+    'npx some-package',
+    'npm publish',
+    'npm exec foo',
+    'npm run evil',
+    'npm install foo',
+    'cargo install foo',
+    'gh api repos/x/y -X DELETE',
+    'gh pr merge 1',
+    'gh pr create --title x',
+    'gh issue view 5 --comments',
+    'gh issue comment 5 --body-file /etc/hosts',
+    'gh issue comment 5 -F /etc/hosts',
+    'rm -rf x',
+    'curl https://example.invalid',
+  ]) {
+    assert.equal(allow(command), false, `${command} must not be allowed`);
   }
-  // No unqualified git or gh, no gh api, no PR creation or merge, no shell, no network client, no deletion.
-  for (const wide of ['Bash', 'Bash(*)', 'Bash(git *)', 'Bash(gh *)', 'Bash(gh api *)', 'Bash(gh pr *)', 'Bash(git push *)', 'Bash(rm *)', 'Bash(curl *)', 'Bash(sh *)', 'Bash(bash *)']) {
-    assert.ok(!rules.has(wide), `${wide} must not be allowed`);
+  for (const command of [
+    'git status',
+    'git status --short',
+    'git diff origin/main...HEAD',
+    'git add orchestrator/src/x.ts',
+    'git commit -m "Add the importer" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"',
+    'npm ci',
+    'npm run typecheck',
+    'npm run test:unit',
+    'cargo test --locked',
+    'gh issue comment 123 --body "Done. Verified typecheck and unit tests."',
+  ]) {
+    assert.equal(allow(command), true, `${command} must be allowed`);
   }
-  for (const rule of DEFAULT_ALLOWED_TOOLS) {
-    assert.doesNotMatch(rule, /merge|golden-change|--force(?!-with-lease)/, rule);
+});
+
+test('the default denied list holds the other half: gh api and gh pr, the protected paths for the file tools, and the web', () => {
+  for (const rule of ['Bash(gh api *)', 'Bash(gh pr *)', 'Bash(git push *)', 'WebFetch', 'WebSearch']) {
+    assert.ok(DEFAULT_DISALLOWED_TOOLS.includes(rule), rule);
+  }
+  for (const path of ['.github/**', 'CLAUDE.md', '.claude/**', 'docs/adr/**', 'docs/business-rules/**', '.env*']) {
+    assert.ok(DEFAULT_DISALLOWED_TOOLS.includes(`Edit(${path})`), `Edit(${path})`);
+    assert.ok(DEFAULT_DISALLOWED_TOOLS.includes(`Write(${path})`), `Write(${path})`);
+  }
+  // A deny rule is never also an allow rule.
+  for (const rule of DEFAULT_DISALLOWED_TOOLS) {
+    assert.ok(!DEFAULT_ALLOWED_TOOLS.includes(rule), rule);
   }
 });
 
@@ -512,26 +584,41 @@ test('no permission flag is passed when none is configured', { timeout: 30_000 }
   assert.equal(await readFile(scenario.argsFile, 'utf8'), '-p\0--output-format\0json\0--\0Implement issue 1.\0');
 });
 
-test('the permission mode, prompts and allowed tools from the config come before the prompt, each as the CLI documents', { timeout: 30_000 }, async () => {
+test('every permission flag from the config comes before the prompt, each as the CLI documents', { timeout: 30_000 }, async () => {
   mode('success');
   const configured = createClaudeSessionActivities(
-    { claudeBin: FAKE_CLAUDE, permissionMode: 'acceptEdits', permissionPrompts: 'none', allowedTools: ['Edit', 'Bash(ls *)'] },
+    {
+      claudeBin: FAKE_CLAUDE,
+      permissionMode: 'acceptEdits',
+      permissionPrompts: 'none',
+      allowedTools: ['Edit', 'Bash(ls *)'],
+      disallowedTools: ['Bash(gh api *)', 'Edit(.github/**)'],
+      settingSources: ['project'],
+      strictMcpConfig: true,
+    },
     FAST,
   );
   await new MockActivityEnvironment().run(configured.runClaudeSession, input());
   assert.equal(
     await readFile(scenario.argsFile, 'utf8'),
-    '-p\0--output-format\0json\0--permission-mode\0acceptEdits\0--permission-prompts\0none\0--allowedTools=Edit,Bash(ls *)\0--\0Implement issue 1.\0',
+    '-p\0--output-format\0json\0--permission-mode\0acceptEdits\0--permission-prompts\0none\0--allowedTools=Edit,Bash(ls *)\0' +
+      '--disallowedTools=Bash(gh api *),Edit(.github/**)\0--setting-sources\0project\0--strict-mcp-config\0--\0Implement issue 1.\0',
   );
 });
 
-test('the default config never passes bypassPermissions or a dangerous flag to the session', { timeout: 30_000 }, async () => {
+test('the default config passes the deny list, the project-only settings and no MCP servers, and never bypassPermissions', { timeout: 30_000 }, async () => {
   mode('success');
   const configured = createClaudeSessionActivities({ ...loadClaudeConfig({}), claudeBin: FAKE_CLAUDE }, FAST);
   await new MockActivityEnvironment().run(configured.runClaudeSession, input());
   const args = (await readFile(scenario.argsFile, 'utf8')).split('\0');
   assert.ok(args.includes('acceptEdits'));
   assert.ok(!args.some((arg) => /bypass|dangerously/i.test(arg)));
+  assert.ok(args.includes(`--disallowedTools=${DEFAULT_DISALLOWED_TOOLS.join(',')}`), 'the deny list');
+  assert.ok(args.includes(`--allowedTools=${DEFAULT_ALLOWED_TOOLS.join(',')}`), 'the allow list');
+  const sources = args.indexOf('--setting-sources');
+  assert.ok(sources >= 0 && args[sources + 1] === 'project', 'the host user settings and hooks are not loaded');
+  assert.ok(args.includes('--strict-mcp-config'), 'strict MCP with no --mcp-config: no server loads');
+  assert.ok(!args.includes('--mcp-config'));
   assert.equal(args.at(-2), 'Implement issue 1.', 'the prompt is the last argument, after --');
   assert.equal(args.at(-3), '--');
 });

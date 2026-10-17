@@ -332,6 +332,9 @@ export function createClaudeSessionActivities(config: ClaudeConfig, limits: Sess
       ...(config.permissionPrompts === undefined ? [] : ['--permission-prompts', config.permissionPrompts]),
       // One argument, joined with `=`: the option is variadic, and this keeps it from taking anything after it.
       ...(config.allowedTools.length === 0 ? [] : [`--allowedTools=${config.allowedTools.join(',')}`]),
+      ...(config.disallowedTools.length === 0 ? [] : [`--disallowedTools=${config.disallowedTools.join(',')}`]),
+      ...(config.settingSources.length === 0 ? [] : ['--setting-sources', config.settingSources.join(',')]),
+      ...(config.strictMcpConfig ? ['--strict-mcp-config'] : []),
       '--',
       input.prompt,
     ];
