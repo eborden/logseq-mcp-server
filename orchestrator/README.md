@@ -6,7 +6,7 @@ This first slice (#626) proves the engine runs here and survives a crash. It hol
 
 ## What v1 does not do
 
-- No `gh` or board code yet (later tasks in #625). The `runClaudeSession` activity (#627) exists but is not registered on the worker or called by a workflow yet (#629 wires it).
+- Both activity sets exist (`runClaudeSession`, #627, and the GitHub activities, #628), but neither is registered on the worker or called by a workflow yet (#629 wires them).
 - No Postgres, Docker, extra task queues or scheduler. One task queue, `orchestrator`.
 - It never merges, never applies `golden-change` and never moves a board item from Backlog to Ready.
 
@@ -84,6 +84,18 @@ Temporal runs an activity at least once: a worker can die after the side effect 
 - **Deterministic workflow.** The workflow file has no clock, I/O or randomness. The run key and the work duration come in as input.
 - **Parsed at the boundary.** Activity input is parsed into a typed value first (`src/hello-types.ts`). A bad input is a non-retryable failure.
 
+## GitHub activities (#628)
+
+`src/activities/github.ts` holds the activities the workflow will call, built by `createGithubActivities(config)`: `listReadyIssues`, `readIssue`, `claimIssue`, `setStatus`, `openPr`, `postReview` and `getGateStatus`. Each is a thin wrapper over `gh` (`src/gh.ts`): one process per call, an argv array and never a shell string, a timeout (30 s) and an output cap, and an answer parsed at the boundary (`src/github-parse.ts`). A malformed answer fails with the path of the first mismatch, never a value and never a partial result.
+
+- **Trust.** `readIssue` drops, while listing, every comment whose `author_association` is not `OWNER`, `MEMBER` or `COLLABORATOR`, and refuses an issue written by anyone else. The same filter applies to the PRs and reviews the claim and review activities scan. A session never receives the text of a stranger.
+- **Idempotent writes.** `claimIssue` and `setStatus` read the item's Status and write only when it differs. `openPr` looks for an open PR with the same head and base first. `postReview` looks for its idempotency key (a hidden comment in the body) first. A repeat changes nothing. The workflow ID, not `claimIssue`, is the claim: a retry of a claim that succeeded answers `claimed: false, already_in_progress`.
+- **Gate.** `getGateStatus` runs the query of CLAUDE.md "Code review" step 5 and counts only non-empty reviews by a trusted author on the head commit. A PR with more than 100 reviews or threads fails rather than being counted from part of its list.
+- **Rate limits.** A primary limit waits until the reset time. A secondary limit waits `Retry-After`, or at least 60 seconds, doubling on each repeat. Three waits at most per call, and a wait longer than 10 minutes fails the activity (`GitHubRateLimitTooLong`, non-retryable) instead of sleeping. The workflow must give these activities a start-to-close timeout above the longest wait.
+- **Never.** It cannot merge, apply a label (`golden-change` included), resolve a thread, or move an item into Ready or out of Backlog. `setStatus` accepts only In progress, In review and Done.
+
+Settings (all optional, read once in `src/gh-config.ts`): `ORCHESTRATOR_GH_PATH` (default `gh`), `ORCHESTRATOR_GITHUB_REPO` (`eborden/logseq-mcp-server`), `ORCHESTRATOR_PROJECT_OWNER` (`eborden`), `ORCHESTRATOR_PROJECT_NUMBER` (`1`), `ORCHESTRATOR_GH_TIMEOUT_MS` (`30000`). `npm run test:github` runs the tests against a fake `gh` (`test/fake-gh.mjs`), so it makes no GitHub call. The GitHub token is whatever `gh auth` holds, and it needs the `repo` and `project` scopes.
+
 ## Files
 
 | File | Role |
@@ -95,7 +107,8 @@ Temporal runs an activity at least once: a worker can die after the side effect 
 | `src/activities/claude-session.ts` | `runClaudeSession`: one worktree, one branch, one `claude -p` session |
 | `src/claude-session-policy.ts` | Its timeouts, heartbeat and retry bounds (importable from workflow code) |
 | `src/config.ts`, `src/hello-types.ts`, `src/types.ts` | Typed config and input and output parsing |
-| `test/` | The crash test, the server-free unit tests, and `fake-claude.sh` (a stand-in for `claude`, so no test calls the model) |
+| `src/gh.ts`, `src/gh-config.ts`, `src/github-parse.ts`, `src/activities/github.ts` | The `gh` wrapper, its config, the parsers and the GitHub activities |
+| `test/` | The crash test, the server-free unit tests, and `fake-claude.sh` (a stand-in for `claude`, so no test calls the model) and `fake-gh.mjs` (a stand-in for `gh`) |
 
 ## Dependencies
 
