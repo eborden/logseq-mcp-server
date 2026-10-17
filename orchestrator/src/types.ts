@@ -152,3 +152,116 @@ export function parseSessionResult(raw: unknown): SessionResult {
   }
   return { branch, headSha, exitStatus };
 }
+
+// ---- GitHub activities (#628) ---------------------------------------------------------------------------------
+
+/** The board's Status column, in flow order (CLAUDE.md "Board statuses"). */
+export type BoardStatus = 'Backlog' | 'Ready' | 'In progress' | 'In review' | 'Done';
+
+/** The statuses an activity may set. Backlog to Ready is the maintainer's move and is not here on purpose. */
+export type SettableStatus = 'In progress' | 'In review' | 'Done';
+
+export interface BlockedReadyIssue {
+  readonly number: number;
+  /** Numbers of the issues that block it and are still open. */
+  readonly openBlockers: readonly number[];
+}
+
+/** Only numbers: a title is text from an issue's author and no session should receive it from a list. */
+export interface ReadyIssues {
+  /** Ready items with no open blocked-by edge, in board order. */
+  readonly ready: readonly number[];
+  readonly blocked: readonly BlockedReadyIssue[];
+}
+
+export interface IssueComment {
+  readonly id: number;
+  /** The author's GitHub login. */
+  readonly author: string;
+  readonly createdAt: string;
+  readonly body: string;
+}
+
+/** An issue as a session may read it. Text from an author who is not an OWNER, MEMBER or COLLABORATOR never gets here. */
+export interface IssueView {
+  readonly number: number;
+  readonly title: string;
+  readonly state: 'open' | 'closed';
+  readonly author: string;
+  readonly body: string;
+  readonly labels: readonly string[];
+  readonly comments: readonly IssueComment[];
+  /** How many comments were dropped for their author. Only the count is kept, never the text. */
+  readonly droppedUntrustedComments: number;
+}
+
+export type ClaimReason =
+  /** This call moved the item from Ready to In progress. */
+  | 'claimed'
+  /** The item was already In progress. A retry of a claim that succeeded lands here too, so the workflow ID (not this flag) is the claim. */
+  | 'already_in_progress'
+  | 'open_pr'
+  | 'claude_branch'
+  /** The item is already In review or Done. */
+  | 'already_past_in_progress';
+
+export interface ClaimResult {
+  readonly claimed: boolean;
+  readonly reason: ClaimReason;
+}
+
+export interface SetStatusResult {
+  /** False when the item already had the status. */
+  readonly changed: boolean;
+  readonly status: SettableStatus;
+}
+
+export interface OpenPrInput {
+  /** A branch named `claude/<issue>` or `claude/<issue>-<slug>`. */
+  readonly head: string;
+  readonly base: string;
+  readonly title: string;
+  /** Filled from `.github/pull_request_template.md` by the caller. */
+  readonly body: string;
+}
+
+export interface OpenPrResult {
+  readonly number: number;
+  readonly url: string;
+  /** False when an open PR for the same head and base was already there. */
+  readonly created: boolean;
+}
+
+export interface ReviewComment {
+  readonly path: string;
+  readonly line: number;
+  readonly side: 'LEFT' | 'RIGHT';
+  readonly body: string;
+}
+
+export interface PostReviewInput {
+  readonly pr: number;
+  /** The head commit the review is about. */
+  readonly commitId: string;
+  /** Names this review, so a retry finds it instead of posting a second one. */
+  readonly idempotencyKey: string;
+  /** Must not be empty: the gate counts only reviews with a body. */
+  readonly body: string;
+  readonly comments: readonly ReviewComment[];
+}
+
+export interface PostReviewResult {
+  readonly reviewId: number;
+  /** False when a review with this key was already on the PR. */
+  readonly posted: boolean;
+}
+
+export interface GateStatus {
+  readonly headSha: string;
+  /** Reviews with a non-empty body, by a trusted author, on the head commit. */
+  readonly reviewsOnHead: number;
+  /** Review threads that are not resolved, whoever started them. */
+  readonly unresolvedThreads: number;
+  /** `reviewsOnHead >= 1 && unresolvedThreads === 0`. Zero threads with zero reviews is not clear. */
+  readonly clear: boolean;
+}
