@@ -70,7 +70,8 @@ Read once at startup in `src/config.ts`. A bad value fails fast, naming the vari
 | `TEMPORAL_DB_FILE` | `.temporal/dev.sqlite` | start-server |
 | `TEMPORAL_CLI_PATH` | unset (SDK downloads one) | start-server, `test:server`, `test:crash` |
 | `CLAUDE_BIN` | `claude` | `runClaudeSession` (tests set it to `test/fake-claude.sh`) |
-| `CLAUDE_PERMISSION_MODE` | unset (the CLI's default) | `runClaudeSession`; one of `default`, `acceptEdits`, `plan`, `bypassPermissions` |
+| `CLAUDE_PERMISSION_MODE` | unset (no flag is passed, so the CLI's own default applies) | `runClaudeSession`; one of `acceptEdits`, `auto`, `manual`, `dontAsk`, `plan`, `bypassPermissions` (see "Permission modes") |
+| `ORCHESTRATOR_ALLOW_BYPASS_PERMISSIONS` | unset | `runClaudeSession`; must be `yes-skip-all-permission-checks` for `bypassPermissions` to be accepted |
 
 There are no secrets. Workflow history is stored, so a run carries identifiers only, never graph data (BR-0001).
 
@@ -104,7 +105,48 @@ All pinned to exact versions in `package.json`: the Temporal TypeScript SDK 1.24
 
 `runClaudeSession` (`src/activities/claude-session.ts`, #627) creates a git worktree on a named branch, runs `claude -p` in it and returns `{ branch, headSha, exitStatus }`. It is built with `createClaudeSessionActivities(loadClaudeConfig(process.env))`, so the executable comes from config and tests substitute a fake.
 
-- **One branch, one session.** The branch is created with `git worktree add -b`, which fails if it exists, so overlapping attempts cannot both start. An attempt that finds the branch locally, or on `origin` (where an open PR's branch lives), returns that state and starts nothing. `exitStatus` says what it found: `success` or `error` (a session of ours finished, recorded in the repo's config as `branch.<name>.orchestratorsession`), `interrupted` (one started and never finished, and it may still be running) or `existing` (not ours, or just created by an overlapping attempt). An unreachable `origin` is an error, never "no branch".
+- **One branch, one session.** The branch is created with `git worktree add -b`, which fails if it exists, so overlapping attempts cannot both start. An attempt that finds the branch locally, or on `origin`, returns that state and starts nothing. "An open PR exists" is implemented as "the branch exists on `origin`", because a PR's branch is pushed and this activity makes no GitHub call (#628 does). So a pushed branch with no PR also counts as taken. An unreachable `origin` is an error, never "no branch".
+- **`exitStatus`** says what it found. The session marker is `branch.<name>.orchestratorsession` in the repo's config (`started`, then `success` or `error`), and the claim is `branch.<name>.orchestratorclaimed`, written before the branch exists.
+
+| `exitStatus` | Meaning | Session started now? |
+|---|---|---|
+| `success`, `error` | A session of ours finished (`error` also covers a non-zero exit, `is_error`, a timeout and malformed output) | No |
+| `interrupted` | A session started and never finished; it may still be running | No |
+| `claimed` | An attempt created the branch and died before recording a start (or is doing so right now). The marker is written before the spawn, so no session ran. Nothing can tell a dead attempt from a live one | No |
+| `existing` | The branch exists and has no claim: not made by this activity, or only on `origin` | No |
+
 - **The prompt is one argv element**, after `--`, spawned without a shell. Only `type` and `is_error` are read from the JSON on stdout. A session's text is never returned, logged or put in an error message. Exit 0 with output that is not a result document fails the activity as `MalformedResult` (non-retryable, and the branch is marked `error` so a retry cannot start another session).
-- **Bounded.** 30 minute session timeout enforced by the activity, 5 second heartbeat, 1 MB output cap, 20 second timeout on each git command, and a retry maximum of 3 for infrastructure failures only (`src/claude-session-policy.ts`). A timeout fails as `SessionTimeout` (non-retryable). A timeout or a cancel sends SIGTERM to the child's whole process group and SIGKILL after 5 seconds.
+- **Bounded.** 30 minute session timeout enforced by the activity, a heartbeat every 5 seconds from the start of the activity to its end (the git phase included, so a slow `git ls-remote` cannot look like a dead worker; the heartbeat timeout is 30 seconds), 1 MB output cap, 20 second timeout on each git command, and a retry maximum of 3 for infrastructure failures only (`src/claude-session-policy.ts`). A timeout fails as `SessionTimeout` (non-retryable). A timeout or a cancel sends SIGTERM to the child's whole process group and SIGKILL after 5 seconds. However the child ends, the group then gets a final SIGKILL, so a descendant that ignores SIGTERM and holds no pipe does not outlive the activity.
 - **Known gap.** A worker that is itself SIGKILLed cannot stop its child. The next attempt reports `interrupted` and starts nothing.
+
+### Permission modes
+
+`CLAUDE_PERMISSION_MODE` is a closed set, the choices `claude --help` lists for `--permission-mode` in CLI 2.1.302: `acceptEdits`, `auto`, `manual`, `dontAsk`, `plan`, `bypassPermissions`. Re-check `claude --help` when the CLI is upgraded, since a value the CLI does not know makes every session exit non-zero (recorded as `error`). Unset passes no flag at all.
+
+- `plan` only plans; a session cannot finish an issue in it.
+- `acceptEdits` lets file edits through; other tools may still ask.
+- `dontAsk` and `auto` decide without asking. Read the CLI's own help for exactly what each allows before using them unattended.
+- `bypassPermissions` skips every permission check and can do anything the OS user can. It is refused unless `ORCHESTRATOR_ALLOW_BYPASS_PERMISSIONS=yes-skip-all-permission-checks` is also set. The CLI itself recommends it only for sandboxes with no internet access.
+
+**An unattended session can stall on a permission prompt.** In `-p` mode, `claude --help` says prompts go to `--permission-prompts host` by default, and with no host nobody answers. Such a session may sit until the 30 minute session timeout, fail as `SessionTimeout` and mark the branch `error`. The activity does not pass `--permission-prompts none` or pick a mode for you: which mode an unattended orchestrator should use is a decision for #629, taken with the risk above in mind.
+
+### Verify before relying on it
+
+The prompt is passed as `claude -p --output-format json [--permission-mode m] -- <prompt>`. Nothing has run this against the real `claude`: the tests use a fake that only proves what the activity sends, and `claude --help` does not mention `--`. It should follow the usual convention that `--` ends option parsing, so a prompt that starts with a dash is safe. Before #629 relies on it, one cheap manual check by the maintainer, which does call the model once: `claude -p -- "reply with ok"` and, for the dash case, `claude -p -- "-reply with ok"`. Record the result here.
+
+### Recovering a stuck branch
+
+By design nothing retries `interrupted`, `claimed` or `existing`, so a person (or a workflow step) clears them. Run these in the repo the activity used (`<repo>`), with the `branch` and worktree directory of the step.
+
+1. For `interrupted` (and `claimed`, to be sure), make sure no session is still running: `pgrep -fl "claude -p"` and stop the one working in that worktree.
+2. Remove the worktree, then the branch. Deleting the branch also deletes its `orchestratorsession` and `orchestratorclaimed` config:
+
+   ```bash
+   git -C <repo> worktree remove --force <worktreeDir>
+   git -C <repo> branch -D <branch>
+   git -C <repo> worktree prune
+   ```
+3. If the branch is on `origin` and should go too: `git -C <repo> push origin --delete <branch>`. Skip this when a PR is open on it and you want to keep that work.
+4. Run the step again. `existing` for a branch you want to keep needs no recovery: it is the activity doing its job.
+
+A claim left with no branch (a crash before `git worktree add`) needs nothing: the next attempt starts fresh. To drop it anyway: `git -C <repo> config --local --unset branch.<branch>.orchestratorclaimed`.
