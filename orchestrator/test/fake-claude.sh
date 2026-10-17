@@ -54,7 +54,7 @@ if [ -n "${FAKE_CLAUDE_SEQUENCE:-}" ]; then
   count=$(($(cat "$count_file" 2>/dev/null || echo 0) + 1))
   echo "$count" >"$count_file"
   if [ -f "$FAKE_CLAUDE_SEQUENCE/$count.sh" ]; then
-    # shellcheck disable=SC1090
+    # shellcheck disable=SC1090 # the file is a test script named by the test's own sequence directory
     . "$FAKE_CLAUDE_SEQUENCE/$count.sh"
     echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"fake"}'
     exit 0
