@@ -30,14 +30,16 @@ npm run worker          # terminal 2: polls the "orchestrator" task queue
 npm run run-hello       # terminal 3: starts one run and waits for it
 ```
 
-`run-hello` takes options after `--`, for example `npm run run-hello -- --name Alice --work-ms 15000`. The second activity pretends to work for `--work-ms` (default 10 seconds), which leaves time to crash the worker. Each activity appends one line to a temp file (`--log-file`, default `orchestrator-hello.log` in your temp directory), and `run-hello` prints the lines for its run.
+`run-hello` takes options after `--`, for example `npm run run-hello -- --name Alice --work-ms 15000`. The second activity writes its line and then wraps up for `--work-ms` (default 10 seconds), which leaves time to crash the worker after the write. Each activity appends one line to a temp file (`--log-file`, default `orchestrator-hello.log` in your temp directory), and `run-hello` prints the lines for its run.
 
 ### Try a crash by hand
 
 1. Start the server and the worker, then `npm run run-hello`.
 2. While it waits, kill the worker with `kill -9 <pid>`. Ctrl-C is a graceful shutdown, so use SIGKILL to simulate a crash.
 3. Start the worker again. The same run finishes, after the dead worker's activity times out (3 seconds without a heartbeat) and is retried.
-4. The log holds one `greet` line and one `farewell` line for the run, not two of either.
+4. The log holds one `greet` line and one `farewell` line for the run, not two of either. The retried `farewell` finds its line already there and writes nothing.
+
+Running `run-hello` again with the same `--run-key` attaches to the open run, or prints the result of a completed one without running it again. A failed run may start again under the same key.
 
 ### The server
 
@@ -46,8 +48,8 @@ npm run run-hello       # terminal 3: starts one run and waits for it
 ### The crash test
 
 ```bash
-npm run test:crash   # starts its own in-memory server and workers, SIGKILLs one, checks the run
-npm run test:unit    # no server needed: activity idempotency, input parsing, workflow bundling
+npm run test:crash   # starts its own in-memory server and workers, SIGKILLs one after farewell wrote its line, checks the retry wrote nothing
+npm run test:unit    # no server needed: activity idempotency (repeat, overlap, partial line, stale lock), input parsing, workflow bundling
 ```
 
 `test:crash` starts a server on a free port, so it does not touch `.temporal/dev.sqlite`.
@@ -72,7 +74,7 @@ There are no secrets. Workflow history is stored, so a run carries identifiers o
 Temporal runs an activity at least once: a worker can die after the side effect and before the server hears about it. So the workflow decides the order and the bounds, and each activity is safe to run again.
 
 - **Bounded.** Every activity has a start-to-close timeout and a retry policy with a maximum number of attempts (`src/workflows/hello.ts`). `farewell` also has a heartbeat timeout, so a dead worker is noticed in seconds.
-- **Idempotent.** Each activity appends `<runKey> <step> ...` only if that line is not already there (`src/activities/hello.ts`), so a retry after a crash leaves one line.
+- **Idempotent.** Each activity appends `<runKey> <step> ...` only if that exact line is not already there (`src/activities/hello.ts`). The check and the append run under one lock file, so two overlapping attempts (a stalled worker whose attempt was retried elsewhere) cannot both write, and a line cut short by a kill never counts as done. A lock left behind by a killed worker is broken after 1.5 seconds. The remaining gap: a holder that stalls for more than that between taking the lock and writing could be overtaken. The lock is held for milliseconds, and v1 accepts that.
 - **Deterministic workflow.** The workflow file has no clock, I/O or randomness. The run key and the work duration come in as input.
 - **Parsed at the boundary.** Activity input is parsed into a typed value first (`src/hello-types.ts`). A bad input is a non-retryable failure.
 
