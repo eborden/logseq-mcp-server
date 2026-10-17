@@ -6,7 +6,6 @@ import assert from 'node:assert/strict';
 import { type ChildProcess, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -16,21 +15,11 @@ import { startDevServer } from '../src/dev-server.ts';
 import { hasErrorCode } from '../src/fs-errors.ts';
 import { parseHelloResult } from '../src/hello-types.ts';
 import type { HelloInput } from '../src/hello-types.ts';
+import { freePort } from './support.ts';
 
 const WORKER_ENTRY = fileURLToPath(new URL('../src/worker.ts', import.meta.url));
 const TASK_QUEUE = 'crash-test';
 const WORK_MS = 6_000;
-
-async function freePort(): Promise<number> {
-  const server = createServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  assert(address !== null && typeof address === 'object');
-  server.close();
-  await once(server, 'close');
-  return address.port;
-}
 
 function startWorker(port: number): ChildProcess {
   return spawn(process.execPath, ['--import', 'tsx', WORKER_ENTRY], {
