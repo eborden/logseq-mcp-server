@@ -1,5 +1,5 @@
-// IssueWorkflow (#629, parent plan #625): one Ready issue to an open PR that is In review on the board. The first half
-// of the loop; the reviewer, the fix loop and the gate are #630, and the merge is the maintainer's.
+// IssueWorkflow (#629 and #630, parent plan #625): one Ready issue to an open PR that is In review on the board, then
+// the reviewer, a bounded fix loop and the merge gate (review-loop.ts). The merge is the maintainer's.
 //
 // Workflow code is deterministic: no clock, no I/O, no randomness. Every side effect is an activity, each activity is
 // bounded (timeouts and a maximum number of attempts, from the policy files), and the history carries identifiers
@@ -21,11 +21,14 @@
 //   open_pr      openPr
 //   board_pr     addToBoard, setStatus In review, getBoardStatus: the PR is In review with no manual step
 //   board_issue  setStatus In review for the issue, getBoardStatus
+//   review loop  the second half, in review-loop.ts (#630): reviews, a bounded fix loop and the gate. The run ends at
+//                "gate clear, waiting for the maintainer", or at "waiting for threads to be resolved by the maintainer".
 // It never merges, never labels, never resolves a thread and never moves an item to Ready or Backlog.
 
 import {
   ActivityFailure,
   ApplicationFailure,
+  CancellationScope,
   TimeoutFailure,
   isCancellation,
   proxyActivities,
@@ -38,6 +41,8 @@ import { BOARD_ACTIVITY_OPTIONS } from '../board-policy.ts';
 import { IMPLEMENTER_ACTIVITY_OPTIONS } from '../claude-session-policy.ts';
 import { BRANCH_ACTIVITY_OPTIONS } from '../branch-types.ts';
 import { GITHUB_ACTIVITY_OPTIONS } from '../github-policy.ts';
+import { DEFAULT_REVIEW_LOOP_TIMEOUT_MS } from '../review-policy.ts';
+import { reviewLoop } from './review-loop.ts';
 import {
   BOARD_CONFIRM_READS,
   BOARD_CONFIRM_WAIT,
@@ -192,5 +197,26 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   await step('board_issue', () => board.setStatus(issueItem, 'In review'));
   await confirmStatus('board_issue', issueItem, 'In review');
 
-  return { outcome: 'in_review', issueNumber: issue, branch: session.branch, headSha: session.headSha, pr: opened.number };
+  // The second half (#630): reviews, the fix loop and the gate, bounded in total time. At the limit the running step is
+  // cancelled (its session is stopped) and the run stops with one comment. A cancel of the whole workflow passes through.
+  let timedOut = false;
+  const loopScope = new CancellationScope();
+  const timerScope = new CancellationScope();
+  void timerScope.run(() => sleep(input.reviewLoopTimeoutMs ?? DEFAULT_REVIEW_LOOP_TIMEOUT_MS)).then(
+    () => {
+      timedOut = true;
+      loopScope.cancel();
+    },
+    () => undefined,
+  );
+  try {
+    return await loopScope.run(() => reviewLoop({ input, pr: opened.number, branch, headSha: checked.headSha, step, stop }));
+  } catch (error) {
+    if (timedOut && isCancellation(error)) {
+      return await CancellationScope.nonCancellable(() => stop('review_loop', 'ReviewLoopTimeout'));
+    }
+    throw error;
+  } finally {
+    timerScope.cancel();
+  }
 }

@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -25,6 +25,7 @@ import { createClaudeSessionActivities } from '../src/activities/claude-session.
 import { createBranchActivities } from '../src/activities/branch.ts';
 import { createGithubActivities } from '../src/activities/github.ts';
 import { createImplementerActivities } from '../src/activities/implementer.ts';
+import { createReviewActivities } from '../src/activities/review.ts';
 import { loadClaudeConfig, loadServerConfig } from '../src/config.ts';
 import { startDevServer } from '../src/dev-server.ts';
 import { startIssueRun } from '../src/issue-client.ts';
@@ -73,6 +74,7 @@ after(async () => {
   await env?.teardown();
   delete process.env['FAKE_CLAUDE_MODE'];
   delete process.env['FAKE_CLAUDE_LOG'];
+  delete process.env['FAKE_CLAUDE_SEQUENCE'];
   if (dir !== undefined) {
     await rm(dir, { recursive: true, force: true });
   }
@@ -110,6 +112,9 @@ class World {
   /** Steps that do their side effect and then die before the result is recorded, once (a worker crash). */
   readonly loseOnce = new Set<LostStep>();
   /** A gate a test opens to let the session finish, so a second start can be tried while one run is open. */
+  /** The review loop's clean answers (#630): reviews posted, and the head the last one was on. */
+  reviews = 0;
+  reviewedHead: string | undefined;
   sessionGate: Promise<void> | undefined;
   sessionEntered: (() => void) | undefined;
 
@@ -258,6 +263,24 @@ function fakeActivities(worlds: Map<number, World>) {
       w.maybeLose(kind === 'pr' ? 'setStatusPr' : 'setStatusIssue');
       return { changed, status };
     },
+    // The second half (#630) is tested in review-loop.test.ts; here every review is clean, so the gate clears at once.
+    runReviewerSession: async (input: { issue: number }) => {
+      world(input.issue).attempt('runReviewerSession');
+      return { findings: 0, acceptedThreadIds: [] };
+    },
+    postSessionReview: async (input: { issue: number; headSha: string }) => {
+      const w = world(input.issue);
+      w.attempt('postSessionReview');
+      if (w.reviewedHead === undefined) {
+        w.reviews += 1;
+      }
+      w.reviewedHead = input.headSha;
+      return { reviewId: 1, posted: true, comments: 0 };
+    },
+    getGateStatus: async (pr: number) => {
+      const w = world(pr - PR_OFFSET);
+      return { headSha: w.reviewedHead ?? '', reviewsOnHead: 1, unresolvedThreads: 0, clear: true };
+    },
     commentIssue: async (input: { issue: number; key: string; body: string }) => {
       const w = world(input.issue);
       w.attempt('commentIssue');
@@ -325,7 +348,8 @@ test('happy path: check, claim, session, PR, then the PR and the issue In review
 
   const result = await runIssue(FAKE_QUEUE, issue);
 
-  assert.deepEqual(result, { outcome: 'in_review', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD_SHA, pr: issue + PR_OFFSET });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD_SHA, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1 });
+  assert.equal(world.reviews, 1, 'one review, and no fixer: a clean first review clears the gate');
   assert.deepEqual(world.order, ['claim', 'session', 'guard', 'push', 'openPr', 'addToBoard', 'setStatus:pr', 'setStatus:issue']);
   assert.deepEqual(world.counters, { claims: 1, sessions: 1, guards: 1, pushes: 1, prs: 1, adds: 1, prWrites: 1, issueWrites: 1, comments: 0 });
   assert.equal(world.prStatus, 'In review', 'the PR is In review on the board with no manual step');
@@ -353,7 +377,7 @@ test('a result lost after any one step is retried, and the run still ends In rev
   const results = await Promise.all(runs.map(({ issue }) => runIssue(FAKE_QUEUE, issue)));
 
   for (const [index, { step, issue, world }] of runs.entries()) {
-    assert.equal(results[index]?.outcome, 'in_review', step);
+    assert.equal(results[index]?.outcome, 'gate_clear', step);
     assert.deepEqual(world.counters, { claims: 1, sessions: 1, guards: 1, pushes: 1, prs: 1, adds: 1, prWrites: 1, issueWrites: 1, comments: 0 }, `${step}: each side effect once`);
     assert.deepEqual(world.order, ['claim', 'session', 'guard', 'push', 'openPr', 'addToBoard', 'setStatus:pr', 'setStatus:issue'], step);
     assert.equal(world.loseOnce.size, 0, `${step}: the loss really happened`);
@@ -384,7 +408,7 @@ test('a retry of the run own claim carries on: proceed true with claimed false i
 
   const result = await runIssue(FAKE_QUEUE, issue);
 
-  assert.equal(result.outcome, 'in_review');
+  assert.equal(result.outcome, 'gate_clear');
   assert.equal(world.counters.claims, 0, 'this run moved nothing in the claim');
   assert.equal(world.counters.sessions, 1);
 });
@@ -622,6 +646,7 @@ async function realStack(name: string, issue: number, configure: (state: ReturnT
   await git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
   await git(repo, 'push', '-q', 'origin', 'main');
   const state = emptyState();
+  state.dynamicGate = true;
   configure(state);
   const fake = await createFake(home, 'gh', state);
   const logFile = join(home, 'claude.log');
@@ -630,8 +655,21 @@ async function realStack(name: string, issue: number, configure: (state: ReturnT
   const github = createGithubActivities(fake.config);
   const claude = createClaudeSessionActivities({ ...loadClaudeConfig({}), claudeBin: FAKE_CLAUDE });
   const implementer = createImplementerActivities({ readIssue: github.readIssue, runClaudeSession: claude.runClaudeSession, repo: fake.config.repo });
+  // The second session of a run is the reviewer's (#630): it finds nothing, so the gate clears.
+  const sequence = join(home, 'sequence');
+  await mkdir(sequence, { recursive: true });
+  await writeFile(join(sequence, '2.sh'), `cat > review-findings.json <<'JSON'\n{"summary":"Checked the change against the issue.","findings":[],"acceptedThreadIds":[]}\nJSON\n`);
+  process.env['FAKE_CLAUDE_SEQUENCE'] = sequence;
+  const review = createReviewActivities({
+    readIssue: github.readIssue,
+    listReviewThreads: github.listReviewThreads,
+    replyToThread: github.replyToThread,
+    postReview: github.postReview,
+    repo: fake.config.repo,
+    claude: { ...loadClaudeConfig({}), claudeBin: FAKE_CLAUDE },
+  });
   const taskQueue = `issue-wf-real-${name}`;
-  await startWorker(taskQueue, { ...github, ...createBranchActivities(), ...implementer });
+  await startWorker(taskQueue, { ...github, ...createBranchActivities(), ...implementer, ...review });
   const input: IssueWorkflowInput = { issueNumber: issue, repoDir: repo, worktreeDir: join(home, 'wt'), base: 'main' };
   const sessions = async (): Promise<number> => {
     try {
@@ -689,12 +727,12 @@ test('the real activities against the fake gh and claude: the PR is In review, a
 
   const result: unknown = await client.workflow.getHandle(issueWorkflowId(stack.input.issueNumber)).result();
 
-  assert.deepEqual(result, { outcome: 'in_review', issueNumber: 201, branch: 'claude/201', headSha: (result as { headSha: string }).headSha, pr: 1001 });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: 201, branch: 'claude/201', headSha: (result as { headSha: string }).headSha, pr: 1001, fixRounds: 0, reviewsOnHead: 1 });
   const state = await stack.fake.state();
   assert.equal(state.board.find((item) => item.number === stack.input.issueNumber)?.status, 'In review');
   assert.equal(state.board.find((item) => item.number === 1001)?.status, 'In review');
   assert.equal(state.pulls.length, 1);
-  assert.equal(await stack.sessions(), 1);
+  assert.equal(await stack.sessions(), 2, 'the implementer, then a fresh reviewer');
 
   const history = await client.workflow.getHandle(issueWorkflowId(stack.input.issueNumber)).fetchHistory();
   assertNoIssueText(history, 'the finished run');

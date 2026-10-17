@@ -27,6 +27,8 @@ export const ISSUE_STEP_TIMEOUT = '2 hours';
 export const BOARD_CONFIRM_READS = 3;
 export const BOARD_CONFIRM_WAIT = '5 seconds';
 
+import { MAX_FIX_ROUNDS_LIMIT, MAX_REVIEW_LOOP_TIMEOUT_MS, MIN_REVIEW_LOOP_TIMEOUT_MS } from './review-policy.ts';
+
 export interface IssueWorkflowInput {
   readonly issueNumber: number;
   /** Absolute path of the main checkout the worktree is created from. */
@@ -35,6 +37,10 @@ export interface IssueWorkflowInput {
   readonly worktreeDir: string;
   /** The branch the PR targets, for example `main` or `feature/atlas`. The session starts from `origin/<base>`. */
   readonly base: string;
+  /** The most fixer rounds of the review loop. Absent means DEFAULT_MAX_FIX_ROUNDS (src/review-policy.ts). */
+  readonly maxFixRounds?: number;
+  /** The longest the review loop may take, in milliseconds. Absent means DEFAULT_REVIEW_LOOP_TIMEOUT_MS. */
+  readonly reviewLoopTimeoutMs?: number;
 }
 
 export class InvalidIssueInputError extends Error {
@@ -69,24 +75,81 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
   if (typeof base !== 'string' || !BASE_REF.test(base) || base.includes('..') || base.includes('//') || base.endsWith('/') || base.endsWith('.lock')) {
     throw new InvalidIssueInputError('base must be a plain branch name');
   }
-  return { issueNumber, repoDir: absolutePath('repoDir', repoDir), worktreeDir: absolutePath('worktreeDir', worktreeDir), base };
+  const maxFixRounds = optionalWholeNumber(raw, 'maxFixRounds', 1, MAX_FIX_ROUNDS_LIMIT);
+  const reviewLoopTimeoutMs = optionalWholeNumber(raw, 'reviewLoopTimeoutMs', MIN_REVIEW_LOOP_TIMEOUT_MS, MAX_REVIEW_LOOP_TIMEOUT_MS);
+  return {
+    issueNumber,
+    repoDir: absolutePath('repoDir', repoDir),
+    worktreeDir: absolutePath('worktreeDir', worktreeDir),
+    base,
+    ...(maxFixRounds === undefined ? {} : { maxFixRounds }),
+    ...(reviewLoopTimeoutMs === undefined ? {} : { reviewLoopTimeoutMs }),
+  };
+}
+
+function optionalWholeNumber(raw: object, name: string, min: number, max: number): number | undefined {
+  const value: unknown = name in raw ? Reflect.get(raw, name) : undefined;
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) {
+    throw new InvalidIssueInputError(`${name} must be a whole number from ${min} to ${max}`);
+  }
+  return value;
 }
 
 /** Why a run ended without a PR and without a person having to look. The issue is left as it was found. */
 export type SkipReason = 'issue_closed' | 'open_pr' | 'claude_branch' | 'already_past_in_progress';
 
+/**
+ * How a run that got a PR ends without a failure (#630). Both are "waiting for the maintainer": the workflow never merges.
+ * - `gate_clear`: at least one review on the PR's head and no unresolved thread.
+ * - `waiting_for_threads`: every open thread is one the reviewer accepted a reply on (`acceptedThreadIds`) or one the
+ *   loop may not act on (an untrusted author's). Only a person resolves a thread, so the gate stays not clear until then.
+ * Identifiers and counts only: no review or thread text is ever in a result.
+ */
 export type IssueRunResult =
   | {
-      readonly outcome: 'in_review';
+      readonly outcome: 'gate_clear';
       readonly issueNumber: number;
       readonly branch: string;
       readonly headSha: string;
       readonly pr: number;
+      readonly fixRounds: number;
+      readonly reviewsOnHead: number;
+    }
+  | {
+      readonly outcome: 'waiting_for_threads';
+      readonly issueNumber: number;
+      readonly branch: string;
+      readonly headSha: string;
+      readonly pr: number;
+      readonly fixRounds: number;
+      readonly acceptedThreadIds: readonly string[];
+      readonly openThreads: number;
     }
   | { readonly outcome: 'skipped'; readonly issueNumber: number; readonly reason: SkipReason };
 
 /** The steps a run can stop at. Part of the failure comment and of the failure the run ends with. */
-export type IssueStep = 'check' | 'claim' | 'confirm_claim' | 'session' | 'guard' | 'push' | 'open_pr' | 'board_pr' | 'board_issue';
+export type IssueStep =
+  | 'check'
+  | 'claim'
+  | 'confirm_claim'
+  | 'session'
+  | 'guard'
+  | 'push'
+  | 'open_pr'
+  | 'board_pr'
+  | 'board_issue'
+  | 'review_session'
+  | 'review_post'
+  | 'gate'
+  | 'threads'
+  | 'fix_session'
+  | 'fix_guard'
+  | 'fix_push'
+  | 'fix_reply'
+  | 'review_loop';
 
 /**
  * The key of the comment a stop leaves: the step and the reason, both identifiers. With the reason in it, a restarted
@@ -155,4 +218,18 @@ export function pullRequestBody(issueNumber: number, branch: string): string {
     'Revert the merge commit.',
     '',
   ].join('\n');
+}
+
+/**
+ * The comment a run leaves when every open thread is one it may not act on (#630). Fixed words, counts and thread ids:
+ * the workflow never resolves a thread, so this says what a person has to do.
+ */
+export function waitingForThreadsComment(workflowId: string, pr: number, openThreads: number, acceptedThreadIds: readonly string[]): string {
+  return [
+    `The orchestrator's review loop (workflow \`${workflowId}\`) has ended for #${pr}, and the merge gate is not clear: ${openThreads} review thread${openThreads === 1 ? ' is' : 's are'} still open.`,
+    acceptedThreadIds.length === 0
+      ? 'The reviewer accepted the reply on none of them. The ones left are not an author the loop may act on.'
+      : `The reviewer accepted the reply on ${acceptedThreadIds.length} of them (thread ids: ${acceptedThreadIds.map((id) => `\`${id}\``).join(', ')}). The others are not an author the loop may act on.`,
+    'Only a person resolves a review thread: the workflow never does. Once the threads are resolved, the gate is clear if a review is on the head commit.',
+  ].join('\n\n');
 }
