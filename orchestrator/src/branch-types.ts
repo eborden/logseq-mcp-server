@@ -75,6 +75,8 @@ export const NON_RETRYABLE_BRANCH_FAILURES: string[] = [
   'ProtectedPath',
   'DiffTooLarge',
   'EmptyDiff',
+  'SpecialFile',
+  'MalformedGitOutput',
   'BranchMoved',
   'PushRejected',
 ];
