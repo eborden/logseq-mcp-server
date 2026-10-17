@@ -195,6 +195,35 @@ export interface IssueView {
   readonly droppedUntrustedComments: number;
 }
 
+/**
+ * What the workflow learns from the read of an issue before it claims it: numbers and flags only. The text of the
+ * issue and of its comments stays out of this result, because activity results are stored in the workflow history
+ * (#629, BR-0001). The brief is built where the text is read, inside `runImplementerSession`.
+ */
+export interface IssueCheck {
+  readonly number: number;
+  /** False for a closed issue: nothing to implement. */
+  readonly open: boolean;
+  /** Comments by an OWNER, MEMBER or COLLABORATOR. */
+  readonly trustedComments: number;
+  /** Comments dropped for their author. Only the count is kept. */
+  readonly droppedUntrustedComments: number;
+}
+
+export interface CommentIssueInput {
+  readonly issue: number;
+  /** Names this comment, so a retry finds it instead of posting a second one. */
+  readonly key: string;
+  /** Written by the caller from fixed text and identifiers, never from a session's output. */
+  readonly body: string;
+}
+
+export interface CommentIssueResult {
+  readonly commentId: number;
+  /** False when a comment with this key was already on the issue. */
+  readonly posted: boolean;
+}
+
 export type ClaimReason =
   /** This call moved the item from Ready to In progress. */
   | 'claimed'

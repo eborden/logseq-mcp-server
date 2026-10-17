@@ -205,6 +205,17 @@ if (argv[0] === 'api') {
     issue === undefined ? respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 }) : send(200, issue);
   }
   if ((match = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(path))) {
+    if (method === 'POST') {
+      // Like GitHub: commenting on an issue that does not exist is a 404. The comment is by the token's own account.
+      if (state.issues[match[1]] === undefined) {
+        respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 });
+      }
+      const comments = (state.comments[match[1]] ??= []);
+      const comment = { id: 9000 + comments.length + 1, body: JSON.parse(stdin).body, user: { login: 'alice' }, created_at: '2026-01-02T00:00:00Z', author_association: 'OWNER' };
+      comments.push(comment);
+      save();
+      send(201, comment);
+    }
     send(200, page(state.comments[match[1]] ?? [], params));
   }
   if ((match = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/dependencies\/blocked_by$/.exec(path))) {

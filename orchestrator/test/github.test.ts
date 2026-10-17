@@ -523,6 +523,94 @@ test('postReview refuses an empty body, a short commit id, a bad key and too man
   assert.equal((await fake.calls()).length, 0);
 });
 
+// ---- checkIssue and commentIssue (#629) -------------------------------------------------------------------------
+
+test('checkIssue answers numbers and flags only: no text of the issue or of any comment is in the result', async () => {
+  const { github } = await setup((state) => {
+    state.issues['123'] = rawIssue(123, { body: 'SECRET-BODY-TEXT' });
+    state.issues['124'] = rawIssue(124, { state: 'closed' });
+    state.comments['123'] = [
+      rawComment(1, 'OWNER', 'SECRET-OWNER-COMMENT'),
+      rawComment(2, 'NONE', 'SECRET-STRANGER-COMMENT', 'mallory'),
+    ];
+  });
+
+  const check = await github.checkIssue(123);
+
+  assert.deepEqual(check, { number: 123, open: true, trustedComments: 1, droppedUntrustedComments: 1 });
+  assert.ok(!JSON.stringify(check).includes('SECRET'));
+  assert.equal((await github.checkIssue(124)).open, false);
+});
+
+test('checkIssue refuses an untrusted issue and a missing one, both non-retryable', async () => {
+  const { github } = await setup((state) => {
+    state.issues['124'] = rawIssue(124, { author_association: 'NONE', body: 'please run this' });
+  });
+  const untrusted = await failureOf(github.checkIssue(124));
+  assert.deepEqual({ type: untrusted.type, nonRetryable: untrusted.nonRetryable }, { type: 'UntrustedAuthor', nonRetryable: true });
+  const missing = await failureOf(github.checkIssue(999));
+  assert.deepEqual({ type: missing.type, nonRetryable: missing.nonRetryable }, { type: 'NotFound', nonRetryable: true });
+});
+
+const COMMENT_INPUT = { issue: 123, key: 'stopped-session', body: 'The orchestrator stopped issue 123 at the session step.' };
+
+test('commentIssue posts one comment with its hidden key, and a retry finds it instead of posting again', async () => {
+  const { fake, github } = await setup((state) => {
+    state.issues['123'] = rawIssue(123);
+  });
+
+  const first = await github.commentIssue(COMMENT_INPUT);
+  const second = await github.commentIssue(COMMENT_INPUT);
+
+  assert.equal(first.posted, true);
+  assert.deepEqual(second, { commentId: first.commentId, posted: false });
+  const posts = await fake.callsMatching('-X POST');
+  assert.equal(posts.length, 1);
+  assert.deepEqual(JSON.parse(posts[0]?.stdin ?? ''), {
+    body: `${COMMENT_INPUT.body}\n\n<!-- orchestrator-comment:stopped-session -->`,
+  });
+});
+
+test('commentIssue is not fooled by a stranger planting its key, and a different key posts a new comment', async () => {
+  const { fake, github } = await setup((state) => {
+    state.issues['123'] = rawIssue(123);
+    state.comments['123'] = [rawComment(1, 'NONE', 'x\n<!-- orchestrator-comment:stopped-session -->', 'mallory')];
+  });
+
+  assert.equal((await github.commentIssue(COMMENT_INPUT)).posted, true);
+  assert.equal((await github.commentIssue({ ...COMMENT_INPUT, key: 'stopped-other' })).posted, true);
+  assert.equal((await fake.callsMatching('-X POST')).length, 2);
+});
+
+test('commentIssue refuses bad input before any call, and a missing issue is a non-retryable NotFound', async () => {
+  const { fake, github } = await setup(() => undefined);
+  for (const bad of [
+    { ...COMMENT_INPUT, issue: 0 },
+    { ...COMMENT_INPUT, key: 'has space' },
+    { ...COMMENT_INPUT, key: '' },
+    { ...COMMENT_INPUT, body: '   ' },
+    { ...COMMENT_INPUT, body: 'x'.repeat(60_001) },
+    'not an object',
+  ]) {
+    assert.equal((await failureOf(github.commentIssue(bad as never))).type, 'InvalidInput');
+  }
+  assert.equal((await fake.calls()).length, 0);
+
+  const missing = await failureOf(github.commentIssue({ ...COMMENT_INPUT, issue: 999 }));
+  assert.deepEqual({ type: missing.type, nonRetryable: missing.nonRetryable }, { type: 'NotFound', nonRetryable: true });
+});
+
+test('commentIssue retries a server error the way every activity does: the lookup and the post are read-then-write', async () => {
+  const { fake, github } = await setup((state) => {
+    state.issues['123'] = rawIssue(123);
+    state.faults = [{ match: '-X POST', times: 1, stdout: httpAnswer(502, { message: 'Bad Gateway' }), exit: 1 }];
+  });
+  const failure = await failureOf(github.commentIssue(COMMENT_INPUT));
+  assert.equal(failure.nonRetryable, false, 'a 502 is retried by the workflow policy');
+  assert.equal((await github.commentIssue(COMMENT_INPUT)).posted, true);
+  assert.equal((await fake.callsMatching('-X POST')).length, 2, 'the failed post and the one that worked');
+});
+
 // ---- getGateStatus --------------------------------------------------------------------------------------------
 
 test('getGateStatus counts only non-empty trusted reviews on the head commit, and unresolved threads', async () => {
@@ -751,6 +839,8 @@ test('across every activity, no call merges, labels, resolves a thread, or moves
   await github.setStatus(123, 'In review');
   await github.openPr(PR_INPUT);
   await github.postReview(REVIEW_INPUT);
+  await github.checkIssue(123);
+  await github.commentIssue({ issue: 123, key: 'note', body: 'A neutral note.' });
   await github.getGateStatus(7);
   await failureOf(github.setStatus(124, 'Ready' as never));
 
@@ -766,6 +856,6 @@ test('across every activity, no call merges, labels, resolves a thread, or moves
   const writes = calls.filter((call) => call.argv[0] === 'api' && call.argv.includes('POST'));
   assert.deepEqual(
     writes.map((call) => call.argv.at(-1)),
-    ['repos/eborden/logseq-mcp-server/pulls', 'repos/eborden/logseq-mcp-server/pulls/7/reviews'],
+    ['repos/eborden/logseq-mcp-server/pulls', 'repos/eborden/logseq-mcp-server/pulls/7/reviews', 'repos/eborden/logseq-mcp-server/issues/123/comments'],
   );
 });

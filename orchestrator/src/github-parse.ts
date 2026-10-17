@@ -332,6 +332,11 @@ export function parseCreatedReviewId(raw: unknown): number {
   return int(obj(raw, 'created review', '$'), 'id', 'created review', '$');
 }
 
+/** The id of a comment GitHub just created. */
+export function parseCreatedCommentId(raw: unknown): number {
+  return int(obj(raw, 'created comment', '$'), 'id', 'created comment', '$');
+}
+
 export interface GateFacts {
   readonly headSha: string;
   readonly reviews: readonly {
