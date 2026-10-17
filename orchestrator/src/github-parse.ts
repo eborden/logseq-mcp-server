@@ -476,9 +476,11 @@ export function parsePrState(raw: unknown, expectedNumber: number): PrState {
   return { state, merged: bool(pr, 'merged', what, '$'), headSha };
 }
 
-/** The path of one changed file of a PR's file listing. Paths are repository paths, not text anyone wrote about the work. */
-export function parsePrFilePath(raw: unknown, path: string): string {
-  return str(obj(raw, 'pull request files', path), 'filename', 'pull request files', path);
+/** The paths of one changed file of a PR's listing: its name and, for a rename, the name it had. Repository paths only. */
+export function parsePrFilePaths(raw: unknown, path: string): string[] {
+  const file = obj(raw, 'pull request files', path);
+  const previous = optStr(file, 'previous_filename', 'pull request files', path);
+  return [str(file, 'filename', 'pull request files', path), ...(previous === undefined ? [] : [previous])];
 }
 
 /** True when a REST answer for an issue shows it closed. The state is read after the same trusted-author check. */

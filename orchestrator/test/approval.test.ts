@@ -69,6 +69,9 @@ test('a decision payload is parsed at the boundary: kind, calendar date and an o
     { decision: 'approved', at: '2025-01-31', message: 5 },
     { decision: 'approved', at: '2025-01-31', message: 'x'.repeat(MAX_DECISION_MESSAGE_CHARS + 1) },
     { decision: 'approved', at: '2025-01-31', message: 'a\u0000b' },
+    { decision: 'approved', at: '2025-01-31', message: 'a\u202eb' },
+    { decision: 'approved', at: '2025-01-31', message: 'a\u2028b' },
+    { decision: 'approved', at: '2025-01-31', message: 'a\rb' },
   ];
   for (const raw of bad) {
     assert.throws(() => parseMaintainerDecision(raw), InvalidDecisionError, JSON.stringify(raw));
@@ -97,8 +100,8 @@ test('a PR is sorted into what only the maintainer decides, by counts', () => {
     'docs/business-rules/0007-atlas.md',
     'Docs/Business-Rules/0008-atlas.md',
   ]);
-  assert.deepEqual(changes, { files: 7, golden: 2, ceilings: 1, adrs: 1, businessRules: 2 });
-  assert.deepEqual(classifyChangedPaths([]), { files: 0, golden: 0, ceilings: 0, adrs: 0, businessRules: 0 });
+  assert.deepEqual(changes, { files: 7, golden: 2, ceilings: 1, adrs: 1, businessRules: 2, complete: true });
+  assert.deepEqual(classifyChangedPaths([]), { files: 0, golden: 0, ceilings: 0, adrs: 0, businessRules: 0, complete: true });
 });
 
 test('the decision comment quotes the message and its date, says what only the maintainer decides, and never forges a marker', () => {
@@ -114,6 +117,12 @@ test('the decision comment quotes the message and its date, says what only the m
   assert.match(sensitive, /does not stand in for it/);
 
   assert.equal(quoteMessage('<!-- orchestrator-comment:x -->'), '> &lt;!-- orchestrator-comment:x -->');
+  // A mention, an issue link, a markdown link and a raw URL are all inert in the public comment.
+  const hostile = quoteMessage('thanks @alice and @org/team, see #123 and [x](https://example.com) <!-- orchestrator-comment:decision-1 -->');
+  assert.doesNotMatch(hostile, /@|#(?!\d+;)|\[|:\/\/|<!--/);
+  assert.equal(quoteMessage('one\rtwo\r\nthree'), '> one\n> two\n> three');
+  const unknown = decisionComment('issue-123', 1123, HEAD, { decision: 'approved', at: '2025-03-04' }, { ...none, complete: false });
+  assert.match(unknown, /could not tell whether golden results/);
   const requested = decisionComment('issue-123', 1123, HEAD, { decision: 'changes_requested', at: '2025-03-04' }, none);
   assert.match(requested, /changes requested/);
   assert.match(requested, /does not change the branch again/);
@@ -346,7 +355,7 @@ test('approved on a clear gate: one decision comment, then the merge is observed
 
   const result = await resultOf(issue);
 
-  assert.deepEqual(result, { outcome: 'merged', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, issueClosedByRun: true, ignoredSignals: 0 });
+  assert.deepEqual(result, { outcome: 'merged', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, issueClosedByRun: true, decisionRecorded: true, ignoredSignals: 0 });
   const comment = world.comments.get(key);
   assert.ok(comment);
   assert.equal(comment.target, issue + PR_OFFSET, 'the comment is on the PR');
@@ -436,7 +445,6 @@ test('a timeout comments on the PR and stops: it never approves, never moves any
   assert.deepEqual([...world.comments.keys()], [`decision-timeout-${issue + PR_OFFSET}`]);
   assert.equal(world.comments.get(`decision-timeout-${issue + PR_OFFSET}`)?.target, issue + PR_OFFSET);
   assert.match(world.comments.get(`decision-timeout-${issue + PR_OFFSET}`)?.body ?? '', /A timeout never approves/);
-  assert.equal(world.counters.getPrState, 0, 'no merge wait without an approval');
   assert.equal(world.counters.getPrChanges, 0);
   assert.deepEqual(world.statusWrites, ['pr:In review', 'issue:In review']);
   assert.equal(world.prStatus, 'In review');
@@ -444,15 +452,11 @@ test('a timeout comments on the PR and stops: it never approves, never moves any
 });
 
 test('a gate that never clears also times out without a decision being used', { timeout: 120_000 }, async () => {
+  // Read 1 is the review loop's and is always clear; every read after it is not.
   const { issue, world } = newWorld((w) => {
     w.clearFromRead = 1_000_000;
   });
-  // Read 1 is the review loop's: with a gate that is never clear it ends `waiting_for_threads` in the loop, which
-  // needs threads to list. Model it by a gate that clears for the loop's read only.
-  world.clearFromRead = 2;
   const handle = await startRun(issue, { decisionTimeoutMs: 2_000 });
-  await until('the decision stage', () => world.gateReads >= 2);
-  world.clearFromRead = 1_000_000;
   await handle.signal(maintainerDecisionSignal, APPROVED);
 
   const result = await resultOf(issue);
@@ -514,7 +518,6 @@ test('changes_requested posts the decision comment and ends the run: no merge wa
   assert.match(comment, /> Rename the atlas helper\./);
   assert.match(comment, /golden-change/, 'a PR that changes golden results says the label is the maintainer\'s');
   assert.match(comment, /business rule file/);
-  assert.equal(world.counters.getPrState, 0);
   assert.deepEqual(world.statusWrites, ['pr:In review', 'issue:In review']);
 });
 
@@ -574,6 +577,49 @@ test('a result lost after the decision comment, a Done move or the close is retr
   assert.equal(lost.world.issueOpen, false);
   assert.equal(lost.world.counters.commentCalls, 2, 'the decision comment ran twice (the lost attempt and its retry), the other comment never');
   assert.equal(handle.workflowId, issueWorkflowId(lost.issue));
+});
+
+test('a PR merged with no signal goes to Done and the closed check, and says no decision was recorded', { timeout: 120_000 }, async () => {
+  const { issue, world } = newWorld();
+  const handle = await startRun(issue);
+  await until('a clear gate', () => world.gateReads >= 2);
+  world.merged = true;
+
+  const result = await resultOf(issue);
+
+  assert.deepEqual(result, { outcome: 'merged', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, issueClosedByRun: true, decisionRecorded: false, ignoredSignals: 0 });
+  assert.deepEqual([...world.comments.keys()], [`merged-without-decision-${issue + PR_OFFSET}`]);
+  assert.deepEqual(world.statusWrites.filter((write) => write.endsWith('Done')), ['pr:Done', 'issue:Done']);
+  assert.equal(world.issueOpen, false);
+  assert.equal(handle.workflowId, issueWorkflowId(issue));
+});
+
+test('a PR closed unmerged while the run waits for a decision stops the run: it does not wait out the timeout', { timeout: 120_000 }, async () => {
+  const { issue, world } = newWorld();
+  await startRun(issue);
+  await until('a clear gate', () => world.gateReads >= 2);
+  world.prState = 'closed';
+
+  assert.deepEqual(await stoppedWith(issue), { step: 'decision_gate', reason: 'PrClosedUnmerged' });
+  assert.deepEqual(world.statusWrites, ['pr:In review', 'issue:In review']);
+});
+
+test('a PR merged while a decision is still held records the held decision, then goes to Done', { timeout: 120_000 }, async () => {
+  const { issue, world } = newWorld((w) => {
+    w.clearFromRead = 1_000_000;
+  });
+  world.clearFromRead = 2;
+  const handle = await startRun(issue);
+  await until('the decision stage', () => world.gateReads >= 2);
+  world.clearFromRead = 1_000_000;
+  await handle.signal(maintainerDecisionSignal, APPROVED);
+  world.merged = true;
+
+  const result = await resultOf(issue);
+
+  assert.equal(result.outcome, 'merged');
+  assert.equal(result.outcome === 'merged' ? result.decisionRecorded : undefined, true);
+  assert.ok(world.comments.has(`decision-${issue + PR_OFFSET}`));
 });
 
 test('the finished run replays against the current workflow code', { timeout: 120_000 }, async () => {

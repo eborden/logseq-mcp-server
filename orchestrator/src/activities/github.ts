@@ -38,14 +38,14 @@ import {
   parseItemBoardStatus,
   parseList,
   parseOpenPr,
-  parsePrFilePath,
+  parsePrFilePaths,
   parsePrState,
   parseRefName,
   parseReview,
   parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
-import { classifyChangedPaths } from '../approval-types.ts';
+import { UNCLASSIFIED_CHANGES, classifyChangedPaths } from '../approval-types.ts';
 import type { SensitiveChanges } from '../approval-types.ts';
 import type {
   AddToBoardResult,
@@ -666,12 +666,20 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
 
   /**
    * The files a PR changes that the maintainer alone decides on (golden results, call ceilings, ADRs, business
-   * rules), as counts. Paths stay in this activity (#631): the workflow records numbers only.
+   * rules), as counts. A rename counts by both names. Paths stay in this activity (#631): the workflow records numbers only.
    */
   async function getPrChanges(raw: unknown): Promise<SensitiveChanges> {
     const number = parseIssueNumber(raw, 'pr');
-    const { items } = await listAll(`${repoRoute}/pulls/${number}/files`, 'pull request files', parsePrFilePath);
-    return classifyChangedPaths(items);
+    try {
+      const { items } = await listAll(`${repoRoute}/pulls/${number}/files`, 'pull request files', parsePrFilePaths);
+      return classifyChangedPaths(items.flat());
+    } catch (error) {
+      // A PR with more files than one call reads must not stop the run after the maintainer decided: say so instead.
+      if (error instanceof GhError && error.kind === 'output_too_large') {
+        return UNCLASSIFIED_CHANGES;
+      }
+      throw error;
+    }
   }
 
   /**

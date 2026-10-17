@@ -36,6 +36,10 @@ export class InvalidDecisionError extends Error {
   }
 }
 
+// The characters review-types.ts `sanitiseText` removes: control characters other than newline and tab, and the ones
+// that reorder or hide text.
+const HIDDEN_CHARACTERS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2028\u2029\u2066-\u2069\ufeff]/;
+
 const DATE_SHAPE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** True for a real calendar date in the form `YYYY-MM-DD`: February 30 and month 13 are refused. */
@@ -65,7 +69,7 @@ export function parseMaintainerDecision(raw: unknown): MaintainerDecision {
     throw new InvalidDecisionError('at must be a calendar date, YYYY-MM-DD');
   }
   if (message !== undefined) {
-    if (typeof message !== 'string' || message.trim() === '' || message.length > MAX_DECISION_MESSAGE_CHARS || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(message)) {
+    if (typeof message !== 'string' || message.trim() === '' || message.length > MAX_DECISION_MESSAGE_CHARS || HIDDEN_CHARACTERS.test(message)) {
       throw new InvalidDecisionError(`message must be non-empty text of at most ${MAX_DECISION_MESSAGE_CHARS} characters without control characters`);
     }
     return { decision: kind, at, message };
@@ -124,15 +128,21 @@ export interface SensitiveChanges {
   readonly ceilings: number;
   readonly adrs: number;
   readonly businessRules: number;
+  /** False when the PR has more files than one call reads, so the counts are not the whole answer. */
+  readonly complete: boolean;
 }
 
 const CEILINGS_FILE = 'tests/data/parity/call-ceilings.json';
 const PARITY_DIR = 'tests/data/parity/';
 
+/** What a PR with more files than one call reads answers: nothing was counted, and the comment says so. */
+export const UNCLASSIFIED_CHANGES: SensitiveChanges = { files: 0, golden: 0, ceilings: 0, adrs: 0, businessRules: 0, complete: false };
+
 /**
  * Sorts the changed paths of a PR into the counts above. A group file under `tests/data/parity/` is counted as
  * golden although a change to only its stub answers is not one (the CI job compares by case): this errs toward
- * telling the maintainer, which costs a sentence, never toward staying quiet.
+ * telling the maintainer, which costs a sentence, never toward staying quiet. The same goes for the README of
+ * `docs/adr/` and `docs/business-rules/`: it counts as a change there although the OK rule is about their content.
  */
 export function classifyChangedPaths(paths: readonly string[]): SensitiveChanges {
   let golden = 0;
@@ -151,7 +161,7 @@ export function classifyChangedPaths(paths: readonly string[]): SensitiveChanges
       businessRules += 1;
     }
   }
-  return { files: paths.length, golden, ceilings, adrs, businessRules };
+  return { files: paths.length, golden, ceilings, adrs, businessRules, complete: true };
 }
 
 // ---- comments --------------------------------------------------------------------------------------------------
@@ -169,12 +179,16 @@ export function mergeTimeoutCommentKey(pr: number): string {
   return `merge-timeout-${pr}`;
 }
 
-/** The maintainer's words as a blockquote. Angle brackets are escaped so a message cannot forge a hidden marker. */
+/**
+ * The maintainer's words as a blockquote, made inert in a public comment: `<` is an entity (no hidden marker, no HTML),
+ * and `@`, `#`, `[` and `://` are written as entities so a message cannot mention anyone, link an issue or autolink.
+ */
 export function quoteMessage(message: string): string {
+  const entity: Readonly<Record<string, string>> = { '&': '&amp;', '<': '&lt;', '@': '&#64;', '#': '&#35;', '[': '&#91;' };
   return message
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .split(/\r?\n/)
+    .replace(/[&<@#[]/g, (character) => entity[character] ?? character)
+    .replace(/:\/\//g, '&#58;//')
+    .split(/\r\n|\r|\n/)
     .map((line) => `> ${line}`)
     .join('\n');
 }
@@ -186,6 +200,9 @@ function plural(count: number, word: string): string {
 /** The sentences about what only the maintainer may decide, from the counts. Empty when the PR changes none of it. */
 export function sensitiveNotes(changes: SensitiveChanges): string[] {
   const notes: string[] = [];
+  if (!changes.complete) {
+    notes.push('This PR changes more files than the orchestrator reads, so it could not tell whether golden results, call ceilings, ADRs or business rules changed. Check by hand before the merge.');
+  }
   if (changes.golden + changes.ceilings > 0) {
     notes.push(
       `This PR changes ${plural(changes.golden, 'file')} of golden results and ${plural(changes.ceilings, 'call ceiling file')} (\`tests/data/parity/\`). The \`golden-change\` label needs the maintainer's explicit OK and only the maintainer adds it. The workflow never applies it.`,
@@ -227,5 +244,16 @@ export function mergeTimeoutComment(workflowId: string, pr: number, timeoutMs: n
   return [
     `The orchestrator (workflow \`${workflowId}\`) recorded the maintainer's approval of #${pr} and waited ${Math.round(timeoutMs / 3_600_000)} hours for the merge, which did not happen.`,
     'The run stops here. The PR and its issue are left as they are: nothing was moved to Done.',
+  ].join('\n\n');
+}
+
+export function mergedWithoutDecisionKey(pr: number): string {
+  return `merged-without-decision-${pr}`;
+}
+
+export function mergedWithoutDecisionComment(workflowId: string, pr: number): string {
+  return [
+    `The orchestrator (workflow \`${workflowId}\`) saw #${pr} merged with no decision from the maintainer sent to it.`,
+    'No decision is recorded for this run. The merge is the maintainer\'s own record. The run now moves the PR and its issue to Done and checks that the issue is closed.',
   ].join('\n\n');
 }
