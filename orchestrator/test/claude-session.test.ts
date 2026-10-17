@@ -646,7 +646,8 @@ test('the implementer activity has its own start-to-close: the read, the session
   assert.deepEqual(IMPLEMENTER_ACTIVITY_OPTIONS.retry, CLAUDE_SESSION_ACTIVITY_OPTIONS.retry);
   // The workflow uses it, not the session options that a long read would run out.
   const source = await readFile(new URL('../src/workflows/issue.ts', import.meta.url), 'utf8');
-  assert.ok(source.includes('...IMPLEMENTER_ACTIVITY_OPTIONS'));
+  assert.match(source, /const implementer = proxyActivities<ImplementerActivities>\(\{\n  \.\.\.IMPLEMENTER_ACTIVITY_OPTIONS,\n  scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,\n\}\);/);
+  assert.ok(!source.includes('startToCloseTimeout'), 'no step overrides the start-to-close of its policy');
   assert.ok(!source.includes('CLAUDE_SESSION_ACTIVITY_OPTIONS'));
 });
 
