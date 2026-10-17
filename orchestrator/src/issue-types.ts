@@ -20,10 +20,10 @@ export function issueBranch(issueNumber: number): string {
 }
 
 /**
- * The longest the whole run may take. The client sets it as the workflow execution timeout. The work to an open PR
- * and its review loop are bounded at 8 hours; the maintainer's decision and the merge after it each get at most
- * MAX_DECISION_TIMEOUT_MS (10 days, #631), so 21 days covers the longest run the input can ask for. Before the gate, only the step
- * bound (2 hours each) and the review loop's own timer bound the run; there is no 8 hour cap on it any more.
+ * The longest the whole run may take. The client sets it as the workflow execution timeout. Before the gate nothing caps
+ * the run as a whole except the step bound (2 hours each) and the review loop's own timer; after it, the maintainer's
+ * decision and the merge each get at most MAX_DECISION_TIMEOUT_MS (10 days, #631), so 21 days covers the longest wait
+ * the input can ask for with room for the work before it.
  */
 export const ISSUE_RUN_TIMEOUT = '21 days';
 /** The longest any one step may take, retries included (`scheduleToCloseTimeout` of its activities). */
