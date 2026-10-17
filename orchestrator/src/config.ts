@@ -17,6 +17,15 @@ export interface ServerConfig {
   readonly cliPath: string | undefined;
 }
 
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+
+export interface ClaudeConfig {
+  /** The `claude` executable: a bare name looked up on PATH, or an absolute path. Tests point it at a fake. */
+  readonly claudeBin: string;
+  /** Passed as `--permission-mode`. Absent leaves the CLI's own default. */
+  readonly permissionMode: PermissionMode | undefined;
+}
+
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export const DEFAULT_PORT = 7233;
@@ -64,6 +73,22 @@ export function loadConfig(env: Env): Config {
   }
 
   return { address, namespace, taskQueue };
+}
+
+const CLAUDE_BIN = /^(\/[^\0]{1,1023}|[A-Za-z0-9._-]{1,100})$/;
+const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
+
+export function loadClaudeConfig(env: Env): ClaudeConfig {
+  const claudeBin = blankAsAbsent(env['CLAUDE_BIN']) ?? 'claude';
+  if (!CLAUDE_BIN.test(claudeBin)) {
+    throw new ConfigError('CLAUDE_BIN must be a command name or an absolute path');
+  }
+  const rawMode = blankAsAbsent(env['CLAUDE_PERMISSION_MODE']);
+  const permissionMode = rawMode === undefined ? undefined : PERMISSION_MODES.find((mode) => mode === rawMode);
+  if (rawMode !== undefined && permissionMode === undefined) {
+    throw new ConfigError(`CLAUDE_PERMISSION_MODE must be one of ${PERMISSION_MODES.join(', ')}`);
+  }
+  return { claudeBin, permissionMode };
 }
 
 export function loadServerConfig(env: Env): ServerConfig {
