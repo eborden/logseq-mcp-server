@@ -122,6 +122,8 @@ class World {
   gateHead: (reads: number) => string | undefined = () => undefined;
   reviewerDelayMs = 0;
   pushHeadMoves = true;
+  /** GitHub shows no review on the head for this many gate reads after it was accepted. */
+  reviewLagReads = 0;
 
   gateReads = 0;
   readonly counters = { reviewerSessions: 0, reviews: 0, fixerSessions: 0, guards: 0, pushes: 0, replies: 0, comments: 0 };
@@ -295,7 +297,7 @@ function fakeActivities() {
       w.gateReads += 1;
       return {
         headSha: w.gateHead(w.gateReads) ?? w.head,
-        reviewsOnHead: w.reviews.filter((review) => review.commit === w.head).length,
+        reviewsOnHead: w.gateReads <= w.reviewLagReads ? 0 : w.reviews.filter((review) => review.commit === w.head).length,
         unresolvedThreads: w.unresolved.length,
         clear: false,
       };
@@ -576,6 +578,21 @@ test('a failing fixer, a guard that refuses and a head the gate never shows each
   assert.equal(lagging.world.counters.comments, 1);
 });
 
+test('a review count that lags the review just posted is read again, and only then does the run stop', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  const lag = newWorld((world) => {
+    world.reviewLagReads = 1;
+  });
+  const never = newWorld((world) => {
+    world.recordReviewOn = () => undefined;
+  });
+
+  assert.equal((await runIssue(FAKE_QUEUE, lag.issue)).outcome, 'gate_clear');
+  assert.equal(lag.world.attempts['getGateStatus'], 2);
+  assert.equal((await stoppedWith(never.issue, FAKE_QUEUE)).reason, 'ReviewNotCounted');
+  assert.equal(never.world.attempts['getGateStatus'], 3, 'the same bounded number of reads');
+});
+
 test('a gate read that lags one push behind is read again, and the run goes on', { timeout: 120_000 }, async () => {
   await ensureFakeWorker();
   const { issue, world: w } = newWorld((world) => {
@@ -682,8 +699,10 @@ async function sourceFiles(root: string): Promise<{ name: string; text: string }
   return found;
 }
 
+// A tripwire, not a proof: a literal search of the source for the forms such a call takes (a GraphQL name, a `gh`
+// argv, a REST route). A call built some other way would not match.
 test('nothing in the orchestrator resolves a thread, approves, requests changes, merges or labels', async () => {
-  const forbidden = [/resolveReviewThread/i, /unresolveReviewThread/i, /\/resolve['"`]/, /event:\s*['"](APPROVE|REQUEST_CHANGES)/, /gh pr merge/, /pulls\/\$\{[^}]*\}\/merge/, /--add-label/, /addLabelsToLabelable/];
+  const forbidden = [/resolveReviewThread/i, /unresolveReviewThread/i, /\/resolve['"`]/, /event:\s*['"](APPROVE|REQUEST_CHANGES)/, /gh pr merge/, /pulls\/\$\{[^}]*\}\/merge/, /--add-label/, /addLabelsToLabelable/, /mergePullRequest/, /'pr',\s*'merge'/, /--approve/, /\/labels['"`]/, /updateProjectV2ItemFieldValue/];
   for (const { name, text } of await sourceFiles(SRC_DIR)) {
     const code = text
       .split('\n')

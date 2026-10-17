@@ -130,15 +130,23 @@ const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u20
 
 /**
  * Text from a session, made safe to post. It cannot carry the hidden idempotency markers (`<!--`), notify anyone
- * (`@name` gets a zero-width space), offer an "apply suggestion" button, or hide text behind control characters.
+ * (`@name` gets a zero-width space), name a link or image target, offer an "apply suggestion" button, or hide text
+ * behind control characters. Plain `<` in review text (a generic type) becomes `&lt;`: the cost of closing HTML.
  */
 export function sanitiseText(text: string): string {
   return text
     .replace(/\r\n?/g, '\n')
     .replace(CONTROL, '')
-    .replace(/<!--/g, '&lt;!--')
+    // Every `<` is an entity: no hidden marker, no HTML tag (an `<img>` is fetched when the review is viewed).
+    .replace(/</g, '&lt;')
     .replace(/-->/g, '--&gt;')
-    .replace(/(^|[^A-Za-z0-9_`])@(?=[A-Za-z0-9])/g, '$1@\u200b')
+    // Every `@` before a letter or digit is broken, in a code span or not (GitHub notifies only outside a closed one,
+    // and a lone backtick does not close one).
+    .replace(/@(?=[A-Za-z0-9])/g, '@\u200b')
+    // No markdown image or link target, so a finding cannot make GitHub fetch or show a URL of the session's choosing.
+    .replace(/!\[/g, '!\u200b[')
+    .replace(/\]\(/g, ']\u200b(')
+    .replace(/\]:/g, ']\u200b:')
     .replace(/```[ \t]*suggestion/gi, '``` suggestion')
     .trim();
 }

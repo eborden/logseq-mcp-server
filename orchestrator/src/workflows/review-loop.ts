@@ -81,18 +81,23 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
     acceptedThreadIds: [...accepted],
   });
 
-  /** Reads the gate until it shows the head just reviewed (GitHub can lag a push), a bounded number of times. */
+  /**
+   * Reads the gate until it shows the head just reviewed and a review or a thread on it (GitHub can lag a push, and
+   * can lag a review it just accepted), a bounded number of times. After the last read, a head that is not ours stops
+   * the run; the right head with nothing counted on it is returned for the caller to stop on.
+   */
   async function readGate(): Promise<GateStatus> {
+    let status: GateStatus | undefined;
     for (let read = 1; read <= GATE_READS; read += 1) {
-      const status = await step('gate', () => reviewGithub.getGateStatus(pr));
-      if (status.headSha === head) {
+      status = await step('gate', () => reviewGithub.getGateStatus(pr));
+      if (status.headSha === head && (status.reviewsOnHead > 0 || status.unresolvedThreads > 0)) {
         return status;
       }
       if (read < GATE_READS) {
         await sleep(GATE_READ_WAIT);
       }
     }
-    return await stop('gate', 'HeadMismatch');
+    return status?.headSha === head ? status : await stop('gate', 'HeadMismatch');
   }
 
   for (;;) {
