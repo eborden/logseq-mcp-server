@@ -6,7 +6,7 @@ This first slice (#626) proves the engine runs here and survives a crash. It hol
 
 ## What v1 does not do
 
-- No `claude`, `gh` or board code yet (later tasks in #625).
+- No `gh` or board code yet (later tasks in #625). The `runClaudeSession` activity (#627) exists but is not registered on the worker or called by a workflow yet (#629 wires it).
 - No Postgres, Docker, extra task queues or scheduler. One task queue, `orchestrator`.
 - It never merges, never applies `golden-change` and never moves a board item from Backlog to Ready.
 
@@ -52,7 +52,7 @@ Running `run-hello` again with the same `--run-key` attaches to the open run, or
 ```bash
 npm run test:crash   # starts its own in-memory server and workers, SIGKILLs one after farewell wrote its line, checks the retry wrote nothing
 npm run test:server  # runs start-server as a child process: it must stay up, accept a connection and exit 0 on SIGTERM
-npm run test:unit    # no server needed: activity idempotency (repeat, overlap, partial line, stale lock), input parsing, workflow bundling
+npm run test:unit    # no server needed: activity idempotency (repeat, overlap, partial line, stale lock), input parsing, workflow bundling, and `runClaudeSession` against a fake `claude`
 ```
 
 `test:crash` and `test:server` start servers on free ports, so they do not touch `.temporal/dev.sqlite`. Both need the Temporal CLI, and both fail (never skip) when it is missing. If the SDK cannot download it, check the network (a VPN can break the download) or install the CLI and set `TEMPORAL_CLI_PATH` to it. On a failed assertion `test:server` stops its child with SIGTERM first, so the `temporal` process does not outlive the test.
@@ -68,7 +68,9 @@ Read once at startup in `src/config.ts`. A bad value fails fast, naming the vari
 | `TASK_QUEUE` | `orchestrator` | worker, client |
 | `TEMPORAL_PORT` | `7233` | start-server |
 | `TEMPORAL_DB_FILE` | `.temporal/dev.sqlite` | start-server |
-| `TEMPORAL_CLI_PATH` | unset (SDK downloads one) | start-server |
+| `TEMPORAL_CLI_PATH` | unset (SDK downloads one) | start-server, `test:server`, `test:crash` |
+| `CLAUDE_BIN` | `claude` | `runClaudeSession` (tests set it to `test/fake-claude.sh`) |
+| `CLAUDE_PERMISSION_MODE` | unset (the CLI's default) | `runClaudeSession`; one of `default`, `acceptEdits`, `plan`, `bypassPermissions` |
 
 There are no secrets. Workflow history is stored, so a run carries identifiers only, never graph data (BR-0001).
 
@@ -89,9 +91,20 @@ Temporal runs an activity at least once: a worker can die after the side effect 
 | `src/activities/hello.ts` | The two activities |
 | `src/worker.ts`, `src/client.ts` | The worker and the run starter |
 | `src/start-server.ts`, `src/dev-server.ts` | The dev server launcher |
-| `src/config.ts`, `src/hello-types.ts` | Typed config and input parsing |
-| `test/` | The crash test and the server-free unit tests |
+| `src/activities/claude-session.ts` | `runClaudeSession`: one worktree, one branch, one `claude -p` session |
+| `src/claude-session-policy.ts` | Its timeouts, heartbeat and retry bounds (importable from workflow code) |
+| `src/config.ts`, `src/hello-types.ts`, `src/types.ts` | Typed config and input and output parsing |
+| `test/` | The crash test, the server-free unit tests, and `fake-claude.sh` (a stand-in for `claude`, so no test calls the model) |
 
 ## Dependencies
 
 All pinned to exact versions in `package.json`: the Temporal TypeScript SDK 1.24.0 (`@temporalio/client`, `worker`, `workflow`, `activity`, `testing`; MIT, maintained by the Temporal SDK team), plus `typescript`, `@types/node` and `tsx` for the toolchain. `@temporalio/testing` is a runtime dependency here because it is the SDK's launcher for the dev server.
+
+## The Claude session activity
+
+`runClaudeSession` (`src/activities/claude-session.ts`, #627) creates a git worktree on a named branch, runs `claude -p` in it and returns `{ branch, headSha, exitStatus }`. It is built with `createClaudeSessionActivities(loadClaudeConfig(process.env))`, so the executable comes from config and tests substitute a fake.
+
+- **One branch, one session.** The branch is created with `git worktree add -b`, which fails if it exists, so overlapping attempts cannot both start. An attempt that finds the branch locally, or on `origin` (where an open PR's branch lives), returns that state and starts nothing. `exitStatus` says what it found: `success` or `error` (a session of ours finished, recorded in the repo's config as `branch.<name>.orchestratorsession`), `interrupted` (one started and never finished, and it may still be running) or `existing` (not ours, or just created by an overlapping attempt). An unreachable `origin` is an error, never "no branch".
+- **The prompt is one argv element**, after `--`, spawned without a shell. Only `type` and `is_error` are read from the JSON on stdout. A session's text is never returned, logged or put in an error message. Exit 0 with output that is not a result document fails the activity as `MalformedResult` (non-retryable, and the branch is marked `error` so a retry cannot start another session).
+- **Bounded.** 30 minute session timeout enforced by the activity, 5 second heartbeat, 1 MB output cap, 20 second timeout on each git command, and a retry maximum of 3 for infrastructure failures only (`src/claude-session-policy.ts`). A timeout fails as `SessionTimeout` (non-retryable). A timeout or a cancel sends SIGTERM to the child's whole process group and SIGKILL after 5 seconds.
+- **Known gap.** A worker that is itself SIGKILLed cannot stop its child. The next attempt reports `interrupted` and starts nothing.
