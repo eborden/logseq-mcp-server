@@ -106,11 +106,11 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
     for (const id of reviewed.acceptedThreadIds) {
       accepted.add(id);
     }
-    await step('review_post', () => reviewGithub.postSessionReview(stepInput()));
+    const posted = await step('review_post', () => reviewGithub.postSessionReview(stepInput()));
 
     const gate = await readGate();
     if (gateClear(gate)) {
-      return { outcome: 'gate_clear', issueNumber: input.issueNumber, branch, headSha: head, pr, fixRounds: round, reviewsOnHead: gate.reviewsOnHead };
+      return { outcome: 'gate_clear', issueNumber: input.issueNumber, branch, headSha: head, pr, fixRounds: round, reviewsOnHead: gate.reviewsOnHead, advisory: posted.advisory, advisoryOmitted: posted.omitted };
     }
     if (gate.unresolvedThreads === 0) {
       // No thread is open, yet no review counts on the head: the review just posted is not being counted. Looping
@@ -126,10 +126,10 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
         reviewGithub.commentIssue({
           issue: input.issueNumber,
           key: `waiting-threads-${pr}`,
-          body: waitingForThreadsComment(issueWorkflowId(input.issueNumber), pr, open.length, acceptedOpen),
+          body: waitingForThreadsComment(issueWorkflowId(input.issueNumber), pr, open.length, acceptedOpen, posted.advisory, posted.omitted),
         }),
       );
-      return { outcome: 'waiting_for_threads', issueNumber: input.issueNumber, branch, headSha: head, pr, fixRounds: round, acceptedThreadIds: acceptedOpen, openThreads: open.length };
+      return { outcome: 'waiting_for_threads', issueNumber: input.issueNumber, branch, headSha: head, pr, fixRounds: round, acceptedThreadIds: acceptedOpen, openThreads: open.length, advisory: posted.advisory, advisoryOmitted: posted.omitted };
     }
     if (round >= maxRounds) {
       return await stop('review_loop', 'MaxRoundsReached');

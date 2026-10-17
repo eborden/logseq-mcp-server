@@ -125,6 +125,9 @@ class World {
   pushHeadMoves = true;
   /** GitHub shows no review on the head for this many gate reads after it was accepted. */
   reviewLagReads = 0;
+  /** Findings of every review that sit in its body (off the changed lines), and the ones left out of it. */
+  advisory = 0;
+  advisoryOmitted = 0;
 
   gateReads = 0;
   readonly counters = { reviewerSessions: 0, reviews: 0, fixerSessions: 0, guards: 0, pushes: 0, replies: 0, comments: 0 };
@@ -290,7 +293,7 @@ function fakeActivities() {
         }
       }
       w.maybeLose('postSessionReview');
-      return { reviewId: 5000 + input.round, posted: true, comments: findings, advisory: 0, omitted: 0 };
+      return { reviewId: 5000 + input.round, posted: true, comments: findings, advisory: w.advisory, omitted: w.advisoryOmitted };
     },
     getGateStatus: async (pr: number) => {
       const w = world(pr - PR_OFFSET);
@@ -396,7 +399,7 @@ test('a clean first review clears the gate with no fixer run, and the run ends t
 
   const result = await runIssue(FAKE_QUEUE, issue);
 
-  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD0, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1 });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD0, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0 });
   assert.deepEqual(w.counters, { reviewerSessions: 1, reviews: 1, fixerSessions: 0, guards: 1, pushes: 1, replies: 0, comments: 0 });
   assert.deepEqual(w.events, ['guard:a', 'push:a', 'reviewer:0', 'review:0@a']);
 });
@@ -411,7 +414,7 @@ test('threads open, a fix, a closing review on the new head, then the gate clear
 
   const result = await runIssue(FAKE_QUEUE, issue);
 
-  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: fixHead(0), pr: issue + PR_OFFSET, fixRounds: 1, reviewsOnHead: 1 });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: fixHead(0), pr: issue + PR_OFFSET, fixRounds: 1, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0 });
   // In order: a review on the first head, a fix, the guard and the push of the new commit, the replies, and then a
   // second review on the NEW head. The first review is on an older commit and does not count for the gate any more.
   assert.deepEqual(w.events, ['guard:a', 'push:a', 'reviewer:0', 'review:0@a', 'fixer:0', 'guard:1', 'push:1', 'replies:0@1', 'reviewer:1', 'review:1@1']);
@@ -440,6 +443,8 @@ test('without a person resolving the thread, the run ends waiting for threads to
     fixRounds: 1,
     acceptedThreadIds: ['T0_0'],
     openThreads: 1,
+    advisory: 0,
+    advisoryOmitted: 0,
   });
   assert.equal(w.counters.fixerSessions, 1, 'no second fixer round for a thread the reviewer accepted');
   assert.equal(w.unresolved.length, 1, 'the workflow resolved nothing');
@@ -577,6 +582,27 @@ test('a failing fixer, a guard that refuses and a head the gate never shows each
   assert.deepEqual([stoppedLag.step, stoppedLag.reason], ['gate', 'HeadMismatch']);
   assert.equal(lagging.world.attempts['getGateStatus'], 3, 'the gate was read a bounded number of times');
   assert.equal(lagging.world.counters.comments, 1);
+});
+
+test('advisory findings of the last review are in the result and in the waiting comment: a clear gate does not hide them', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  const clear = newWorld((world) => {
+    world.advisory = 2;
+    world.advisoryOmitted = 1;
+  });
+  const waiting = newWorld((world) => {
+    world.advisory = 3;
+    world.threads.push({ id: 'STRANGER_1', trusted: false, resolved: false });
+  });
+
+  const result = await runIssue(FAKE_QUEUE, clear.issue);
+  const other = await runIssue(FAKE_QUEUE, waiting.issue);
+
+  assert.ok(result.outcome === 'gate_clear');
+  assert.deepEqual([result.advisory, result.advisoryOmitted], [2, 1], 'clear, with 3 findings no thread holds');
+  assert.ok(other.outcome === 'waiting_for_threads');
+  assert.equal(other.advisory, 3);
+  assert.ok((waiting.world.commentKeys.get(`waiting-threads-${waiting.issue + PR_OFFSET}`) ?? '').includes('3 advisory findings'));
 });
 
 test('a review count that lags the review just posted is read again, and only then does the run stop', { timeout: 120_000 }, async () => {
@@ -734,6 +760,8 @@ test('the invariant check fails for each form a call could take, added to a scra
     ['a Ready move by mutation', "const q = 'mutation { updateProjectV2ItemFieldValue(input: { value: { singleSelectOptionId: \"Ready\" } }) { clientMutationId } }';"],
     ['a board write by gh project outside the board activities', "await gh.project(['item-edit', '--id', id]);"],
     ['dynamic code', "eval('x');"],
+    ['a merge call after a block comment on the same line', "/* ok */ await gh.api('repos/o/r/pulls/1/merge', { method: 'PUT' });"],
+    ['a merge mutation on a template line that starts with a star', 'const q = `\n* mutation { mergePullRequest(input: {}) { clientMutationId } }\n`;'],
   ];
   for (const [name, line] of forms) {
     const scratch = { name: review.name, text: `${review.text}\n${line}\n` };

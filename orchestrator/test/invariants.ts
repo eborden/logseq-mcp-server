@@ -35,11 +35,17 @@ const RULES: readonly Rule[] = [
   { label: 'dynamic code', pattern: /\beval\s*\(|\bnew\s+Function\s*\(|\bFunction\s*\(/ },
 ];
 
-/** The code of a file with comment lines removed and obvious string building put back together. */
+/**
+ * The code of a file with comments removed and obvious string building put back together. A block comment ends at its
+ * `*` + `/`, and code after it on the same line is kept; a `//` comment is dropped only when it is the whole line.
+ * A `/*` counts as a comment start only after a line start, a space or one of `;{}()`, so a glob like `src/**` in a
+ * string does not swallow the code that follows it.
+ */
 export function normalise(text: string): string {
   const code = text
+    .replace(/(^|[\s;{}()])\/\*[\s\S]*?\*\//g, '$1')
     .split('\n')
-    .filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*') && !line.trim().startsWith('/*'))
+    .filter((line) => !line.trim().startsWith('//'))
     .join('\n');
   return code
     .replace(/\[\s*((?:['"`][^'"`\n]*['"`]\s*,?\s*)+)\]\s*\.join\(\s*(['"`])([^'"`\n]*)\2\s*\)/g, (_all, items: string, _quote: string, separator: string) =>

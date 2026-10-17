@@ -39,6 +39,7 @@ export const NON_RETRYABLE_REVIEW_FAILURES: string[] = [
   'FindingsTooLarge',
   'BriefTooLarge',
   'BranchMoved',
+  'DiffUnreadable',
 ];
 
 /** The reviewer and the fixer each read from GitHub before the session, so they get the implementer's budget. */
