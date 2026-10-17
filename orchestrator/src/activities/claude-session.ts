@@ -61,7 +61,7 @@ interface GitResult {
 }
 
 /** Runs git and returns its exit code. A timeout or a missing git is thrown (the retry policy tries again). */
-async function git(cwd: string, args: readonly string[]): Promise<GitResult> {
+export async function git(cwd: string, args: readonly string[]): Promise<GitResult> {
   try {
     const { stdout, stderr } = await execFileAsync('git', args, { cwd, timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_MAX_BUFFER });
     return { code: 0, stdout, stderr };
@@ -82,7 +82,7 @@ async function git(cwd: string, args: readonly string[]): Promise<GitResult> {
 }
 
 /** Runs git and throws on any non-zero exit. */
-async function gitOk(cwd: string, args: readonly string[]): Promise<string> {
+export async function gitOk(cwd: string, args: readonly string[]): Promise<string> {
   const result = await git(cwd, args);
   if (result.code !== 0) {
     throw new Error(`git ${args[0] ?? ''} failed (exit ${result.code}): ${result.stderr.trim().slice(0, 300)}`);
@@ -98,7 +98,7 @@ function claimKey(branch: string): string {
   return `branch.${branch}.orchestratorclaimed`;
 }
 
-async function readConfig(repoDir: string, key: string): Promise<string | undefined> {
+export async function readConfig(repoDir: string, key: string): Promise<string | undefined> {
   const result = await git(repoDir, ['config', '--local', '--get', key]);
   if (result.code === 0) {
     return result.stdout.trim();
@@ -173,7 +173,7 @@ async function findExisting(input: SessionInput): Promise<SessionResult | undefi
   return undefined;
 }
 
-type ChildOutcome =
+export type ChildOutcome =
   | { readonly kind: 'exited'; readonly code: number | null; readonly stdout: string; readonly overflow: boolean }
   | { readonly kind: 'timeout' }
   | { readonly kind: 'cancelled' }
@@ -183,7 +183,7 @@ type ChildOutcome =
  * Runs `claude` and stops its whole process group on timeout or cancel. Whatever way it ends, the group is then
  * sent SIGKILL: a descendant that ignores SIGTERM and holds no stdout pipe outlives the direct child's `close`.
  */
-function runChild(
+export function runChild(
   bin: string,
   args: readonly string[],
   cwd: string,
@@ -269,6 +269,27 @@ function runChild(
   });
 }
 
+/**
+ * The argv of one `claude -p` session: the permission flags of the config, then `--` and the prompt as one element.
+ * `allowedTools` replaces the config's list for a session that needs a narrower one (the reviewer, #630).
+ */
+export function claudeArgs(config: ClaudeConfig, prompt: string, allowedTools: readonly string[] = config.allowedTools): string[] {
+  return [
+    '-p',
+    '--output-format',
+    'json',
+    ...(config.permissionMode === undefined ? [] : ['--permission-mode', config.permissionMode]),
+    ...(config.permissionPrompts === undefined ? [] : ['--permission-prompts', config.permissionPrompts]),
+    // One argument, joined with `=`: the option is variadic, and this keeps it from taking anything after it.
+    ...(allowedTools.length === 0 ? [] : [`--allowedTools=${allowedTools.join(',')}`]),
+    ...(config.disallowedTools.length === 0 ? [] : [`--disallowedTools=${config.disallowedTools.join(',')}`]),
+    ...(config.settingSources.length === 0 ? [] : ['--setting-sources', config.settingSources.join(',')]),
+    ...(config.strictMcpConfig ? ['--strict-mcp-config'] : []),
+    '--',
+    prompt,
+  ];
+}
+
 function parseOrFail(raw: unknown): SessionInput {
   try {
     return parseSessionInput(raw);
@@ -324,20 +345,7 @@ export function createClaudeSessionActivities(config: ClaudeConfig, limits: Sess
     }
     await writeMarker(input.repoDir, input.branch, 'started');
 
-    const args = [
-      '-p',
-      '--output-format',
-      'json',
-      ...(config.permissionMode === undefined ? [] : ['--permission-mode', config.permissionMode]),
-      ...(config.permissionPrompts === undefined ? [] : ['--permission-prompts', config.permissionPrompts]),
-      // One argument, joined with `=`: the option is variadic, and this keeps it from taking anything after it.
-      ...(config.allowedTools.length === 0 ? [] : [`--allowedTools=${config.allowedTools.join(',')}`]),
-      ...(config.disallowedTools.length === 0 ? [] : [`--disallowedTools=${config.disallowedTools.join(',')}`]),
-      ...(config.settingSources.length === 0 ? [] : ['--setting-sources', config.settingSources.join(',')]),
-      ...(config.strictMcpConfig ? ['--strict-mcp-config'] : []),
-      '--',
-      input.prompt,
-    ];
+    const args = claudeArgs(config, input.prompt);
     const outcome = await runChild(config.claudeBin, args, input.worktreeDir, limits, context);
 
     switch (outcome.kind) {
