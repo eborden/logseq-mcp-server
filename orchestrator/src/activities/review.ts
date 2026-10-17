@@ -108,8 +108,13 @@ export function reviewerDir(input: ReviewStepInput): string {
   return `${input.worktreeDir}-review-${input.round}`;
 }
 
+/**
+ * One marker per session. The reviewer's carries the head it reviewed, so a marker from an earlier head can never
+ * make a later head reuse its findings. The fixer's does not: a round starts at one head, and `postFixerReplies` is
+ * given the head after the push.
+ */
 function markerKey(kind: Kind, input: ReviewStepInput): string {
-  return `orchestrator.${kind}-${input.pr}-r${input.round}`;
+  return kind === 'reviewer' ? `orchestrator.reviewer-${input.pr}-r${input.round}-${input.headSha.slice(0, SHORT)}` : `orchestrator.fixer-${input.pr}-r${input.round}`;
 }
 
 /** The file's text, refused when it is missing, not a plain file or over the byte bound. The text is never put in a message. */
@@ -136,6 +141,48 @@ async function readReviewerOutput(input: ReviewStepInput): Promise<ReviewerOutpu
   } catch (error) {
     throw asFailure(error);
   }
+}
+
+/**
+ * The (path, line) pairs the PR changes on their new side: `git diff -U0` of the base to the head, read in the review
+ * worktree. GitHub answers 422 for a whole review when one inline comment is on any other line.
+ */
+async function changedLines(dir: string, base: string, headSha: string): Promise<Map<string, Set<number>>> {
+  const diff = await gitOk(dir, ['diff', '-U0', '--no-color', '--no-ext-diff', '--no-renames', `origin/${base}...${headSha}`]);
+  const changed = new Map<string, Set<number>>();
+  let lines: Set<number> | undefined;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++ ')) {
+      const path = line.slice(4).replace(/\t.*$/, '');
+      lines = path.startsWith('b/') ? new Set<number>() : undefined;
+      if (lines !== undefined) {
+        changed.set(path.slice(2), lines);
+      }
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (hunk !== null && lines !== undefined) {
+      const start = Number(hunk[1]);
+      const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+      for (let at = start; at < start + count; at += 1) {
+        lines.add(at);
+      }
+    }
+  }
+  return changed;
+}
+
+/** The reviewer's file, refused whole when a finding is not on a line the diff changes (the count only, no text). */
+async function readCheckedReviewerOutput(input: ReviewStepInput): Promise<ReviewerOutput> {
+  const output = await readReviewerOutput(input);
+  if (output.findings.length > 0) {
+    const changed = await changedLines(reviewerDir(input), input.base, input.headSha);
+    const outside = output.findings.filter((finding) => changed.get(finding.path)?.has(finding.line) !== true).length;
+    if (outside > 0) {
+      throw failure(`${outside} finding${outside === 1 ? ' is' : 's are'} not on a line the diff changes, which GitHub would reject`, 'MalformedFindings');
+    }
+  }
+  return output;
 }
 
 async function readFixerOutput(input: ReviewStepInput): Promise<FixerOutput> {
@@ -256,10 +303,13 @@ export function createReviewActivities(deps: ReviewDeps) {
         await rm(dir, { recursive: true, force: true });
         await git(input.repoDir, ['worktree', 'prune']);
         await gitOk(input.repoDir, ['worktree', 'add', '--detach', dir, input.headSha]);
+        // The checkout is the PR's own tree, which may already hold a file (or a link) of this name: only the session
+        // may write the findings, so remove it (a link itself, not its target) before the session starts.
+        await rm(join(dir, REVIEWER_OUTPUT_FILE), { force: true });
       };
       await runOnce('reviewer', input, dir, prompt, reviewerAllowedTools(input.base), prepare, context);
 
-      const output = await readReviewerOutput(input);
+      const output = await readCheckedReviewerOutput(input);
       // Only a thread that is open and the reviewer could read is accepted; an id the session invented is dropped.
       const acceptable = new Set(threads.filter((thread) => thread.trusted).map((thread) => thread.id));
       return { findings: output.findings.length, acceptedThreadIds: output.acceptedThreadIds.filter((id) => acceptable.has(id)) };
@@ -272,7 +322,7 @@ export function createReviewActivities(deps: ReviewDeps) {
     if ((await readConfig(input.repoDir, markerKey('reviewer', input))) !== 'success') {
       throw failure('there is no finished reviewer session to post', 'SessionError');
     }
-    const output = await readReviewerOutput(input);
+    const output = await readCheckedReviewerOutput(input);
     const body = [
       `Review of commit \`${input.headSha.slice(0, SHORT)}\` (round ${input.round}), by a fresh reviewer session of the orchestrator. Its text is model output, checked for size and shape and cleaned before it was posted.`,
       '',
