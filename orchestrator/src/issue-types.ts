@@ -117,6 +117,10 @@ export type IssueRunResult =
       readonly pr: number;
       readonly fixRounds: number;
       readonly reviewsOnHead: number;
+      /** Findings of the last review that sit in its body, not in a thread: they do not hold the gate. Counts only. */
+      readonly advisory: number;
+      /** Advisory findings that did not fit the review body's bound. */
+      readonly advisoryOmitted: number;
     }
   | {
       readonly outcome: 'waiting_for_threads';
@@ -127,6 +131,8 @@ export type IssueRunResult =
       readonly fixRounds: number;
       readonly acceptedThreadIds: readonly string[];
       readonly openThreads: number;
+      readonly advisory: number;
+      readonly advisoryOmitted: number;
     }
   | { readonly outcome: 'skipped'; readonly issueNumber: number; readonly reason: SkipReason };
 
@@ -224,12 +230,24 @@ export function pullRequestBody(issueNumber: number, branch: string): string {
  * The comment a run leaves when every open thread is one it may not act on (#630). Fixed words, counts and thread ids:
  * the workflow never resolves a thread, so this says what a person has to do.
  */
-export function waitingForThreadsComment(workflowId: string, pr: number, openThreads: number, acceptedThreadIds: readonly string[]): string {
+export function waitingForThreadsComment(
+  workflowId: string,
+  pr: number,
+  openThreads: number,
+  acceptedThreadIds: readonly string[],
+  advisory: number,
+  advisoryOmitted: number,
+): string {
   return [
     `The orchestrator's review loop (workflow \`${workflowId}\`) has ended for #${pr}, and the merge gate is not clear: ${openThreads} review thread${openThreads === 1 ? ' is' : 's are'} still open.`,
     acceptedThreadIds.length === 0
       ? 'The reviewer accepted the reply on none of them. The ones left are not an author the loop may act on.'
       : `The reviewer accepted the reply on ${acceptedThreadIds.length} of them (thread ids: ${acceptedThreadIds.map((id) => `\`${id}\``).join(', ')}). The others are not an author the loop may act on.`,
+    advisory === 0
+      ? ''
+      : `The last review also has ${advisory + advisoryOmitted} advisory finding${advisory + advisoryOmitted === 1 ? '' : 's'} in its body (${advisoryOmitted} of them not listed there), on lines the commit does not change. They open no thread, so they do not hold the gate: read the review.`,
     'Only a person resolves a review thread: the workflow never does. Once the threads are resolved, the gate is clear if a review is on the head commit.',
-  ].join('\n\n');
+  ]
+    .filter((paragraph) => paragraph !== '')
+    .join('\n\n');
 }

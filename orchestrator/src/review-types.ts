@@ -142,6 +142,9 @@ export function sanitiseText(text: string): string {
   return text
     .replace(/\r\n?/g, '\n')
     .replace(CONTROL, '')
+    // An entity that would render as `@`, `:` or `/` must not reach GitHub as one (`&#64;alice` renders `@alice`). `&amp;`,
+    // `&lt;` and `&gt;` stay, so the pass is idempotent and the entities the next rule writes are not doubled.
+    .replace(/&(?!(?:amp|lt|gt);)(?=#|[A-Za-z][A-Za-z0-9]*;)/g, '&amp;')
     // Every `<` is an entity: no hidden marker, no HTML tag (an `<img>` is fetched when the review is viewed).
     .replace(/</g, '&lt;')
     .replace(/-->/g, '--&gt;')

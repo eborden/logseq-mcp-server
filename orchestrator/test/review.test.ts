@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -103,6 +103,11 @@ test('sanitising: no hidden marker, no mention, no suggestion button, no control
   assert.equal(sanitiseText('mail alice@example.com and `@code`'), 'mail alice@\u200bexample.com and `@\u200bcode`', 'a mention is broken in a code span too');
   assert.equal(sanitiseText('`@alice please'), '`@\u200balice please', 'a lone backtick closes no code span');
   assert.equal(sanitiseText('![x](https://host.example/p.png?d=1) and [t](https://h.example)'), '!\u200b[x]\u200b(https:\u200b//host.example/p.png?d=1) and [t]\u200b(https:\u200b//h.example)', 'no image or link target');
+  for (const entity of ['&#64;alice', '&#x40;alice', '&commat;alice', 'https&#58;//h.example', 'https:&#47;&#47;h.example']) {
+    const clean = sanitiseText(entity);
+    assert.ok(clean.startsWith('&amp;') || clean.includes('&amp;'), `${entity} must not stay an entity`);
+    assert.equal(sanitiseText(clean), clean, `${entity}: sanitising twice is the same as once`);
+  }
   assert.equal(sanitiseText('[ref]: https://h.example'), '[ref]\u200b: https:\u200b//h.example');
   assert.equal(sanitiseText('<img src="https://h.example/x.png"> and Vec<T>'), '&lt;img src="https:\u200b//h.example/x.png"> and Vec&lt;T>', 'no HTML tag');
   assert.equal(sanitiseText('see https://h.example/a and www.h.example'), 'see https:\u200b//h.example/a and www\u200b.h.example', 'a raw URL does not autolink');
@@ -317,6 +322,7 @@ async function scenario(configure: (state: FakeState) => void = () => undefined,
     if (content.startsWith('->')) {
       await symlink(content.slice(2), join(worktree, name));
     } else {
+      await mkdir(dirname(join(worktree, name)), { recursive: true });
       await writeFile(join(worktree, name), content);
     }
     await git(worktree, 'add', name);
@@ -465,15 +471,28 @@ JSON
   assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: false, comments: 1, advisory: 2, omitted: 0 }, 'a retry changes nothing');
 });
 
-test('the reviewer: when the diff cannot be read, every finding goes in the body and the review is still posted', async () => {
+test('the reviewer: when the diff cannot be read, findings that cannot be placed stop the run (DiffUnreadable), and no finding means the review is still posted', async () => {
   const s = await scenario();
   await s.script(1, WRITE_FINDINGS);
   await s.run(s.activities.runReviewerSession);
-  const posted = await s.run(s.activities.postSessionReview, { base: 'no-such-branch' });
-  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 0, advisory: 1, omitted: 0 });
-  const review = await postedReviewBody(s);
-  assert.equal(review.comments.length, 0);
-  assert.ok(review.body.includes('SECRET-FINDING-TEXT'));
+  const failed = await failureOf(s.run(s.activities.postSessionReview, { base: 'no-such-branch' }));
+  assert.equal(failed.type, 'DiffUnreadable');
+  assert.equal(failed.nonRetryable, true);
+  assert.ok(!failed.message.includes('SECRET-FINDING-TEXT'));
+  assert.equal((await s.fake.callsMatching('/pulls/77/reviews')).filter((call) => call.argv.includes('POST')).length, 0, 'nothing was posted: a clear gate must not rest on findings no thread holds');
+
+  const clean = await scenario();
+  await clean.script(1, `printf '{"summary":"Nothing found.","findings":[],"acceptedThreadIds":[]}' > review-findings.json`);
+  await clean.run(clean.activities.runReviewerSession);
+  assert.deepEqual(await clean.run(clean.activities.postSessionReview, { base: 'no-such-branch' }), { reviewId: 5001, posted: true, comments: 0, advisory: 0, omitted: 0 });
+});
+
+test('a committed directory named like the findings file is a classified stop, not an unclassified error', async () => {
+  const s = await scenario(undefined, { 'review-findings.json/x': 'x' });
+  await s.script(1, `printf '{"summary":"Nothing found.","findings":[],"acceptedThreadIds":[]}' > review-findings.json`);
+  const failed = await failureOf(s.run(s.activities.runReviewerSession));
+  assert.equal(failed.type, 'MalformedFindings');
+  assert.equal(failed.nonRetryable, true);
 });
 
 test('the reviewer: a file that is missing, malformed or too large is refused, and nothing is posted', async () => {

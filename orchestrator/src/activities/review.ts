@@ -274,8 +274,8 @@ export function createReviewActivities(deps: ReviewDeps) {
         await git(input.repoDir, ['worktree', 'prune']);
         await gitOk(input.repoDir, ['worktree', 'add', '--detach', dir, input.headSha]);
         // The checkout is the PR's own tree, which may already hold a file (or a link) of this name: only the session
-        // may write the findings, so remove it (a link itself, not its target) before the session starts.
-        await rm(join(dir, REVIEWER_OUTPUT_FILE), { force: true });
+        // may write the findings, so remove it (a link itself, not its target; a directory too) before the session starts.
+        await rm(join(dir, REVIEWER_OUTPUT_FILE), { recursive: true, force: true });
       };
       await runOnce('reviewer', input, dir, prompt, reviewerAllowedTools(input.base), prepare, context);
 
@@ -288,8 +288,8 @@ export function createReviewActivities(deps: ReviewDeps) {
 
   /**
    * The lines the head commit changes against the base, or `undefined` when the diff cannot be read within the bounds
-   * (then every finding goes to the body: GitHub rejects the whole review for one inline comment off the diff). No diff
-   * text is kept or logged. `-U0` shows exactly the changed lines, which is what an inline comment may sit on.
+   * (a missing base ref, a shallow clone, a diff over the output buffer, a git failure). The caller does not post
+   * findings it cannot place. No diff text is kept or logged. `-U0` shows exactly the changed lines, which is what an inline comment may sit on.
    */
   async function changedOnHead(input: ReviewStepInput): Promise<ChangedLines | undefined> {
     try {
@@ -307,7 +307,12 @@ export function createReviewActivities(deps: ReviewDeps) {
       throw failure('there is no finished reviewer session to post', 'SessionError');
     }
     const output = await readReviewerOutput(input);
-    const { inline, advisory } = splitFindings(output.findings, await changedOnHead(input));
+    const changed = await changedOnHead(input);
+    if (changed === undefined && output.findings.length > 0) {
+      // Posting every finding as advisory would open no thread, and the gate would clear on a review that raised problems.
+      throw failure(`the diff could not be read, so ${output.findings.length} finding${output.findings.length === 1 ? ' cannot' : 's cannot'} be placed`, 'DiffUnreadable');
+    }
+    const { inline, advisory } = splitFindings(output.findings, changed);
     const section = advisorySection(advisory);
     const body = [
       `Review of commit \`${input.headSha.slice(0, SHORT)}\` (round ${input.round}), by a fresh reviewer session of the orchestrator. Its text is model output, checked for size and shape and cleaned before it was posted.`,
@@ -354,7 +359,7 @@ export function createReviewActivities(deps: ReviewDeps) {
         if (head !== input.headSha) {
           throw failure('the worktree is not at the commit the round starts from', 'BranchMoved');
         }
-        await rm(join(input.worktreeDir, FIXER_OUTPUT_FILE), { force: true });
+        await rm(join(input.worktreeDir, FIXER_OUTPUT_FILE), { recursive: true, force: true });
         // The replies file is untracked on purpose: keep it out of `git status` and out of a `git add`.
         const exclude = (await gitOk(input.worktreeDir, ['rev-parse', '--git-path', 'info/exclude'])).trim();
         const path = resolve(input.worktreeDir, exclude);
