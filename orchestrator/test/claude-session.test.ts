@@ -4,7 +4,8 @@
 
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -14,8 +15,14 @@ import { CancelledFailure } from '@temporalio/activity';
 import { MockActivityEnvironment } from '@temporalio/testing';
 import { createClaudeSessionActivities } from '../src/activities/claude-session.ts';
 import type { SessionLimits } from '../src/activities/claude-session.ts';
-import { CLAUDE_SESSION_ACTIVITY_OPTIONS, SESSION_TIMEOUT_MS, START_TO_CLOSE_MS } from '../src/claude-session-policy.ts';
-import { ConfigError, loadClaudeConfig } from '../src/config.ts';
+import {
+  CLAUDE_SESSION_ACTIVITY_OPTIONS,
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_TIMEOUT_MS,
+  SESSION_TIMEOUT_MS,
+  START_TO_CLOSE_MS,
+} from '../src/claude-session-policy.ts';
+import { BYPASS_OPT_IN_VALUE, BYPASS_OPT_IN_VARIABLE, ConfigError, loadClaudeConfig } from '../src/config.ts';
 import { InvalidSessionInputError, MalformedSessionOutputError, parseClaudeOutput, parseSessionInput, parseSessionResult } from '../src/types.ts';
 import type { SessionInput, SessionResult } from '../src/types.ts';
 
@@ -34,6 +41,7 @@ interface Scenario {
 }
 
 let scenario: Scenario;
+const ORIGINAL_PATH = process.env['PATH'];
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args], { cwd });
@@ -69,6 +77,9 @@ afterEach(async () => {
   }
   for (const name of FAKE_VARS) {
     delete process.env[name];
+  }
+  if (ORIGINAL_PATH !== undefined) {
+    process.env['PATH'] = ORIGINAL_PATH;
   }
   await rm(scenario.dir, { recursive: true, force: true });
 });
@@ -206,11 +217,11 @@ test('overlapping attempts start one session', { timeout: 30_000 }, async () => 
   process.env['FAKE_CLAUDE_SLOW_SECONDS'] = '0.5';
   const results = await Promise.all([run(), run(), run()]);
   assert.equal(await invocations(), 1);
-  // The winner runs the session. A loser sees the branch before the winner has marked it started (`existing`) or
+  // The winner runs the session. A loser sees the branch before the winner has marked it started (`claimed`) or
   // after (`interrupted`, since the winner is still running): either way it starts nothing.
   const losers = results.filter((result) => result.exitStatus !== 'success');
   assert.equal(losers.length, 2);
-  assert(losers.every((result) => result.exitStatus === 'existing' || result.exitStatus === 'interrupted'));
+  assert(losers.every((result) => result.exitStatus === 'claimed' || result.exitStatus === 'interrupted'));
 });
 
 test('a branch that exists without a session of ours is returned as it is', { timeout: 30_000 }, async () => {
@@ -320,6 +331,76 @@ test('the activity heartbeats while the session runs', { timeout: 30_000 }, asyn
   assert(beats >= 5, `expected several heartbeats, got ${beats}`);
 });
 
+test('a child that survives its parent and ignores SIGTERM is killed after a timeout', { timeout: 30_000 }, async () => {
+  mode('orphan-hang');
+  const limits: SessionLimits = { ...FAST, sessionTimeoutMs: 300, killGraceMs: 200 };
+  await assert.rejects(run(input(), limits), failure('SessionTimeout'));
+  await assertChildrenStopped();
+});
+
+test('a child that survives its parent and ignores SIGTERM is killed after a cancel', { timeout: 30_000 }, async () => {
+  mode('orphan-hang');
+  const env = new MockActivityEnvironment();
+  const running = env.run(activities().runClaudeSession, input());
+  await until('the fake to be running', 5_000, async () => ((await readPids()).length === 2 ? true : undefined));
+  env.cancel();
+  await assert.rejects(running, (error) => error instanceof CancelledFailure);
+  await assertChildrenStopped();
+});
+
+test('a session that exits normally leaves no process behind', { timeout: 30_000 }, async () => {
+  mode('orphan-exit');
+  assert.equal((await run()).exitStatus, 'success');
+  await assertChildrenStopped();
+});
+
+test('the heartbeat runs during the git phase before the session starts', { timeout: 30_000 }, async () => {
+  mode('success');
+  // A git that takes 0.3 s per call, ahead of the real one on PATH.
+  const { stdout } = await execFileAsync('which', ['git']);
+  const bin = join(scenario.dir, 'bin');
+  await mkdir(bin);
+  await writeFile(join(bin, 'git'), `#!/bin/sh\nsleep 0.3\nexec ${stdout.trim()} "$@"\n`);
+  await chmod(join(bin, 'git'), 0o755);
+  process.env['PATH'] = `${bin}:${ORIGINAL_PATH ?? ''}`;
+
+  const env = new MockActivityEnvironment();
+  let beatsBeforeSession = 0;
+  env.on('heartbeat', () => {
+    if (!existsSync(scenario.logFile)) {
+      beatsBeforeSession += 1;
+    }
+  });
+  assert.equal(parseSessionResult(await env.run(activities().runClaudeSession, input())).exitStatus, 'success');
+  // About five git calls at 0.3 s each, a beat every 50 ms.
+  assert(beatsBeforeSession >= 10, `expected a heartbeat through the git phase, got ${beatsBeforeSession}`);
+});
+
+test('a crash between creating the branch and marking it started is reported as claimed, and starts nothing', { timeout: 30_000 }, async () => {
+  mode('success');
+  // What the killed attempt left: the claim, and the branch, but no session marker.
+  await git(scenario.repo, 'config', '--local', 'branch.claude/1-example.orchestratorclaimed', '1');
+  await git(scenario.repo, 'branch', 'claude/1-example', 'main');
+  const result = await run();
+  assert.equal(result.exitStatus, 'claimed');
+  assert.equal(await invocations(), 0);
+});
+
+test('a claim with no branch is retried as a fresh start', { timeout: 30_000 }, async () => {
+  mode('success');
+  await git(scenario.repo, 'config', '--local', 'branch.claude/1-example.orchestratorclaimed', '1');
+  assert.equal((await run()).exitStatus, 'success');
+  assert.equal(await invocations(), 1);
+});
+
+test('a failed worktree add leaves no claim behind', { timeout: 30_000 }, async () => {
+  mode('success');
+  // A base ref that does not exist makes `git worktree add` refuse.
+  await assert.rejects(run(input({ baseRef: 'no-such-ref' })), /git worktree failed/);
+  assert.equal(await invocations(), 0);
+  await assert.rejects(git(scenario.repo, 'config', '--local', '--get', 'branch.claude/1-example.orchestratorclaimed'));
+});
+
 test('a bad input is a non-retryable failure and creates nothing', { timeout: 30_000 }, async () => {
   mode('success');
   for (const bad of [
@@ -369,9 +450,30 @@ test('the claude config is parsed once, with a clear error for a bad value', () 
     claudeBin: '/opt/bin/claude',
     permissionMode: 'acceptEdits',
   });
+  // The closed set is the one `claude --help` lists (CLI 2.1.302), and nothing else.
+  for (const mode of ['acceptEdits', 'auto', 'manual', 'dontAsk', 'plan']) {
+    assert.equal(loadClaudeConfig({ CLAUDE_PERMISSION_MODE: mode }).permissionMode, mode);
+  }
+  assert.throws(() => loadClaudeConfig({ CLAUDE_PERMISSION_MODE: 'default' }), ConfigError);
+  assert.equal(loadClaudeConfig({ CLAUDE_PERMISSION_MODE: '  ' }).permissionMode, undefined);
   assert.throws(() => loadClaudeConfig({ CLAUDE_BIN: 'bin/claude' }), ConfigError);
   assert.throws(() => loadClaudeConfig({ CLAUDE_BIN: 'claude; rm -rf /' }), ConfigError);
   assert.throws(() => loadClaudeConfig({ CLAUDE_PERMISSION_MODE: 'yolo' }), /CLAUDE_PERMISSION_MODE/);
+});
+
+test('bypassPermissions needs its own, loudly named opt-in', () => {
+  const bypass = { CLAUDE_PERMISSION_MODE: 'bypassPermissions' };
+  assert.throws(() => loadClaudeConfig(bypass), new RegExp(BYPASS_OPT_IN_VARIABLE));
+  assert.throws(() => loadClaudeConfig({ ...bypass, [BYPASS_OPT_IN_VARIABLE]: 'true' }), ConfigError);
+  assert.equal(loadClaudeConfig({ ...bypass, [BYPASS_OPT_IN_VARIABLE]: BYPASS_OPT_IN_VALUE }).permissionMode, 'bypassPermissions');
+  // The opt-in alone changes nothing.
+  assert.equal(loadClaudeConfig({ [BYPASS_OPT_IN_VARIABLE]: BYPASS_OPT_IN_VALUE }).permissionMode, undefined);
+});
+
+test('no permission flag is passed when none is configured', { timeout: 30_000 }, async () => {
+  mode('success');
+  await run();
+  assert.equal(await readFile(scenario.argsFile, 'utf8'), '-p\0--output-format\0json\0--\0Implement issue 1.\0');
 });
 
 test('a permission mode from the config is passed before the prompt', { timeout: 30_000 }, async () => {
@@ -387,7 +489,9 @@ test('a permission mode from the config is passed before the prompt', { timeout:
 test('the Temporal bounds are set, and the activity stops its own session before the backstop fires', () => {
   assert(START_TO_CLOSE_MS > SESSION_TIMEOUT_MS);
   assert.equal(CLAUDE_SESSION_ACTIVITY_OPTIONS.startToCloseTimeout, START_TO_CLOSE_MS);
-  assert.notEqual(CLAUDE_SESSION_ACTIVITY_OPTIONS.heartbeatTimeout, undefined);
+  assert.equal(CLAUDE_SESSION_ACTIVITY_OPTIONS.heartbeatTimeout, HEARTBEAT_TIMEOUT_MS);
+  // The heartbeat is a timer over the whole activity, so a few missed beats are the most a stalled loop can cost.
+  assert(HEARTBEAT_TIMEOUT_MS >= 3 * HEARTBEAT_INTERVAL_MS);
   assert.equal(typeof CLAUDE_SESSION_ACTIVITY_OPTIONS.retry?.maximumAttempts, 'number');
 });
 

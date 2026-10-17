@@ -12,7 +12,8 @@
 // - The prompt is one argv element of `claude`, spawned without a shell. Only `type` and `is_error` are read
 //   from the session's JSON output; the model's text is untrusted and is never returned, logged or put in an
 //   error message.
-// - Everything is bounded (foundations 4.6): the session has a timeout, a heartbeat runs while it does, its
+// - Everything is bounded (foundations 4.6): the session has a timeout, a heartbeat runs from the start of the
+//   activity to its end (the git phase included), its
 //   output is capped, every git command has a timeout, and the retry policy has a maximum
 //   (`claude-session-policy.ts`). Cancel and timeout both stop the child's whole process group, SIGTERM first
 //   and SIGKILL after a grace period.
@@ -93,8 +94,12 @@ function markerKey(branch: string): string {
   return `branch.${branch}.orchestratorsession`;
 }
 
-async function readMarker(repoDir: string, branch: string): Promise<string | undefined> {
-  const result = await git(repoDir, ['config', '--local', '--get', markerKey(branch)]);
+function claimKey(branch: string): string {
+  return `branch.${branch}.orchestratorclaimed`;
+}
+
+async function readConfig(repoDir: string, key: string): Promise<string | undefined> {
+  const result = await git(repoDir, ['config', '--local', '--get', key]);
   if (result.code === 0) {
     return result.stdout.trim();
   }
@@ -139,7 +144,7 @@ async function remoteBranchSha(repoDir: string, branch: string): Promise<string 
   throw new Error(`git ls-remote failed (exit ${result.code})`);
 }
 
-function statusFromMarker(marker: string | undefined): SessionExitStatus {
+function statusFromMarker(marker: string | undefined, claimed: boolean): SessionExitStatus {
   switch (marker) {
     case 'success':
       return 'success';
@@ -148,7 +153,8 @@ function statusFromMarker(marker: string | undefined): SessionExitStatus {
     case 'started':
       return 'interrupted';
     default:
-      return 'existing';
+      // No session was ever started on a claimed branch (the marker is written before the spawn).
+      return claimed ? 'claimed' : 'existing';
   }
 }
 
@@ -156,8 +162,9 @@ function statusFromMarker(marker: string | undefined): SessionExitStatus {
 async function findExisting(input: SessionInput): Promise<SessionResult | undefined> {
   const local = await localBranchSha(input.repoDir, input.branch);
   if (local !== undefined) {
-    const marker = await readMarker(input.repoDir, input.branch);
-    return { branch: input.branch, headSha: local, exitStatus: statusFromMarker(marker) };
+    const marker = await readConfig(input.repoDir, markerKey(input.branch));
+    const claimed = (await readConfig(input.repoDir, claimKey(input.branch))) !== undefined;
+    return { branch: input.branch, headSha: local, exitStatus: statusFromMarker(marker, claimed) };
   }
   const remote = await remoteBranchSha(input.repoDir, input.branch);
   if (remote !== undefined) {
@@ -172,7 +179,10 @@ type ChildOutcome =
   | { readonly kind: 'cancelled' }
   | { readonly kind: 'spawn-failed' };
 
-/** Runs `claude`, heartbeating, and stops its whole process group on timeout or cancel. */
+/**
+ * Runs `claude` and stops its whole process group on timeout or cancel. Whatever way it ends, the group is then
+ * sent SIGKILL: a descendant that ignores SIGTERM and holds no stdout pipe outlives the direct child's `close`.
+ */
 function runChild(
   bin: string,
   args: readonly string[],
@@ -212,7 +222,6 @@ function runChild(
       killTimer = setTimeout(() => signalGroup('SIGKILL'), limits.killGraceMs);
     };
 
-    const heartbeat = setInterval(() => context.heartbeat(), limits.heartbeatIntervalMs);
     const timeout = setTimeout(() => stop('timeout'), limits.sessionTimeoutMs);
     const onAbort = (): void => stop('cancelled');
     context.cancellationSignal.addEventListener('abort', onAbort, { once: true });
@@ -222,11 +231,12 @@ function runChild(
         return;
       }
       settled = true;
-      clearInterval(heartbeat);
       clearTimeout(timeout);
       if (killTimer !== undefined) {
         clearTimeout(killTimer);
       }
+      // The leader is gone, so this reaches only what it left behind. A group that no longer exists gives ESRCH.
+      signalGroup('SIGKILL');
       context.cancellationSignal.removeEventListener('abort', onAbort);
       resolve(outcome);
     };
@@ -279,13 +289,27 @@ export function createClaudeSessionActivities(config: ClaudeConfig, limits: Sess
   async function runClaudeSession(raw: unknown): Promise<SessionResult> {
     const input = parseOrFail(raw);
     const context = Context.current();
+    // From here to the end, the git phase, the session and the marker writes alike: a slow `git ls-remote` must
+    // not look like a dead worker.
     context.heartbeat();
+    const heartbeat = setInterval(() => context.heartbeat(), limits.heartbeatIntervalMs);
+    try {
+      return await startOrReport(input, context);
+    } finally {
+      clearInterval(heartbeat);
+    }
+  }
 
+  async function startOrReport(input: SessionInput, context: Context): Promise<SessionResult> {
     const existing = await findExisting(input);
     if (existing !== undefined) {
       return existing;
     }
 
+    // The claim comes first and is kept apart from the session marker, so an overlapping attempt can never
+    // overwrite how far the session got. A crash between creating the branch and marking it started leaves
+    // this claim behind, and a later attempt reports `claimed` (no session ran) instead of a bare `existing`.
+    await gitOk(input.repoDir, ['config', '--local', claimKey(input.branch), '1']);
     try {
       await gitOk(input.repoDir, ['worktree', 'add', '-b', input.branch, input.worktreeDir, input.baseRef]);
     } catch (error) {
@@ -294,6 +318,8 @@ export function createClaudeSessionActivities(config: ClaudeConfig, limits: Sess
       if (raced !== undefined) {
         return raced;
       }
+      // Nothing was created, so do not leave a claim that would mislabel a branch made later by someone else.
+      await git(input.repoDir, ['config', '--local', '--unset', claimKey(input.branch)]);
       throw error;
     }
     await writeMarker(input.repoDir, input.branch, 'started');
