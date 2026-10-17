@@ -22,7 +22,15 @@ import {
   SESSION_TIMEOUT_MS,
   START_TO_CLOSE_MS,
 } from '../src/claude-session-policy.ts';
-import { BYPASS_OPT_IN_VALUE, BYPASS_OPT_IN_VARIABLE, ConfigError, loadClaudeConfig } from '../src/config.ts';
+import {
+  BYPASS_OPT_IN_VALUE,
+  BYPASS_OPT_IN_VARIABLE,
+  ConfigError,
+  DEFAULT_ALLOWED_TOOLS,
+  DEFAULT_PERMISSION_MODE,
+  DEFAULT_PERMISSION_PROMPTS,
+  loadClaudeConfig,
+} from '../src/config.ts';
 import { InvalidSessionInputError, MalformedSessionOutputError, parseClaudeOutput, parseSessionInput, parseSessionResult } from '../src/types.ts';
 import type { SessionInput, SessionResult } from '../src/types.ts';
 
@@ -100,7 +108,7 @@ function input(overrides: Partial<SessionInput> = {}): SessionInput {
 }
 
 function activities(limits: SessionLimits = FAST, claudeBin: string = FAKE_CLAUDE) {
-  return createClaudeSessionActivities({ claudeBin, permissionMode: undefined }, limits);
+  return createClaudeSessionActivities({ claudeBin, permissionMode: undefined, permissionPrompts: undefined, allowedTools: [] }, limits);
 }
 
 async function run(args: unknown = input(), limits: SessionLimits = FAST): Promise<SessionResult> {
@@ -445,20 +453,48 @@ test('the error for a malformed session never quotes its output', () => {
 });
 
 test('the claude config is parsed once, with a clear error for a bad value', () => {
-  assert.deepEqual(loadClaudeConfig({}), { claudeBin: 'claude', permissionMode: undefined });
-  assert.deepEqual(loadClaudeConfig({ CLAUDE_BIN: '/opt/bin/claude', CLAUDE_PERMISSION_MODE: 'acceptEdits' }), {
-    claudeBin: '/opt/bin/claude',
-    permissionMode: 'acceptEdits',
+  // Unset means the unattended defaults (#629): acceptEdits, prompts denied at once, the explicit tool list.
+  assert.deepEqual(loadClaudeConfig({}), {
+    claudeBin: 'claude',
+    permissionMode: DEFAULT_PERMISSION_MODE,
+    permissionPrompts: DEFAULT_PERMISSION_PROMPTS,
+    allowedTools: DEFAULT_ALLOWED_TOOLS,
   });
+  assert.equal(DEFAULT_PERMISSION_MODE, 'acceptEdits');
+  assert.equal(DEFAULT_PERMISSION_PROMPTS, 'none');
+  assert.equal(loadClaudeConfig({ CLAUDE_BIN: '/opt/bin/claude' }).claudeBin, '/opt/bin/claude');
   // The closed set is the one `claude --help` lists (CLI 2.1.302), and nothing else.
   for (const mode of ['acceptEdits', 'auto', 'manual', 'dontAsk', 'plan']) {
     assert.equal(loadClaudeConfig({ CLAUDE_PERMISSION_MODE: mode }).permissionMode, mode);
   }
   assert.throws(() => loadClaudeConfig({ CLAUDE_PERMISSION_MODE: 'default' }), ConfigError);
-  assert.equal(loadClaudeConfig({ CLAUDE_PERMISSION_MODE: '  ' }).permissionMode, undefined);
+  assert.equal(loadClaudeConfig({ CLAUDE_PERMISSION_MODE: '  ' }).permissionMode, DEFAULT_PERMISSION_MODE);
   assert.throws(() => loadClaudeConfig({ CLAUDE_BIN: 'bin/claude' }), ConfigError);
   assert.throws(() => loadClaudeConfig({ CLAUDE_BIN: 'claude; rm -rf /' }), ConfigError);
   assert.throws(() => loadClaudeConfig({ CLAUDE_PERMISSION_MODE: 'yolo' }), /CLAUDE_PERMISSION_MODE/);
+});
+
+test('the permission prompts and the allowed tools are configurable, and a bad value fails fast', () => {
+  assert.equal(loadClaudeConfig({ CLAUDE_PERMISSION_PROMPTS: 'host' }).permissionPrompts, 'host');
+  assert.throws(() => loadClaudeConfig({ CLAUDE_PERMISSION_PROMPTS: 'always' }), /CLAUDE_PERMISSION_PROMPTS/);
+  assert.deepEqual(loadClaudeConfig({ CLAUDE_ALLOWED_TOOLS: 'Read, Edit,Bash(ls *)' }).allowedTools, ['Read', 'Edit', 'Bash(ls *)']);
+  for (const bad of ['Read,,Edit', 'Bash(ls', 'has space', 'Bash(a,b)', 'Edit;rm', 'Bash()']) {
+    assert.throws(() => loadClaudeConfig({ CLAUDE_ALLOWED_TOOLS: bad }), /CLAUDE_ALLOWED_TOOLS/, bad);
+  }
+});
+
+test('the default tool list lets an implementer edit, commit, push a claude/ branch and run the repo checks, and nothing wider', () => {
+  const rules = new Set(DEFAULT_ALLOWED_TOOLS);
+  for (const needed of ['Edit', 'Write', 'Bash(git commit *)', 'Bash(git push -u origin claude/*)', 'Bash(cargo *)', 'Bash(npm *)', 'Bash(gh issue comment *)']) {
+    assert.ok(rules.has(needed), needed);
+  }
+  // No unqualified git or gh, no gh api, no PR creation or merge, no shell, no network client, no deletion.
+  for (const wide of ['Bash', 'Bash(*)', 'Bash(git *)', 'Bash(gh *)', 'Bash(gh api *)', 'Bash(gh pr *)', 'Bash(git push *)', 'Bash(rm *)', 'Bash(curl *)', 'Bash(sh *)', 'Bash(bash *)']) {
+    assert.ok(!rules.has(wide), `${wide} must not be allowed`);
+  }
+  for (const rule of DEFAULT_ALLOWED_TOOLS) {
+    assert.doesNotMatch(rule, /merge|golden-change|--force(?!-with-lease)/, rule);
+  }
 });
 
 test('bypassPermissions needs its own, loudly named opt-in', () => {
@@ -466,8 +502,8 @@ test('bypassPermissions needs its own, loudly named opt-in', () => {
   assert.throws(() => loadClaudeConfig(bypass), new RegExp(BYPASS_OPT_IN_VARIABLE));
   assert.throws(() => loadClaudeConfig({ ...bypass, [BYPASS_OPT_IN_VARIABLE]: 'true' }), ConfigError);
   assert.equal(loadClaudeConfig({ ...bypass, [BYPASS_OPT_IN_VARIABLE]: BYPASS_OPT_IN_VALUE }).permissionMode, 'bypassPermissions');
-  // The opt-in alone changes nothing.
-  assert.equal(loadClaudeConfig({ [BYPASS_OPT_IN_VARIABLE]: BYPASS_OPT_IN_VALUE }).permissionMode, undefined);
+  // The opt-in alone changes nothing: the default stays acceptEdits.
+  assert.equal(loadClaudeConfig({ [BYPASS_OPT_IN_VARIABLE]: BYPASS_OPT_IN_VALUE }).permissionMode, 'acceptEdits');
 });
 
 test('no permission flag is passed when none is configured', { timeout: 30_000 }, async () => {
@@ -476,14 +512,28 @@ test('no permission flag is passed when none is configured', { timeout: 30_000 }
   assert.equal(await readFile(scenario.argsFile, 'utf8'), '-p\0--output-format\0json\0--\0Implement issue 1.\0');
 });
 
-test('a permission mode from the config is passed before the prompt', { timeout: 30_000 }, async () => {
+test('the permission mode, prompts and allowed tools from the config come before the prompt, each as the CLI documents', { timeout: 30_000 }, async () => {
   mode('success');
-  const configured = createClaudeSessionActivities({ claudeBin: FAKE_CLAUDE, permissionMode: 'acceptEdits' }, FAST);
+  const configured = createClaudeSessionActivities(
+    { claudeBin: FAKE_CLAUDE, permissionMode: 'acceptEdits', permissionPrompts: 'none', allowedTools: ['Edit', 'Bash(ls *)'] },
+    FAST,
+  );
   await new MockActivityEnvironment().run(configured.runClaudeSession, input());
   assert.equal(
     await readFile(scenario.argsFile, 'utf8'),
-    '-p\0--output-format\0json\0--permission-mode\0acceptEdits\0--\0Implement issue 1.\0',
+    '-p\0--output-format\0json\0--permission-mode\0acceptEdits\0--permission-prompts\0none\0--allowedTools=Edit,Bash(ls *)\0--\0Implement issue 1.\0',
   );
+});
+
+test('the default config never passes bypassPermissions or a dangerous flag to the session', { timeout: 30_000 }, async () => {
+  mode('success');
+  const configured = createClaudeSessionActivities({ ...loadClaudeConfig({}), claudeBin: FAKE_CLAUDE }, FAST);
+  await new MockActivityEnvironment().run(configured.runClaudeSession, input());
+  const args = (await readFile(scenario.argsFile, 'utf8')).split('\0');
+  assert.ok(args.includes('acceptEdits'));
+  assert.ok(!args.some((arg) => /bypass|dangerously/i.test(arg)));
+  assert.equal(args.at(-2), 'Implement issue 1.', 'the prompt is the last argument, after --');
+  assert.equal(args.at(-3), '--');
 });
 
 test('the Temporal bounds are set, and the activity stops its own session before the backstop fires', () => {
