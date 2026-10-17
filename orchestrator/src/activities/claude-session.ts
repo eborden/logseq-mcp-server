@@ -329,6 +329,9 @@ export function createClaudeSessionActivities(config: ClaudeConfig, limits: Sess
       '--output-format',
       'json',
       ...(config.permissionMode === undefined ? [] : ['--permission-mode', config.permissionMode]),
+      ...(config.permissionPrompts === undefined ? [] : ['--permission-prompts', config.permissionPrompts]),
+      // One argument, joined with `=`: the option is variadic, and this keeps it from taking anything after it.
+      ...(config.allowedTools.length === 0 ? [] : [`--allowedTools=${config.allowedTools.join(',')}`]),
       '--',
       input.prompt,
     ];
