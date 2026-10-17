@@ -30,6 +30,8 @@ npm run worker          # terminal 2: polls the "orchestrator" task queue
 npm run run-hello       # terminal 3: starts one run and waits for it
 ```
 
+`start-server` runs in the foreground and stays up until you press Ctrl-C (or send SIGTERM), which stops it cleanly. Leave that terminal open: the worker and the client both need the server running, and fail with a connection error if nothing listens on `127.0.0.1:7233`.
+
 `run-hello` takes options after `--`, for example `npm run run-hello -- --name Alice --work-ms 15000`. The second activity writes its line and then wraps up for `--work-ms` (default 10 seconds), which leaves time to crash the worker after the write. Each activity appends one line to a temp file (`--log-file`, default `orchestrator-hello.log` in your temp directory), and `run-hello` prints the lines for its run.
 
 ### Try a crash by hand
@@ -49,10 +51,11 @@ Running `run-hello` again with the same `--run-key` attaches to the open run, or
 
 ```bash
 npm run test:crash   # starts its own in-memory server and workers, SIGKILLs one after farewell wrote its line, checks the retry wrote nothing
+npm run test:server  # runs start-server as a child process: it must stay up, accept a connection and exit 0 on SIGTERM
 npm run test:unit    # no server needed: activity idempotency (repeat, overlap, partial line, stale lock), input parsing, workflow bundling
 ```
 
-`test:crash` starts a server on a free port, so it does not touch `.temporal/dev.sqlite`.
+`test:crash` and `test:server` start servers on free ports, so they do not touch `.temporal/dev.sqlite`. Both need the Temporal CLI. If the SDK cannot download it, `test:server` prints a loud SKIPPED line and reports the test as skipped; any other startup failure fails it. `test:crash` fails.
 
 ## Configuration
 
