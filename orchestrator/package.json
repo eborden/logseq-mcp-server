@@ -13,6 +13,7 @@
     "worker": "tsx src/worker.ts",
     "run-hello": "tsx src/client.ts",
     "test:unit": "node --import tsx --test test/activities.test.ts",
+    "test:server": "node --import tsx --test test/start-server.test.ts",
     "test:crash": "node --import tsx --test test/crash.test.ts"
   },
   "license": "MIT",
