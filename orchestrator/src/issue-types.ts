@@ -86,7 +86,15 @@ export type IssueRunResult =
   | { readonly outcome: 'skipped'; readonly issueNumber: number; readonly reason: SkipReason };
 
 /** The steps a run can stop at. Part of the failure comment and of the failure the run ends with. */
-export type IssueStep = 'check' | 'claim' | 'confirm_claim' | 'session' | 'open_pr' | 'board_pr' | 'board_issue';
+export type IssueStep = 'check' | 'claim' | 'confirm_claim' | 'session' | 'guard' | 'push' | 'open_pr' | 'board_pr' | 'board_issue';
+
+/**
+ * The key of the comment a stop leaves: the step and the reason, both identifiers. With the reason in it, a restarted
+ * run that stops at the same step for a different reason still comments, and the same step and reason post once.
+ */
+export function stopCommentKey(step: IssueStep, reason: StopReason): string {
+  return `stopped-${step}-${reason}`;
+}
 
 /** The type of the failure a stopped run ends with, so a client or an operator can tell it from a crash. */
 export const ISSUE_STOPPED_FAILURE = 'IssueStopped';

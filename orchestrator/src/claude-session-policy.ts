@@ -39,3 +39,17 @@ export const CLAUDE_SESSION_ACTIVITY_OPTIONS: ActivityOptions = {
     nonRetryableErrorTypes: NON_RETRYABLE_SESSION_FAILURES,
   },
 };
+
+/**
+ * `runImplementerSession` reads the issue before it starts the session, and the read can wait out up to three rate
+ * limits of ten minutes each (GITHUB_ACTIVITY_TIMEOUTS, 30 minutes) plus its requests. Sharing the session's 35 minutes
+ * with that read would let start-to-close fire in the middle of a session, so the implementer has its own: the read's
+ * budget, then the session's own limit, then a margin for git. The workflow still bounds the whole step at 2 hours.
+ */
+export const IMPLEMENTER_READ_BUDGET_MS = 35 * 60_000;
+export const IMPLEMENTER_START_TO_CLOSE_MS = IMPLEMENTER_READ_BUDGET_MS + SESSION_TIMEOUT_MS + 10 * 60_000;
+
+export const IMPLEMENTER_ACTIVITY_OPTIONS: ActivityOptions = {
+  ...CLAUDE_SESSION_ACTIVITY_OPTIONS,
+  startToCloseTimeout: IMPLEMENTER_START_TO_CLOSE_MS,
+};

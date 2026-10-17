@@ -10,12 +10,14 @@
 // rejects a second (src/issue-client.ts). `claimIssue` is read, then write, and cannot see another workflow, so that
 // ID, not the board, keeps two runs off one issue.
 //
-// Steps, in order. A permanent failure at any of them comments on the issue (once, keyed by the step) and ends the
+// Steps, in order. A permanent failure at any of them comments on the issue (once, keyed by the step and the reason) and ends the
 // run as a Failed workflow: a failed premise is never retried.
 //   check        checkIssue: a trusted-author read; a closed issue is skipped
 //   claim        claimIssue: acts on `proceed`, never on `claimed` alone
 //   confirm      the board shows In progress (the claim's own write is not read back by the claim)
 //   session      runImplementerSession: the brief, then one `claude -p` session on the branch `claude/<n>`
+//   guard        guardBranch: the diff has no protected path, is not empty and is not huge (counts only)
+//   push         pushBranch: the only push, with fixed argv; the session cannot push
 //   open_pr      openPr
 //   board_pr     addToBoard, setStatus In review, getBoardStatus: the PR is In review with no manual step
 //   board_issue  setStatus In review for the issue, getBoardStatus
@@ -30,9 +32,11 @@ import {
   sleep,
 } from '@temporalio/workflow';
 import type { GithubActivities } from '../activities/github.ts';
+import type { BranchActivities } from '../activities/branch.ts';
 import type { ImplementerActivities } from '../activities/implementer.ts';
 import { BOARD_ACTIVITY_OPTIONS } from '../board-policy.ts';
-import { CLAUDE_SESSION_ACTIVITY_OPTIONS } from '../claude-session-policy.ts';
+import { IMPLEMENTER_ACTIVITY_OPTIONS } from '../claude-session-policy.ts';
+import { BRANCH_ACTIVITY_OPTIONS } from '../branch-types.ts';
 import { GITHUB_ACTIVITY_OPTIONS } from '../github-policy.ts';
 import {
   BOARD_CONFIRM_READS,
@@ -47,6 +51,7 @@ import {
   pullRequestBody,
   pullRequestTitle,
   stopComment,
+  stopCommentKey,
 } from '../issue-types.ts';
 import type { IssueRunResult, IssueStep, SkipReason, StopReason } from '../issue-types.ts';
 import type { BoardItemRef, SessionExitStatus, SettableStatus } from '../types.ts';
@@ -60,7 +65,11 @@ const board = proxyActivities<Pick<GithubActivities, 'addToBoard' | 'getBoardSta
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
 });
 const implementer = proxyActivities<ImplementerActivities>({
-  ...CLAUDE_SESSION_ACTIVITY_OPTIONS,
+  ...IMPLEMENTER_ACTIVITY_OPTIONS,
+  scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
+});
+const branches = proxyActivities<BranchActivities>({
+  ...BRANCH_ACTIVITY_OPTIONS,
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
 });
 
@@ -109,7 +118,7 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   async function stop(step: IssueStep, reason: StopReason): Promise<never> {
     if (!NO_COMMENT_FAILURES.includes(reason)) {
       try {
-        await github.commentIssue({ issue, key: `stopped-${step}`, body: stopComment(workflowId, step, reason, pr) });
+        await github.commentIssue({ issue, key: stopCommentKey(step, reason), body: stopComment(workflowId, step, reason, pr) });
       } catch (commentError) {
         if (isCancellation(commentError)) {
           throw commentError;
@@ -164,6 +173,10 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   if (session.exitStatus !== 'success') {
     return await stop('session', SESSION_STOP_REASONS[session.exitStatus]);
   }
+
+  // The session cannot push. The diff is checked first (protected paths, size), then the one push, with fixed argv.
+  const checked = await step('guard', () => branches.guardBranch({ repoDir: input.repoDir, branch, headSha: session.headSha, base: input.base }));
+  await step('push', () => branches.pushBranch({ repoDir: input.repoDir, branch, headSha: checked.headSha, base: input.base }));
 
   const opened = await step('open_pr', () =>
     github.openPr({ head: branch, base: input.base, title: pullRequestTitle(issue), body: pullRequestBody(issue, branch) }),
