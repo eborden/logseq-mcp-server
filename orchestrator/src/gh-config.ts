@@ -40,16 +40,9 @@ export const DEFAULT_RATE_LIMIT: RateLimitPolicy = {
   maxWaits: 3,
 };
 
-/**
- * What the workflow (#629) must give every GitHub activity. One attempt can wait out `maxWaits` rate limits of up to
- * `maxWaitMs` each (30 minutes in all), on top of the time of its own requests, so the start-to-close timeout must
- * be longer than that. While it waits it heartbeats every 5 seconds, and a request is bounded by `timeoutMs` (30 s),
- * so a heartbeat timeout of two minutes tells a dead worker from a waiting one.
- */
-export const GITHUB_ACTIVITY_TIMEOUTS = {
-  startToCloseTimeout: '45 minutes',
-  heartbeatTimeout: '2 minutes',
-} as const;
+// What the workflow gives every GitHub activity lives in github-policy.ts: workflow code cannot import this file,
+// which reads config. Re-exported so existing imports keep working.
+export { GITHUB_ACTIVITY_TIMEOUTS } from './github-policy.ts';
 
 const GH_PATH = /^[A-Za-z0-9._/+-]{1,1024}$/;
 const REPO = /^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/;
