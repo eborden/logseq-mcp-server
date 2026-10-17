@@ -371,9 +371,6 @@ const REFUSED_FOR_BOTH: [string | undefined, string][] = [
   ['Ready', 'In progress'],
   ['Ready', 'In review'],
   ['Ready', 'Done'],
-  [undefined, 'In progress'],
-  [undefined, 'In review'],
-  [undefined, 'Done'],
   ['Done', 'In progress'],
   ['Done', 'In review'],
   ['In progress', 'Done'],
@@ -575,13 +572,37 @@ test('a Status that never shows: addToBoard answers null after exactly the re-re
   assert.equal(clock.waits.length, BOARD_RE_READS);
 
   const failure = await failureOf(github.setStatus(PR_URL, 'In review'));
-  assert.equal(failure.type, 'InvalidState');
-  assert.equal(failure.nonRetryable, true);
-  assert.match(failure.message, /pull request #77 is without a status/);
+  assert.equal(failure.type, 'BoardReadbackMismatch', 'a Status that is late is retryable (#629)');
+  assert.equal(failure.nonRetryable, false);
+  assert.match(failure.message, /pull request #77 is on the board but shows no status yet/);
   assert.equal((await fake.callsMatching('projectItems')).length, 1 + 1 + BOARD_RE_READS + 1 + BOARD_RE_READS);
   assert.equal(clock.waits.length, 2 * BOARD_RE_READS);
   assert.equal((await fake.callsMatching('item-edit')).length, 0, 'nothing was written');
   assert.ok(clock.waits.every((ms) => ms === BOARD_RE_READ_DELAY_MS));
+});
+
+test('an item without a Status after the re-reads is retried, and the next attempt carries on once the Status shows (#629)', async () => {
+  // The board shows no Status for the first 5 reads. Attempt 1 makes 1 + BOARD_RE_READS reads and fails retryably;
+  // attempt 2 sees it on its second read, and nothing was written in between.
+  const { fake, github } = await setup((state) => {
+    withPr(undefined)(state);
+    state.board.push({ number: 77, type: 'PullRequest', pendingStatus: 'Backlog', pendingReads: 5 });
+  });
+
+  const first = await failureOf(github.setStatus(PR_URL, 'In review'));
+  assert.equal(first.type, 'BoardReadbackMismatch');
+  assert.equal(first.nonRetryable, false, 'Temporal retries it, bounded by BOARD_ACTIVITY_MAX_ATTEMPTS');
+  assert.equal((await fake.callsMatching('item-edit')).length, 0, 'no write on a Status that is not there yet');
+
+  assert.deepEqual(await github.setStatus(PR_URL, 'In review'), { changed: true, status: 'In review' });
+  assert.equal((await fake.callsMatching('item-edit')).length, 1);
+});
+
+test('every refusal of a move itself stays non-retryable: only the missing Status is retried (#629)', async () => {
+  const { github } = await setup(withPr('Done'));
+  const failure = await failureOf(github.setStatus(PR_URL, 'In review'));
+  assert.equal(failure.type, 'InvalidState');
+  assert.equal(failure.nonRetryable, true);
 });
 
 test('setStatus right after the add waits for the default Status instead of failing, then makes the PR first move', async () => {
@@ -679,7 +700,7 @@ test('the policy module for workflow code: bounded attempts, no Node or config i
   }
   const source = await readFile(new URL('../src/board-policy.ts', import.meta.url), 'utf8');
   const imports = [...source.matchAll(/^import .* from '([^']+)';$/gm)].map((match) => match[1]);
-  assert.deepEqual(imports, ['@temporalio/workflow'], 'workflow code may import it: nothing from node: or config.ts');
+  assert.deepEqual(imports, ['@temporalio/workflow', './github-policy.ts'], 'workflow code may import it: nothing from node: or config.ts');
 });
 
 // ---- who may be added: a missing or null association ---------------------------------------------------------------
