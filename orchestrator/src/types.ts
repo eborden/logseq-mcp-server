@@ -272,3 +272,40 @@ export interface GateStatus {
   /** `reviewsOnHead >= 1 && unresolvedThreads === 0`. Zero threads with zero reviews is not clear. */
   readonly clear: boolean;
 }
+
+// ---- Board items for issues and PRs (#635) --------------------------------------------------------------------
+
+/** What a board item is. Issues and PRs share one number space, so a number alone does not say which. */
+export type ItemKind = 'issue' | 'pr';
+
+/** An issue or a PR, as a workflow names it to the board activities. */
+export interface BoardItemRef {
+  readonly kind: ItemKind;
+  readonly number: number;
+}
+
+/**
+ * How a workflow names an item to the board activities: a URL (`https://github.com/<repo>/issues/<n>` or
+ * `/pull/<n>`, of the configured repository), a `{ kind, number }`, or a bare number, which means an issue (what
+ * `setStatus` took before #635).
+ */
+export type BoardTarget = number | string | BoardItemRef;
+
+export interface AddToBoardResult {
+  readonly kind: ItemKind;
+  readonly number: number;
+  /** The board item's node id, read back from the board after the add. */
+  readonly itemId: string;
+  /** False when the item was already on the board: nothing was written and its Status is untouched. */
+  readonly added: boolean;
+  /** The Status the board shows now. `null` when the item has none. A PR is added in Backlog by the board's own default. */
+  readonly status: BoardStatus | null;
+}
+
+export interface BoardStatusResult {
+  readonly kind: ItemKind;
+  readonly number: number;
+  readonly onBoard: boolean;
+  /** The Status the board shows. `null` when the item is off the board or has no Status. */
+  readonly status: BoardStatus | null;
+}

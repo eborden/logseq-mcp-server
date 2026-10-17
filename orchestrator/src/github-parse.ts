@@ -7,7 +7,7 @@
 // never read, copied or returned. The filter lives here, inside the listing parse, so no caller can forget it.
 
 import { GhError } from './gh.ts';
-import type { BoardStatus, IssueComment, IssueView } from './types.ts';
+import type { BoardStatus, IssueComment, IssueView, ItemKind } from './types.ts';
 
 type Obj = ReadonlyMap<string, unknown>;
 
@@ -202,23 +202,29 @@ export function parseBoardStatus(raw: string, what: string, path: string): Board
 
 export type BoardLookup =
   | { readonly onBoard: false }
-  | { readonly onBoard: true; readonly status: BoardStatus | undefined };
+  | { readonly onBoard: true; readonly itemId: string; readonly status: BoardStatus | undefined };
 
-/** The Status of one issue's item on one project, from the `projectItems` GraphQL query. `undefined`: no such issue. */
-export function parseIssueBoardStatus(
+/**
+ * The Status of one issue's or PR's item on one project, from the `projectItems` GraphQL query. `undefined`: no such
+ * issue or PR. The query asks `issue(number)` or `pullRequest(number)` by `kind`, and the answer is read under the
+ * matching key, so an answer for the other kind is a mismatch, not a lookup.
+ */
+export function parseItemBoardStatus(
   data: unknown,
+  kind: ItemKind,
   projectOwner: string,
   projectNumber: number,
 ): BoardLookup | undefined {
-  const what = 'issue board status';
+  const what = kind === 'pr' ? 'pull request board status' : 'issue board status';
+  const key = kind === 'pr' ? 'pullRequest' : 'issue';
   const repository = obj(obj(data, what, '$').get('repository'), what, '$.repository');
-  const issueRaw = repository.get('issue');
-  if (issueRaw === null) {
+  const itemRaw = repository.get(key);
+  if (itemRaw === null) {
     return undefined;
   }
-  const projectItems = obj(obj(issueRaw, what, '$.repository.issue').get('projectItems'), what, '$...projectItems');
+  const projectItems = obj(obj(itemRaw, what, `$.repository.${key}`).get('projectItems'), what, '$...projectItems');
   if (bool(obj(projectItems.get('pageInfo'), what, '$...pageInfo'), 'hasNextPage', what, '$...pageInfo')) {
-    throw new GhError(`${what}: the issue is on more projects than one page holds`, 'output_too_large');
+    throw new GhError(`${what}: the item is on more projects than one page holds`, 'output_too_large');
   }
   for (const [index, element] of list(projectItems.get('nodes'), what, '$...nodes').entries()) {
     const path = `$...nodes[${index}]`;
@@ -228,14 +234,35 @@ export function parseIssueBoardStatus(
     if (project.get('number') !== projectNumber || owner.get('login') !== projectOwner) {
       continue;
     }
+    const itemId = str(node, 'id', what, path);
     const value = node.get('fieldValueByName');
     if (value === null || value === undefined) {
-      return { onBoard: true, status: undefined };
+      return { onBoard: true, itemId, status: undefined };
     }
     const name = str(obj(value, what, `${path}.fieldValueByName`), 'name', what, `${path}.fieldValueByName`);
-    return { onBoard: true, status: parseBoardStatus(name, what, `${path}.fieldValueByName.name`) };
+    return { onBoard: true, itemId, status: parseBoardStatus(name, what, `${path}.fieldValueByName.name`) };
   }
   return { onBoard: false };
+}
+
+/**
+ * Whether the REST answer for an issue or a PR (`issues/<n>` serves both) is by a trusted author and is the kind and
+ * number asked for. No text of it is read: this is the check before an item is added to the board.
+ */
+export function parseItemAuthor(raw: unknown, kind: ItemKind, expectedNumber: number): { readonly trusted: boolean } {
+  const what = kind === 'pr' ? 'pull request' : 'issue';
+  const item = obj(raw, what, '$');
+  if (!isTrustedAssociation(item.get('author_association'))) {
+    return { trusted: false };
+  }
+  if (int(item, 'number', what, '$') !== expectedNumber) {
+    return mismatch(what, '$.number');
+  }
+  // The issues route answers for a PR too, and marks it with `pull_request`.
+  if (item.has('pull_request') !== (kind === 'pr')) {
+    return mismatch(what, '$.pull_request (the number is not a ' + what + ')');
+  }
+  return { trusted: true };
 }
 
 // ---- branches and pull requests -------------------------------------------------------------------------------

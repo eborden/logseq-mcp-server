@@ -2,12 +2,15 @@
 // carry the repo's trust and rate-limit rules in code, not prose (CLAUDE.md "Untrusted GitHub content", "Board
 // statuses", "GitHub rate limits", "Code review" step 5).
 //
-// What they never do, by construction: merge, apply a label (`golden-change` included), move a board item out of
-// Backlog or into Ready, or resolve a review thread. The only board write is `setStatus` to In progress, In
+// What they never do, by construction: merge, apply a label (`golden-change` included), move a board item into
+// Ready or out of Backlog (one exception: a PR's own first move, Backlog to In review, #635), or resolve a review
+// thread. The board writes are `addToBoard` (an item is added, nothing else) and `setStatus` to In progress, In
 // review or Done, and the only GraphQL here is read-only.
 //
 // Activities run at least once (foundations 4.5), so every write checks first and a repeat does nothing:
-// - `claimIssue` and `setStatus` read the item's Status and write only when it differs.
+// - `claimIssue` and `setStatus` read the item's Status and write only when it differs. `setStatus` then reads the
+//   board again and fails if it does not show the new Status.
+// - `addToBoard` reads the board first and adds only an item that is not on it.
 // - `openPr` looks for an open PR with the same head and base before it creates one.
 // - `postReview` looks for a review that carries its idempotency key before it posts one.
 // A write whose answer was lost (a timeout, a killed worker) is found by the next attempt's read.
@@ -27,8 +30,9 @@ import {
   parseCreatedPr,
   parseCreatedReviewId,
   parseGate,
-  parseIssueBoardStatus,
   parseIssueHead,
+  parseItemAuthor,
+  parseItemBoardStatus,
   parseList,
   parseOpenPr,
   parseRefName,
@@ -36,9 +40,14 @@ import {
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
 import type {
+  AddToBoardResult,
+  BoardItemRef,
+  BoardStatusResult,
+  BoardTarget,
   ClaimResult,
   GateStatus,
   IssueView,
+  ItemKind,
   OpenPrInput,
   OpenPrResult,
   PostReviewInput,
@@ -59,14 +68,51 @@ const MAX_REVIEW_COMMENTS = 100;
 const HEARTBEAT_SLICE_MS = 5_000;
 
 const SETTABLE: readonly SettableStatus[] = ['In progress', 'In review', 'Done'];
-/** The moves `setStatus` makes: from a status to the one next step it may take. */
-const ALLOWED_MOVES: ReadonlyMap<string, SettableStatus> = new Map<string, SettableStatus>([
+/** The moves `setStatus` makes for an issue: from a status to the one next step it may take. */
+const ISSUE_MOVES: ReadonlyMap<string, SettableStatus> = new Map<string, SettableStatus>([
   ['In progress', 'In review'],
   ['In review', 'Done'],
 ]);
-const ALLOWED_MOVES_TEXT = [...ALLOWED_MOVES].map(([from, to]) => `${from} to ${to}`).join(' and ');
+/**
+ * What a PR may do that an issue may not, and the only difference. A PR is added to the board in Backlog (the board's
+ * default, which nothing here changes), and it never passes through Ready or In progress: its first move is Backlog
+ * to In review. For an issue that same move is the maintainer's (Backlog to Ready is a gate), so it stays refused.
+ */
+const PR_ONLY_MOVES: ReadonlyMap<string, SettableStatus> = new Map<string, SettableStatus>([['Backlog', 'In review']]);
+/** The moves by kind, keyed by the item's current status. A PR has the issue moves plus its own first move. */
+const ALLOWED_MOVES: ReadonlyMap<ItemKind, ReadonlyMap<string, SettableStatus>> = new Map<ItemKind, ReadonlyMap<string, SettableStatus>>([
+  ['issue', ISSUE_MOVES],
+  ['pr', new Map<string, SettableStatus>([...PR_ONLY_MOVES, ...ISSUE_MOVES])],
+]);
+
+function allowedMovesText(kind: ItemKind): string {
+  const moves = [...(ALLOWED_MOVES.get(kind) ?? [])].map(([from, to]) => `${from} to ${to}`);
+  const last = moves.pop();
+  return moves.length === 0 ? (last ?? 'nothing') : `${moves.join(', ')} and ${last ?? ''}`;
+}
+
+function describeItem(item: BoardItemRef): string {
+  return `${item.kind === 'pr' ? 'pull request' : 'issue'} #${item.number}`;
+}
+
+function itemUrl(repo: string, item: BoardItemRef): string {
+  return `https://github.com/${repo}/${item.kind === 'pr' ? 'pull' : 'issues'}/${item.number}`;
+}
 
 export type RefusalType = 'InvalidInput' | 'UntrustedAuthor' | 'InvalidState' | 'NotFound';
+
+/**
+ * The board does not show what a write should have made of it (a move that did not stick, an add that is not
+ * there). Retryable on purpose: the next attempt reads the board again and only writes what is still missing, so
+ * a board that was slow to show the change passes on the retry, and a board that never does exhausts the
+ * workflow's bounded attempts and fails the step. It never claims a move that the board did not show.
+ */
+export class BoardReadbackError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BoardReadbackError';
+  }
+}
 
 /** A refusal retrying cannot fix. It becomes a non-retryable failure. */
 export class GithubRefusal extends Error {
@@ -110,6 +156,33 @@ function parseSettableStatus(raw: unknown): SettableStatus {
   const status = SETTABLE.find((candidate) => candidate === raw);
   // Ready is absent on purpose: a move into Ready is the maintainer's.
   return status ?? refuse(`status must be one of ${SETTABLE.join(', ')}`);
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * A board item named as a bare number (an issue), a `{ kind, number }`, or the URL of an issue or PR of the
+ * configured repository. Any other URL (another repository, a comment link, a query string) is refused.
+ */
+function parseItemRef(raw: unknown, repo: string, name: string): BoardItemRef {
+  if (typeof raw === 'number') {
+    return { kind: 'issue', number: parseIssueNumber(raw, name) };
+  }
+  if (typeof raw === 'string') {
+    const match = new RegExp(`^https://github\\.com/${escapeRegExp(repo)}/(issues|pull)/([1-9]\\d{0,8})$`).exec(raw);
+    if (match === null) {
+      return refuse(`${name} must be an issue or pull request URL of ${repo}`);
+    }
+    return { kind: match[1] === 'pull' ? 'pr' : 'issue', number: Number(match[2]) };
+  }
+  const input = inputObject(raw, name);
+  const kind = input.get('kind');
+  if (kind !== 'issue' && kind !== 'pr') {
+    return refuse(`${name}.kind must be issue or pr`);
+  }
+  return { kind, number: parseIssueNumber(input.get('number'), `${name}.number`) };
 }
 
 const HEAD = /^claude\/\d{1,9}(?:-[A-Za-z0-9._-]{1,100})?$/;
@@ -162,10 +235,15 @@ function parsePostReviewInput(raw: unknown): PostReviewInput {
 
 // ---- the activities -------------------------------------------------------------------------------------------
 
-const BOARD_QUERY =
-  'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){' +
-  'projectItems(first:20){pageInfo{hasNextPage} nodes{project{number owner{... on User{login} ... on Organization{login}}} ' +
-  'fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}';
+/** The board items of an issue or of a PR (`issue(number)` and `pullRequest(number)` both carry `projectItems`). Read-only. */
+function boardQuery(kind: ItemKind): string {
+  return (
+    'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){' +
+    `${kind === 'pr' ? 'pullRequest' : 'issue'}(number:$number){` +
+    'projectItems(first:20){pageInfo{hasNextPage} nodes{id project{number owner{... on User{login} ... on Organization{login}}} ' +
+    'fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}'
+  );
+}
 
 // The query of CLAUDE.md "Code review" step 5, with the review's state and author association added (a PENDING draft
 // or a DISMISSED review, or a stranger's review, must not clear the gate; the step 5 query has that gap too), and a page-info flag so a PR with more than 100 reviews or threads fails instead of
@@ -205,23 +283,23 @@ function operations(config: GhConfig, gh: GhCli) {
     throw new GhError(`${what}: more than ${MAX_PAGES * PAGE_SIZE} entries, which is more than one call reads`, 'output_too_large');
   }
 
-  async function boardLookup(issue: number): Promise<BoardLookup> {
-    const data = await gh.graphql(BOARD_QUERY, { owner, name, number: issue });
-    const lookup = parseIssueBoardStatus(data, config.projectOwner, config.projectNumber);
+  async function boardLookup(item: BoardItemRef): Promise<BoardLookup> {
+    const data = await gh.graphql(boardQuery(item.kind), { owner, name, number: item.number });
+    const lookup = parseItemBoardStatus(data, item.kind, config.projectOwner, config.projectNumber);
     if (lookup === undefined) {
-      throw new GithubRefusal('NotFound', `issue #${issue} does not exist`);
+      throw new GithubRefusal('NotFound', `${describeItem(item)} does not exist`);
     }
     return lookup;
   }
 
-  async function moveTo(issue: number, status: SettableStatus): Promise<void> {
+  async function moveTo(item: BoardItemRef, status: SettableStatus): Promise<void> {
     await gh.project([
       'item-edit',
       String(config.projectNumber),
       '--owner',
       config.projectOwner,
       '--url',
-      `https://github.com/${config.repo}/issues/${issue}`,
+      itemUrl(config.repo, item),
       '--field',
       'Status',
       '--value',
@@ -303,7 +381,8 @@ function operations(config: GhConfig, gh: GhCli) {
    */
   async function claimIssue(raw: unknown): Promise<ClaimResult> {
     const issue = parseIssueNumber(raw, 'issue');
-    const lookup = await boardLookup(issue);
+    const item: BoardItemRef = { kind: 'issue', number: issue };
+    const lookup = await boardLookup(item);
     if (!lookup.onBoard) {
       throw new GithubRefusal('InvalidState', `issue #${issue} is not on the board`);
     }
@@ -323,30 +402,80 @@ function operations(config: GhConfig, gh: GhCli) {
     if ((await claudeBranchesFor(issue)).length > 0) {
       return { claimed: false, reason: 'claude_branch', proceed: false };
     }
-    await moveTo(issue, 'In progress');
+    await moveTo(item, 'In progress');
     return { claimed: true, reason: 'claimed', proceed: true };
   }
 
-  async function setStatus(rawIssue: unknown, rawStatus: unknown): Promise<SetStatusResult> {
-    const issue = parseIssueNumber(rawIssue, 'issue');
+  /**
+   * Adds an issue or a PR to the board, unless it is already there. Read, then write, then read again.
+   *
+   * The first read makes a repeat a no-op that touches nothing, not even the item's Status (`gh project item-add`
+   * is idempotent itself, but a repeat must not depend on that, and the read tells `added` truthfully). The author
+   * check runs only before a write: an item by anyone but an OWNER, MEMBER or COLLABORATOR is not put on the board,
+   * and its text is never read. The read after the add fails (retryably) if the board does not show the item, so a
+   * workflow never carries on with an item that is not there. The Status of a new item is whatever the board's own
+   * default gives it (Backlog for a PR); this activity never sets it.
+   */
+  async function addToBoard(raw: unknown): Promise<AddToBoardResult> {
+    const item = parseItemRef(raw, config.repo, 'url');
+    const before = await boardLookup(item);
+    if (before.onBoard) {
+      return { ...item, itemId: before.itemId, added: false, status: before.status ?? null };
+    }
+    const head = parseItemAuthor(await gh.api(`${repoRoute}/issues/${item.number}`), item.kind, item.number);
+    if (!head.trusted) {
+      throw new GithubRefusal('UntrustedAuthor', `${describeItem(item)} was not written by an OWNER, MEMBER or COLLABORATOR, so it is not added to the board`);
+    }
+    await gh.project(['item-add', String(config.projectNumber), '--owner', config.projectOwner, '--url', itemUrl(config.repo, item)]);
+    const after = await boardLookup(item);
+    if (!after.onBoard) {
+      throw new BoardReadbackError(`${describeItem(item)} was added to the board but the board does not show it`);
+    }
+    return { ...item, itemId: after.itemId, added: true, status: after.status ?? null };
+  }
+
+  /** The Status the board shows for an issue or a PR: a read, so a workflow can verify a move instead of assuming it. */
+  async function getBoardStatus(raw: unknown): Promise<BoardStatusResult> {
+    const item = parseItemRef(raw, config.repo, 'url');
+    const lookup = await boardLookup(item);
+    return { ...item, onBoard: lookup.onBoard, status: lookup.onBoard ? (lookup.status ?? null) : null };
+  }
+
+  /**
+   * Moves an issue or a PR one step, then reads the board again and fails unless it shows the status asked for.
+   *
+   * Which moves: `ALLOWED_MOVES` by kind. An issue makes In progress to In review and In review to Done. A PR makes
+   * those two and, as its own first move, Backlog to In review (a PR is added in Backlog and never goes through
+   * Ready or In progress). Ready is never a target (a move into Ready is the maintainer's), Backlog is never one
+   * either, nothing moves out of Done or back, and a skipped step (Backlog to Done) is refused. A repeat finds the
+   * status already set and writes nothing. A bare number means an issue, as before #635.
+   */
+  async function setStatus(rawTarget: unknown, rawStatus: unknown): Promise<SetStatusResult> {
+    const item = parseItemRef(rawTarget, config.repo, 'item');
     const status = parseSettableStatus(rawStatus);
-    const lookup = await boardLookup(issue);
+    const lookup = await boardLookup(item);
     if (!lookup.onBoard) {
-      throw new GithubRefusal('InvalidState', `issue #${issue} is not on the board`);
+      throw new GithubRefusal('InvalidState', `${describeItem(item)} is not on the board`);
     }
     if (lookup.status === status) {
       return { changed: false, status };
     }
-    // Only the forward steps after a claim. Ready is claimIssue's (its PR and branch checks must not be skipped),
-    // Backlog is the maintainer's, and nothing moves back out of Done.
-    const allowed = lookup.status === undefined ? undefined : ALLOWED_MOVES.get(lookup.status);
+    const allowed = lookup.status === undefined ? undefined : ALLOWED_MOVES.get(item.kind)?.get(lookup.status);
     if (allowed !== status) {
       throw new GithubRefusal(
         'InvalidState',
-        `issue #${issue} is ${lookup.status ?? 'without a status'}; setStatus allows only ${ALLOWED_MOVES_TEXT} (claimIssue claims a Ready item)`,
+        `${describeItem(item)} is ${lookup.status ?? 'without a status'}; setStatus allows only ${allowedMovesText(item.kind)}` +
+          (item.kind === 'issue' ? ' (claimIssue claims a Ready item)' : ''),
       );
     }
-    await moveTo(issue, status);
+    await moveTo(item, status);
+    // A write that exited 0 is not a move that happened: read the board and say what it shows.
+    const after = await boardLookup(item);
+    if (!after.onBoard || after.status !== status) {
+      throw new BoardReadbackError(
+        `${describeItem(item)} was moved to ${status} but the board shows ${after.onBoard ? (after.status ?? 'no status') : 'no item'}`,
+      );
+    }
     return { changed: true, status };
   }
 
@@ -421,7 +550,7 @@ function operations(config: GhConfig, gh: GhCli) {
     };
   }
 
-  return { listReadyIssues, readIssue, claimIssue, setStatus, openPr, postReview, getGateStatus };
+  return { listReadyIssues, readIssue, claimIssue, addToBoard, getBoardStatus, setStatus, openPr, postReview, getGateStatus };
 }
 
 /**
@@ -444,7 +573,9 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     listReadyIssues: activity((ops) => ops.listReadyIssues()),
     readIssue: activity((ops, issue: number) => ops.readIssue(issue)),
     claimIssue: activity((ops, issue: number) => ops.claimIssue(issue)),
-    setStatus: activity((ops, issue: number, status: SettableStatus) => ops.setStatus(issue, status)),
+    addToBoard: activity((ops, url: BoardTarget) => ops.addToBoard(url)),
+    getBoardStatus: activity((ops, url: BoardTarget) => ops.getBoardStatus(url)),
+    setStatus: activity((ops, target: BoardTarget, status: SettableStatus) => ops.setStatus(target, status)),
     openPr: activity((ops, input: OpenPrInput) => ops.openPr(input)),
     postReview: activity((ops, input: PostReviewInput) => ops.postReview(input)),
     getGateStatus: activity((ops, pr: number) => ops.getGateStatus(pr)),
@@ -459,6 +590,10 @@ export type GithubActivities = ReturnType<typeof createGithubActivities>;
 export function toFailure(error: unknown): unknown {
   if (error instanceof GithubRefusal) {
     return ApplicationFailure.nonRetryable(error.message, error.type);
+  }
+  if (error instanceof BoardReadbackError) {
+    // Retryable: the retry reads the board again. The workflow's retry policy bounds the attempts.
+    return ApplicationFailure.retryable(error.message, 'BoardReadbackMismatch');
   }
   if (error instanceof GhError) {
     switch (error.kind) {
