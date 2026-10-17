@@ -12,9 +12,11 @@
     "start-server": "tsx src/start-server.ts",
     "worker": "tsx src/worker.ts",
     "run-hello": "tsx src/client.ts",
+    "run-issue": "tsx src/run-issue.ts",
     "test:unit": "node --import tsx --test test/activities.test.ts test/claude-session.test.ts test/gh.test.ts test/github.test.ts test/github-board.test.ts test/brief.test.ts test/implementer.test.ts",
     "test:github": "node --import tsx --test test/gh.test.ts test/github.test.ts test/github-board.test.ts",
     "test:server": "node --import tsx --test test/start-server.test.ts",
+    "test:workflow": "node --import tsx --test test/issue-workflow.test.ts",
     "test:crash": "node --import tsx --test test/crash.test.ts"
   },
   "license": "MIT",

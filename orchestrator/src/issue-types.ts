@@ -101,9 +101,50 @@ export function stopComment(workflowId: string, step: IssueStep, reason: StopRea
   return [
     `The orchestrator stopped this run (workflow \`${workflowId}\`) at the step \`${step}\` with the reason \`${reason}\`.`,
     pr === undefined ? '' : `A pull request is open for it: #${pr}.`,
-    'A person needs to look. Nothing was retried, and nothing was merged or moved on the board past what the steps above did.',
+    'A person needs to look. The run has stopped and will not try this step again by itself.',
     'The README of the orchestrator says how to recover from each reason.',
   ]
     .filter((line) => line !== '')
     .join('\n\n');
+}
+
+/** The title of the PR the workflow opens: identifiers only. The session's own account of the work is its status comment on the issue. */
+export function pullRequestTitle(issueNumber: number): string {
+  return `Implement issue #${issueNumber}`;
+}
+
+/**
+ * The body of the PR the workflow opens, in the sections of `.github/pull_request_template.md`. The workflow knows
+ * only identifiers, so it fills what it knows and points at the rest: the implementer session wrote its account (what
+ * changed, what it verified and could not verify, its open questions) as a status comment on the issue.
+ */
+export function pullRequestBody(issueNumber: number, branch: string): string {
+  return [
+    '## What changed',
+    `Opened by the orchestrator for issue #${issueNumber} (workflow \`${issueWorkflowId(issueNumber)}\`) from the branch \`${branch}\`, which an implementer session wrote and pushed.`,
+    '',
+    `Closes #${issueNumber}`,
+    '',
+    '## Design',
+    "See the issue and the implementer session's status comment on it. The orchestrator does not summarize the work.",
+    '',
+    '## Assumptions',
+    `See the session's status comment on #${issueNumber}.`,
+    '',
+    '## Failure behavior',
+    "See the diff and the session's status comment.",
+    '',
+    '## Preserved on purpose / questions',
+    'None recorded by the orchestrator.',
+    '',
+    '## New concepts',
+    'None recorded by the orchestrator.',
+    '',
+    '## Test plan',
+    '- [ ] Not verified by the orchestrator. A reviewer checks what the issue names, and the maintainer decides the merge.',
+    '',
+    '## Roll back',
+    'Revert the merge commit.',
+    '',
+  ].join('\n');
 }
