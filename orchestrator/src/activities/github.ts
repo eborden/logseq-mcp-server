@@ -20,6 +20,7 @@
 // match is `MalformedGhOutput`; a rate-limit wait too long to sit through is `GitHubRateLimitTooLong`.
 
 import { ApplicationFailure, Context } from '@temporalio/activity';
+import { BOARD_RE_READS, BOARD_RE_READ_DELAY_MS } from '../board-policy.ts';
 import { GhCli, GhError, defaultGhDeps } from '../gh.ts';
 import type { GhDeps } from '../gh.ts';
 import type { GhConfig } from '../gh-config.ts';
@@ -103,9 +104,10 @@ export type RefusalType = 'InvalidInput' | 'UntrustedAuthor' | 'InvalidState' | 
 
 /**
  * The board does not show what a write should have made of it (a move that did not stick, an add that is not
- * there). Retryable on purpose: the next attempt reads the board again and only writes what is still missing, so
- * a board that was slow to show the change passes on the retry, and a board that never does exhausts the
- * workflow's bounded attempts and fails the step. It never claims a move that the board did not show.
+ * there) even after BOARD_RE_READS re-reads inside the attempt (src/board-policy.ts). Retryable on purpose: the next
+ * attempt reads the board again and only writes what is still missing, and a board that never shows the change
+ * exhausts BOARD_ACTIVITY_MAX_ATTEMPTS, which the workflow sets as the retry policy, and fails the step. It never
+ * claims a move that the board did not show.
  */
 export class BoardReadbackError extends Error {
   constructor(message: string) {
@@ -259,7 +261,7 @@ function splitRepo(repo: string): { owner: string; name: string } {
 }
 
 /** The operations, bound to one `gh` wrapper. Each attempt of an activity gets its own, so its rate-limit waits are counted per attempt. */
-function operations(config: GhConfig, gh: GhCli) {
+function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<void>) {
   const { owner, name } = splitRepo(config.repo);
   const repoRoute = `repos/${config.repo}`;
 
@@ -288,6 +290,22 @@ function operations(config: GhConfig, gh: GhCli) {
     const lookup = parseItemBoardStatus(data, item.kind, config.projectOwner, config.projectNumber);
     if (lookup === undefined) {
       throw new GithubRefusal('NotFound', `${describeItem(item)} does not exist`);
+    }
+    return lookup;
+  }
+
+  /**
+   * Reads the board (or starts from `first`, a read the caller already made), and while `settled` does not hold re-reads it up to BOARD_RE_READS more times, waiting
+   * BOARD_RE_READ_DELAY_MS before each (the activity's sleep: it heartbeats and stops on cancellation). The last
+   * read is returned whether or not it settled, so the caller says what the board showed. GitHub Projects can show
+   * a stale Status right after a write, and a new item's default Status comes from a board workflow a moment after
+   * the add.
+   */
+  async function readUntil(item: BoardItemRef, settled: (lookup: BoardLookup) => boolean, first?: BoardLookup): Promise<BoardLookup> {
+    let lookup = first ?? (await boardLookup(item));
+    for (let reread = 0; reread < BOARD_RE_READS && !settled(lookup); reread += 1) {
+      await sleep(BOARD_RE_READ_DELAY_MS);
+      lookup = await boardLookup(item);
     }
     return lookup;
   }
@@ -427,7 +445,9 @@ function operations(config: GhConfig, gh: GhCli) {
       throw new GithubRefusal('UntrustedAuthor', `${describeItem(item)} was not written by an OWNER, MEMBER or COLLABORATOR, so it is not added to the board`);
     }
     await gh.project(['item-add', String(config.projectNumber), '--owner', config.projectOwner, '--url', itemUrl(config.repo, item)]);
-    const after = await boardLookup(item);
+    // Wait (bounded) for the item and for its default Status. A Status that never shows is answered as `null`, not
+    // failed: the item is on the board, and `setStatus` waits for a Status again before it refuses.
+    const after = await readUntil(item, (lookup) => lookup.onBoard && lookup.status !== undefined);
     if (!after.onBoard) {
       throw new BoardReadbackError(`${describeItem(item)} was added to the board but the board does not show it`);
     }
@@ -453,7 +473,9 @@ function operations(config: GhConfig, gh: GhCli) {
   async function setStatus(rawTarget: unknown, rawStatus: unknown): Promise<SetStatusResult> {
     const item = parseItemRef(rawTarget, config.repo, 'item');
     const status = parseSettableStatus(rawStatus);
-    const lookup = await boardLookup(item);
+    // A new item's default Status can arrive a moment after the add, so wait (bounded) for one before refusing.
+    const first = await boardLookup(item);
+    const lookup = first.onBoard && first.status === undefined ? await readUntil(item, (read) => !read.onBoard || read.status !== undefined, first) : first;
     if (!lookup.onBoard) {
       throw new GithubRefusal('InvalidState', `${describeItem(item)} is not on the board`);
     }
@@ -470,7 +492,7 @@ function operations(config: GhConfig, gh: GhCli) {
     }
     await moveTo(item, status);
     // A write that exited 0 is not a move that happened: read the board and say what it shows.
-    const after = await boardLookup(item);
+    const after = await readUntil(item, (read) => read.onBoard && read.status === status);
     if (!after.onBoard || after.status !== status) {
       throw new BoardReadbackError(
         `${describeItem(item)} was moved to ${status} but the board shows ${after.onBoard ? (after.status ?? 'no status') : 'no item'}`,
@@ -563,7 +585,7 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     <Args extends unknown[], Result>(run: (ops: ReturnType<typeof operations>, ...args: Args) => Promise<Result>) =>
     async (...args: Args): Promise<Result> => {
       try {
-        return await run(operations(config, new GhCli(config, deps)), ...args);
+        return await run(operations(config, new GhCli(config, deps), deps.sleep), ...args);
       } catch (error) {
         throw toFailure(error);
       }
@@ -592,7 +614,7 @@ export function toFailure(error: unknown): unknown {
     return ApplicationFailure.nonRetryable(error.message, error.type);
   }
   if (error instanceof BoardReadbackError) {
-    // Retryable: the retry reads the board again. The workflow's retry policy bounds the attempts.
+    // Retryable: the retry reads the board again. BOARD_ACTIVITY_MAX_ATTEMPTS (src/board-policy.ts) bounds the attempts.
     return ApplicationFailure.retryable(error.message, 'BoardReadbackMismatch');
   }
   if (error instanceof GhError) {
