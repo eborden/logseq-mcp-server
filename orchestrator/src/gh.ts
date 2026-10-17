@@ -176,7 +176,7 @@ interface RawResult {
 }
 
 export interface ApiOptions {
-  readonly method?: 'GET' | 'POST';
+  readonly method?: 'GET' | 'POST' | 'PATCH';
   /** Sent as JSON on stdin (`--input -`). */
   readonly body?: unknown;
 }

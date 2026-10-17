@@ -371,3 +371,18 @@ export interface BoardStatusResult {
   /** The Status the board shows. `null` when the item is off the board or has no Status. */
   readonly status: BoardStatus | null;
 }
+
+// ---- the maintainer's decision (#631) ---------------------------------------------------------------------------
+
+export interface PrStateResult {
+  readonly state: 'open' | 'closed';
+  /** True once the PR was merged. The orchestrator only reads this: the merge is the maintainer's. */
+  readonly merged: boolean;
+  readonly headSha: string;
+}
+
+export interface CloseIssueResult {
+  /** True when this call closed the issue. A repeat, or an issue GitHub already closed, answers false. */
+  readonly changed: boolean;
+  readonly closed: true;
+}

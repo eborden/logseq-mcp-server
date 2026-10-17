@@ -451,3 +451,38 @@ export function parseReviewThreads(data: unknown): ReviewThread[] | undefined {
   });
   return result;
 }
+
+// ---- pull request state and files (#631) ------------------------------------------------------------------------
+
+export interface PrState {
+  /** `open` or `closed`. A merged PR is closed. */
+  readonly state: 'open' | 'closed';
+  readonly merged: boolean;
+  readonly headSha: string;
+}
+
+/** The state of one PR: flags and a SHA only. No title or body is read. */
+export function parsePrState(raw: unknown, expectedNumber: number): PrState {
+  const what = 'pull request';
+  const pr = obj(raw, what, '$');
+  if (int(pr, 'number', what, '$') !== expectedNumber) {
+    return mismatch(what, '$.number');
+  }
+  const state = str(pr, 'state', what, '$');
+  if (state !== 'open' && state !== 'closed') {
+    return mismatch(what, '$.state');
+  }
+  const headSha = str(obj(pr.get('head'), what, '$.head'), 'sha', what, '$.head');
+  return { state, merged: bool(pr, 'merged', what, '$'), headSha };
+}
+
+/** The path of one changed file of a PR's file listing. Paths are repository paths, not text anyone wrote about the work. */
+export function parsePrFilePath(raw: unknown, path: string): string {
+  return str(obj(raw, 'pull request files', path), 'filename', 'pull request files', path);
+}
+
+/** True when a REST answer for an issue shows it closed. The state is read after the same trusted-author check. */
+export function parseIssueClosed(raw: unknown, expectedNumber: number): boolean | undefined {
+  const head = parseIssueHead(raw, expectedNumber);
+  return head.trusted ? head.issue.state === 'closed' : undefined;
+}

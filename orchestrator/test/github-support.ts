@@ -50,6 +50,10 @@ export interface FakeState {
   addStatus?: string;
   /** A new item shows no Status for this many board reads, then its default (the board's own workflow is slow). */
   addStatusAfterReads?: number;
+  /** Raw PR answers by number, the files of a PR by number, and the issues a PATCH leaves unchanged (#631). */
+  prStates?: Record<string, unknown>;
+  prFiles?: Record<string, string[]>;
+  patchIgnored?: number[];
   faults: Fault[];
 }
 

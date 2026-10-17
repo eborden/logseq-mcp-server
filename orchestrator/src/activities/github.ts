@@ -34,20 +34,26 @@ import {
   parseGate,
   parseIssueHead,
   parseItemAuthor,
+  parseIssueClosed,
   parseItemBoardStatus,
   parseList,
   parseOpenPr,
+  parsePrFilePath,
+  parsePrState,
   parseRefName,
   parseReview,
   parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
+import { classifyChangedPaths } from '../approval-types.ts';
+import type { SensitiveChanges } from '../approval-types.ts';
 import type {
   AddToBoardResult,
   BoardItemRef,
   BoardStatusResult,
   BoardTarget,
   ClaimResult,
+  CloseIssueResult,
   CommentIssueInput,
   CommentIssueResult,
   GateStatus,
@@ -56,6 +62,7 @@ import type {
   ItemKind,
   OpenPrInput,
   OpenPrResult,
+  PrStateResult,
   PostReviewInput,
   PostReviewResult,
   ReadyIssues,
@@ -648,6 +655,47 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     };
   }
 
+  /**
+   * Whether a PR is open, closed or merged (#631): flags and the head SHA. The workflow reads it to observe the merge,
+   * which is the maintainer's: nothing here merges.
+   */
+  async function getPrState(raw: unknown): Promise<PrStateResult> {
+    const number = parseIssueNumber(raw, 'pr');
+    return parsePrState(await gh.api(`${repoRoute}/pulls/${number}`), number);
+  }
+
+  /**
+   * The files a PR changes that the maintainer alone decides on (golden results, call ceilings, ADRs, business
+   * rules), as counts. Paths stay in this activity (#631): the workflow records numbers only.
+   */
+  async function getPrChanges(raw: unknown): Promise<SensitiveChanges> {
+    const number = parseIssueNumber(raw, 'pr');
+    const { items } = await listAll(`${repoRoute}/pulls/${number}/files`, 'pull request files', parsePrFilePath);
+    return classifyChangedPaths(items);
+  }
+
+  /**
+   * Closes an issue that is still open, with the reason `completed`, and reads it back (#631). The issue is the one
+   * a merged PR was meant to close: a PR merged into a branch other than the default does not close it. It reads
+   * first and writes only an issue that is open, so a repeat does nothing. A trusted-author read only.
+   */
+  async function closeIssue(raw: unknown): Promise<CloseIssueResult> {
+    const number = parseIssueNumber(raw, 'issue');
+    const route = `${repoRoute}/issues/${number}`;
+    const before = parseIssueClosed(await gh.api(route), number);
+    if (before === undefined) {
+      throw new GithubRefusal('UntrustedAuthor', `issue #${number} was not written by an OWNER, MEMBER or COLLABORATOR, so it is not closed`);
+    }
+    if (before) {
+      return { changed: false, closed: true };
+    }
+    await gh.api(route, { method: 'PATCH', body: { state: 'closed', state_reason: 'completed' } });
+    if (parseIssueClosed(await gh.api(route), number) !== true) {
+      throw new BoardReadbackError(`issue #${number} was closed but GitHub still shows it open`);
+    }
+    return { changed: true, closed: true };
+  }
+
   /** The unresolved review threads of a PR. Text of an untrusted author is not read (parseReviewThreads). */
   async function listReviewThreads(raw: unknown): Promise<ReviewThread[]> {
     const number = parseIssueNumber(raw, 'pr');
@@ -690,6 +738,9 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     openPr,
     postReview,
     getGateStatus,
+    getPrState,
+    getPrChanges,
+    closeIssue,
     listReviewThreads,
     replyToThread,
   };
@@ -723,6 +774,9 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     openPr: activity((ops, input: OpenPrInput) => ops.openPr(input)),
     postReview: activity((ops, input: PostReviewInput) => ops.postReview(input)),
     getGateStatus: activity((ops, pr: number) => ops.getGateStatus(pr)),
+    getPrState: activity((ops, pr: number) => ops.getPrState(pr)),
+    getPrChanges: activity((ops, pr: number) => ops.getPrChanges(pr)),
+    closeIssue: activity((ops, issue: number) => ops.closeIssue(issue)),
     listReviewThreads: activity((ops, pr: number) => ops.listReviewThreads(pr)),
     replyToThread: activity((ops, input: ReplyToThreadInput) => ops.replyToThread(input)),
   };
