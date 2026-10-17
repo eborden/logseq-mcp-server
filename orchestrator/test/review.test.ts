@@ -487,6 +487,14 @@ test('the reviewer: when the diff cannot be read, findings that cannot be placed
   assert.deepEqual(await clean.run(clean.activities.postSessionReview, { base: 'no-such-branch' }), { reviewId: 5001, posted: true, comments: 0, advisory: 0, omitted: 0 });
 });
 
+test('a committed directory named like the fixer replies file is a classified stop too', async () => {
+  const s = await scenario(undefined, { 'fixer-replies.json/x': 'x' });
+  await s.script(1, `printf '{"replies":[]}' > fixer-replies.json`);
+  const failed = await failureOf(s.run(s.activities.runFixerSession));
+  assert.equal(failed.type, 'MalformedFindings', 'a directory is removed, and the file the session writes is read');
+  assert.ok(failed.nonRetryable);
+});
+
 test('a committed directory named like the findings file is a classified stop, not an unclassified error', async () => {
   const s = await scenario(undefined, { 'review-findings.json/x': 'x' });
   await s.script(1, `printf '{"summary":"Nothing found.","findings":[],"acceptedThreadIds":[]}' > review-findings.json`);
