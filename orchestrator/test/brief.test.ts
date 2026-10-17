@@ -120,7 +120,7 @@ test('the brief is a pure function: the same input gives the same text', () => {
 
 test('a brief over the prompt limit fails instead of being cut', () => {
   assert.throws(() => buildBrief(input({ body: 'x'.repeat(MAX_PROMPT_CHARS) })), BriefTooLargeError);
-  const fits = buildBrief(input({ body: 'x'.repeat(MAX_PROMPT_CHARS - 5_000) }));
+  const fits = buildBrief(input({ body: 'x'.repeat(MAX_PROMPT_CHARS - 12_000) }));
   assert.ok(fits.length <= MAX_PROMPT_CHARS);
 });
 
@@ -144,7 +144,7 @@ test('the brief asks for nothing the session cannot do: no skill tool, no push, 
   assert.ok(brief.includes('Skills are not available in this session'));
   assert.ok(brief.includes('.claude/skills/work-the-queue/SKILL.md'));
   assert.ok(brief.includes('you cannot push'), 'the session is told it cannot push');
-  for (const path of ['.github/', 'CLAUDE.md', '.claude/', 'docs/adr/', 'docs/business-rules/', '.env']) {
+  for (const path of ['.github/', 'CLAUDE.md', '.claude/', 'docs/adr/', 'docs/business-rules/', 'scripts/', 'tests/guards/', 'orchestrator/src/', 'package.json', 'Cargo.toml', 'build.rs', '.npmrc', '.mcp.json', '.env', '.git', 'symlink']) {
     assert.ok(brief.includes(path), `the brief names the protected path ${path}`);
   }
 });
