@@ -2,11 +2,11 @@
 
 A Temporal-based orchestrator for the issue-to-PR loop (parent plan #625). It lives beside the Rust server and has its own `package.json`, lockfile and `tsconfig.json`, so Temporal's dependencies stay out of the root tooling. Nothing here is part of the MCP server.
 
-The first slice (#626) proved the engine runs here and survives a crash (`helloWorkflow`, kept as the engine check). `IssueWorkflow` (#629) is the first real workflow: it takes one Ready issue to an open PR that is In review on the board. See "IssueWorkflow" below.
+The first slice (#626) proved the engine runs here and survives a crash (`helloWorkflow`, kept as the engine check). `IssueWorkflow` (#629) is the first real workflow: it takes one Ready issue to an open PR that is In review on the board, and (#630) reviews that PR, runs a bounded fix loop and stops at "gate clear, waiting for the maintainer". See "IssueWorkflow" and "The review loop" below.
 
 ## What v1 does not do
 
-- No reviewer, no fix loop and no merge gate yet (#630), and nothing that watches for the merge and closes out the issue and the PR (#631). A run ends when the PR is In review.
+- Nothing that waits for the maintainer's decision, watches for the merge, or closes out the issue and the PR (#631). A run ends at "gate clear, waiting for the maintainer" (or at "waiting for threads to be resolved by the maintainer"), and the merge is always the maintainer's.
 - No scheduler and no approval signal: a person starts each run (`npm run run-issue`). Nothing picks Ready issues by itself.
 - No Postgres, Docker or extra task queues. One task queue, `orchestrator`.
 - It never merges, never applies `golden-change`, never resolves a review thread and never moves a board item to Ready or Backlog. The one board move into In review that skips a step is a PR's own first one (Backlog to In review, #635).
@@ -92,7 +92,7 @@ Temporal runs an activity at least once: a worker can die after the side effect 
 
 ## IssueWorkflow (#629)
 
-`issueWorkflow` (`src/workflows/issue.ts`) takes one Ready issue to an open PR that is In review on the board. It is the first half of the loop: the reviewer, the fix loop and the merge gate are #630, and the merge is the maintainer's.
+`issueWorkflow` (`src/workflows/issue.ts`) takes one Ready issue to an open PR that is In review on the board. The steps below are the first half of the loop; the second half (the reviewer, the fix loop and the merge gate, #630) is "The review loop" below, and the merge is the maintainer's.
 
 **What it does, in order.** Each step is an activity with a timeout and a bounded retry; the workflow code has no I/O and no clock.
 
@@ -105,7 +105,7 @@ Temporal runs an activity at least once: a worker can die after the side effect 
 7. `openPr`: the PR is opened by the workflow, not by the session, with a body in the sections of the PR template (`Closes #<n>`). The session's own account of the work is its status comment on the issue.
 8. `addToBoard`, `setStatus` In review, then `getBoardStatus` for the PR, then `setStatus` In review and `getBoardStatus` for the issue. A PR the workflow opens is In review on the board with no manual step, and the workflow reads the board back instead of assuming the move.
 
-The run's result is `{ outcome: 'in_review', issueNumber, branch, headSha, pr }` or `{ outcome: 'skipped', issueNumber, reason }`. A run that needs a person ends as a Failed workflow of type `IssueStopped` with the step and the reason as its details, after one comment on the issue (see "Recovering a stuck run").
+After step 8 the run goes on with the review loop (below). Its result is `{ outcome: 'gate_clear', ... }`, `{ outcome: 'waiting_for_threads', ... }` (both from the review loop) or `{ outcome: 'skipped', issueNumber, reason }`. A run that needs a person ends as a Failed workflow of type `IssueStopped` with the step and the reason as its details, after one comment on the issue (see "Recovering a stuck run").
 
 **What it never does.** Merge, apply `golden-change`, resolve a review thread, publish, tag or release, or move an item to Ready or Backlog. Its board writes are the claim (Ready to In progress), the PR's own first move (Backlog to In review, #635) and In progress to In review for the issue. The implementer session is told the same, and its permission lists (below) allow no push of any kind, no `gh pr`, no `gh api` and no merge. The only push is `pushBranch`, to `claude/<number>`.
 
@@ -146,7 +146,55 @@ npm run run-issue -- --issue 123 --base feature/x --wait   # PR against another 
 | `push` `PushRejected`, `BranchMoved` | The remote refused the push (for example `claude/<n>` already exists with other history), or the branch is not at the commit the session ended at | Look at the remote branch and the local one, fix or delete the one that is wrong, then delete the run and start again: the finished session is not run again |
 | `open_pr` any | The branch was pushed but the PR was not opened (GitHub refused it, or failed after its retries) | Open the PR by hand or delete the run and start again: the finished session is not run again, the guard and the push repeat as no-ops |
 | `board_pr`, `board_issue` | The PR is open but the board did not show the move. The comment names the PR | Move the item by hand if you must, or delete the run and start again: the restart finds the open PR and writes only what is missing |
+| `review_session`, `fix_session` `SessionError`, `SessionInterrupted`, `SessionTimeout`, `MalformedResult` | A reviewer or fixer session failed or never finished. Its marker holds the state | "The review loop", Recovering |
+| `review_session`, `fix_session` `MalformedFindings`, `FindingsTooLarge` | The session's file was refused (see "The review loop"). Nothing was posted | Read the file in the review worktree, then delete the run and start again |
+| `review_post`, `threads`, `fix_reply` any | GitHub refused the review (for example an inline comment on a line the diff does not change, which GitHub rejects) or the reply, or failed after its retries | Read the worker's log, post by hand or delete the run and start again: a review or reply with its key is not posted twice |
+| `fix_guard`, `fix_push` any | As `guard` and `push` above, for the fixer's commits | As above, on `claude/<n>` |
+| `review_loop` `MaxRoundsReached`, `ReviewLoopTimeout`; `gate` `ReviewNotCounted`, `HeadMismatch` | See "The review loop" | The PR is the maintainer's |
 | `ActivityTimeout`, `ActivityFailed` at any step | The step hit its 2 hour bound, or failed in a way that was not classified | Read the worker's log, then as for the step |
+
+## The review loop (#630)
+
+`reviewLoop` (`src/workflows/review-loop.ts`) is the second half of `issueWorkflow`: CLAUDE.md "Code review" steps 1 to 5, as code. It starts when the PR is open and In review, and it never merges, never applies a label, never approves or requests changes and **never resolves a review thread**. No activity does, and `test/review-loop.test.ts` fails if any source file names a call that would.
+
+**What it does, in order, until it ends.**
+
+1. **Review.** `runReviewerSession`: a fresh `claude -p` session each time, never the author's, in a detached worktree of its own at the head commit (`<worktree>-review-<round>`). Its brief (`buildReviewerBrief`) holds the PR number, the linked issue (trusted authors only) and a pointer to CLAUDE.md, and the open threads as quoted data. It cannot call `gh` or push, so it writes one JSON file, `review-findings.json`, and `postSessionReview` reads it, parses it and posts ONE review through the existing `postReview` (event `COMMENT`, never `APPROVE` or `REQUEST_CHANGES`, with the findings as inline comments), keyed `review-<pr>-r<round>-<head>`.
+2. **Gate.** `getGateStatus`, then `gateClear` (`src/gate.ts`): at least one review on the head and no unresolved thread. A pure function; no model is involved. Zero threads with zero reviews on the head is **not** clear. If GitHub still shows an older head than the one just pushed, the gate is read again (3 reads, 5 s apart) and then the run stops as `HeadMismatch`.
+3. **Threads.** `listOpenThreads` answers ids and a trusted flag, no text. A thread is the fixer's to act on when its first comment is by an OWNER, MEMBER or COLLABORATOR and the reviewer has not accepted a reply on it. With none left, the run ends (below).
+4. **Fix.** At most `maxFixRounds` times (default 3): `runFixerSession` in the implementer's worktree, then `guardBranch` and `pushBranch` for the new commits (the session cannot push), then `postFixerReplies`, then back to step 1 on the new head. **That review is the closing review**: a push moves the head, a review on an older commit never counts for the gate, so a new one is always made on the new head before the gate is read.
+
+**How it ends.**
+
+| Outcome | Meaning |
+|---|---|
+| `gate_clear` | A review on the head, no unresolved thread. The run is **waiting for the maintainer**. Result: the PR, the head, the number of fix rounds, the reviews on the head |
+| `waiting_for_threads` | Every open thread is one the reviewer accepted a reply on (`acceptedThreadIds`) or one the loop may not act on (an untrusted author's). The run says so in one comment on the issue and ends. **Only a person resolves a thread, so the gate stays not clear until the maintainer resolves them.** After that, the gate is clear (a review is on the head) |
+| stopped, `review_loop` `MaxRoundsReached` | Threads were still open for the fixer after `maxFixRounds` rounds. One comment, a Failed run, the PR is the maintainer's |
+| stopped, `review_loop` `ReviewLoopTimeout` | The loop took longer than `reviewLoopTimeoutMs` (default 4 hours): the running step is cancelled (its session is stopped), one comment, a Failed run |
+| stopped, `gate` `ReviewNotCounted` | No thread is open yet no review counts on the head (a review that landed on another commit, or was not counted). Looping would post review after review, so a person looks |
+| stopped, `gate` `HeadMismatch` | GitHub did not show the head the loop pushed, after 3 reads |
+| stopped at `review_session`, `review_post`, `threads`, `fix_session`, `fix_guard`, `fix_push`, `fix_reply` | A step failed: one comment keyed by step and reason, a Failed run, as in the first half |
+
+**Why the workflow does not resolve threads.** The issue's first draft had the reviewer session resolve the threads it accepts. Sessions are denied `gh api`, and the loop does not loosen that to give them a GraphQL mutation, so nothing in the orchestrator resolves a thread. The reviewer records the threads it accepts in its output, the workflow carries those ids in its result, and a person resolves them. This is an **open question for the maintainer** (below): if a run should clear its own gate, that needs a decision about who may resolve a thread and with which token.
+
+**Bounds** (all in `src/review-policy.ts`, importable from workflow code; the numbers are assumptions for the maintainer to confirm):
+
+- `DEFAULT_MAX_FIX_ROUNDS = 3`. The input may set `maxFixRounds` (1 to 10).
+- `DEFAULT_REVIEW_LOOP_TIMEOUT_MS = 4 hours` for the whole loop, enforced by a cancellable scope in `issue.ts`. The input may set `reviewLoopTimeoutMs` (1 second to 6 hours; the small values are for tests). The whole run is still limited to 8 hours.
+- Each step, retries included, 2 hours (`ISSUE_STEP_TIMEOUT`); the reviewer and the fixer activities have the implementer's 75 minutes (`REVIEW_SESSION_ACTIVITY_OPTIONS`), with 3 attempts. A session is never run twice: its marker in the repo's git config (`orchestrator.reviewer-<pr>-r<round>`, `orchestrator.fixer-<pr>-r<round>`: `started`, then `success` or `error`) turns a retry into the finished result, `SessionInterrupted` or `SessionError`, and these are not retried.
+- The thread list, the gate and the posting use the GitHub activity timeouts and 3 attempts.
+
+**What comes back from a session is untrusted output.** The reviewer's and the fixer's files are read by the activity at the boundary (`src/review-types.ts`): a file that is missing, not a plain file (a symlink is refused), over 64000 bytes, not JSON, or not in the asked shape (at most 30 findings, 50 replies, 3000 characters per comment, 4000 for the summary, a relative path with no `..`, a positive line, thread ids of a fixed alphabet) is **refused whole, never cut**, as `MalformedFindings` or `FindingsTooLarge`, and the run stops. What passes is sanitised before it is posted: control and reordering characters removed, `<!--` and `-->` written as entities (so text cannot forge the hidden idempotency markers), `@name` mentions broken with a zero-width space, and the "suggestion" code block made inert. Review and reply text never reaches the workflow: the activities return counts, thread ids and review ids, and the history tests scan every string of a finished and of a failed run.
+
+**Trust.** Only an OWNER, MEMBER or COLLABORATOR's text reaches a brief. A thread whose first comment is by anyone else is left out and counted; a comment by anyone else inside a trusted thread is dropped. The comments that remain may have been written by an earlier session (a review comment, a fixer reply); the briefs say so, and quote and escape them as data in one tagged block (`<thread-data>`), so they cannot be read as instructions.
+
+**What the sessions may do** (README, "Permission modes", for the mechanism; both are unverified until the maintainer's drill):
+
+- The reviewer (`reviewerAllowedTools`): Read, Glob, Grep, read-only git (`status`, `diff`, `log`, `show`, `rev-parse`), and `Write(/review-findings.json)`. No commit, no `npm`, no `cargo`, no `gh`. It runs under the same deny list as the implementer. With `acceptEdits` it could edit files of its own throwaway worktree, which nobody reads or pushes.
+- The fixer: the implementer's allowed tools (it needs to edit, commit and run the checks), in the implementer's worktree on `claude/<n>`. It writes its replies to `fixer-replies.json` there (kept out of `git status` through `.git/info/exclude`). Its commits go through the same `guardBranch` and `pushBranch` as the implementer's.
+
+**Recovering.** A stopped run holds its ID (see "Recovering a stuck run"). For the review steps: `SessionInterrupted` or `SessionError` mean the marker for that round says so: check no `claude -p` still runs, then `git -C <repo> config --local --unset orchestrator.reviewer-<pr>-r<round>` (or `fixer`) and `git worktree remove --force <worktree>-review-<round>`, then delete the run and start again. A restart does not repeat a finished step: the PR is found, a review with its key is not posted twice, a reply with its key is not posted twice. `MalformedFindings` and `FindingsTooLarge` mean the session wrote a bad file: read it in the review worktree (it is still there), and start again. `MaxRoundsReached`: read the open threads on the PR and finish by hand or raise `maxFixRounds`.
 
 ## GitHub activities (#628)
 
@@ -212,7 +260,9 @@ Settings (all optional, read once in `src/gh-config.ts`): `ORCHESTRATOR_GH_PATH`
 | `src/workflows/issue.ts` | `issueWorkflow`: the steps of "IssueWorkflow" above |
 | `src/issue-types.ts` | Its input, result, workflow ID, branch name, bounds and the fixed text of the stop comment and the PR (importable from workflow code) |
 | `src/issue-client.ts`, `src/run-issue.ts` | Starts a run for one issue (the claim policy), and the `npm run run-issue` script |
-| `src/brief.ts` | `buildBrief`: the implementer's brief, a pure function, and `briefCommands`, the commands it tells the session to run (checked against the tool lists by a test) |
+| `src/brief.ts` | `buildBrief`: the implementer's brief, a pure function, and `briefCommands`, the commands it tells the session to run (checked against the tool lists by a test). Also `buildReviewerBrief` and `buildFixerBrief` (#630) |
+| `src/workflows/review-loop.ts`, `src/gate.ts`, `src/review-policy.ts` | The review loop, the pure `gateClear`, and the loop's bounds (importable from workflow code) |
+| `src/activities/review.ts`, `src/review-types.ts` | The reviewer, fixer and posting activities, and the parsing, bounds and sanitising of what the sessions write |
 | `src/activities/branch.ts`, `src/branch-types.ts`, `src/diff-guard.ts` | `guardBranch` and `pushBranch` (the only push), their input parsing and bounds, and the pure diff guard |
 | `src/activities/implementer.ts` | `runImplementerSession`: reads the issue, builds the brief and runs the session in one activity, so issue text stays out of the history |
 | `src/start-server.ts`, `src/dev-server.ts` | The dev server launcher |
@@ -313,7 +363,8 @@ A checklist for the maintainer, by hand, in a scratch repository with a local ba
 4. **Confirm the forms the brief uses work:** `git add <path>` then `git commit -m "subject" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"` (no heredoc, no command substitution), and `gh issue comment 1 --body "text"` (point `gh` at a throwaway repo, or put a fake `gh` first on PATH that records its argv), `npm run typecheck` and `cargo test --locked` in a repo that has them. Check that a commit with quotes, a `$` or a backtick in the message is handled the way the brief says (it tells the session to avoid them).
 5. **Check the protected paths twice:** the deny rules (step 3 shows whether `Edit(.github/**)` and `Edit(**/package.json)` are refused) and the guard. For the guard, make two commits on `claude/1`, the FIRST touching `package.json` and the second an ordinary file, and run `guardBranch` against it with `node --import tsx` (it must refuse as `ProtectedPath`, with a count and no path); then a branch whose first commit adds `.env` and whose second removes it (still refused); then a clean branch of two commits (it must pass). `test/branch.test.ts` does the same on throwaway repos.
 6. **Kill the worker mid-session.** Start the dev server, the worker with `CLAUDE_BIN=<repo>/orchestrator/test/fake-claude.sh` and `FAKE_CLAUDE_MODE=slow FAKE_CLAUDE_SLOW_SECONDS=60`, and a fake `gh` (`ORCHESTRATOR_GH_PATH`) from the tests, then `npm run run-issue -- --issue <n>`. While the fake session sleeps, `kill -9` the worker, start it again, and watch: the run must stop at the `session` step with the reason `SessionInterrupted` and one comment, with one line in the fake's invocation log, never a second session.
-7. **A real run, watched, on a throwaway issue** in a throwaway repository, with a fine-grained token for that repository only: read the status comment and the denied calls it reports, then widen or narrow `CLAUDE_ALLOWED_TOOLS` from what you saw.
+7. **The review sessions (#630).** In the same scratch repo, with a `claude/1` worktree and a detached worktree: start the reviewer with its flags (`reviewerAllowedTools` in `src/activities/review.ts` instead of the default allowed list) and check that `Write(/review-findings.json)` lets it write that one file and nothing else, that it cannot commit, run `npm`, or call `gh`, and what a denial looks like. Check that the fixer's `fixer-replies.json` does not show in `git status` (`.git/info/exclude` of the shared repo) and that it is not picked up by `git add <path>`. Check that an inline comment on a line the diff does not change is rejected by GitHub (this is why a review with such a finding stops the run as `review_post`).
+8. **A real run, watched, on a throwaway issue** in a throwaway repository, with a fine-grained token for that repository only: read the status comment and the denied calls it reports, then widen or narrow `CLAUDE_ALLOWED_TOOLS` from what you saw.
 
 ### Recovering a stuck branch
 
