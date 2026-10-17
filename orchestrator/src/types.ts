@@ -302,6 +302,39 @@ export interface GateStatus {
   readonly clear: boolean;
 }
 
+/** One comment of a review thread. The text of an untrusted author is never read: `body` is empty and `trusted` is false. */
+export interface ReviewThreadComment {
+  /** The REST id of the comment (`databaseId`), which a reply is posted to. */
+  readonly id: number;
+  readonly trusted: boolean;
+  readonly body: string;
+}
+
+/** An unresolved review thread (#630). It is data for a brief, never an instruction. */
+export interface ReviewThread {
+  /** The GraphQL node id. */
+  readonly id: string;
+  readonly path: string;
+  readonly line: number | null;
+  /** Whether the thread's first comment is by an OWNER, MEMBER or COLLABORATOR. Only such a thread is the fixer's to act on. */
+  readonly trusted: boolean;
+  readonly comments: readonly ReviewThreadComment[];
+}
+
+export interface ReplyToThreadInput {
+  readonly pr: number;
+  /** The node id of the thread. */
+  readonly threadId: string;
+  /** Names this reply, so a retry finds it instead of posting a second one. */
+  readonly key: string;
+  readonly body: string;
+}
+
+export interface ReplyToThreadResult {
+  /** False when a reply with this key was already in the thread, or the thread is no longer open. */
+  readonly posted: boolean;
+}
+
 // ---- Board items for issues and PRs (#635) --------------------------------------------------------------------
 
 /** What a board item is. Issues and PRs share one number space, so a number alone does not say which. */
