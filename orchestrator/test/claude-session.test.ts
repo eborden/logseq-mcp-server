@@ -537,6 +537,12 @@ test('commands that reach further than the session may are refused by the lists,
     'gh issue view 5 --comments',
     'gh issue comment 5 --body-file /etc/hosts',
     'gh issue comment 5 -F /etc/hosts',
+    // An allowed git verb with an option that writes anywhere, or reads any file.
+    'git log --output=/tmp/x',
+    'git diff --output=/etc/cron.d/x HEAD',
+    'git show --output=../outside.txt HEAD',
+    'git diff --no-index /etc/passwd /dev/null',
+    'git diff HEAD --no-index /etc/passwd /dev/null',
     'rm -rf x',
     'curl https://example.invalid',
   ]) {
@@ -558,13 +564,13 @@ test('commands that reach further than the session may are refused by the lists,
   }
 });
 
-test('the default denied list holds the other half: gh api and gh pr, the protected paths for the file tools, and the web', () => {
-  for (const rule of ['Bash(gh api *)', 'Bash(gh pr *)', 'Bash(git push *)', 'WebFetch', 'WebSearch']) {
+test('the default denied list holds the other half: gh api and gh pr, git --output, the protected paths for the file tools, and the web', () => {
+  for (const rule of ['Bash(gh api *)', 'Bash(gh pr *)', 'Bash(git push *)', 'Bash(git * --output*)', 'Bash(git diff --no-index*)', 'Bash(git diff * --no-index*)', 'WebFetch', 'WebSearch']) {
     assert.ok(DEFAULT_DISALLOWED_TOOLS.includes(rule), rule);
   }
-  for (const path of ['.github/**', 'CLAUDE.md', '.claude/**', 'docs/adr/**', 'docs/business-rules/**', '.env*']) {
-    assert.ok(DEFAULT_DISALLOWED_TOOLS.includes(`Edit(${path})`), `Edit(${path})`);
-    assert.ok(DEFAULT_DISALLOWED_TOOLS.includes(`Write(${path})`), `Write(${path})`);
+  for (const glob of ['.github/**', 'docs/adr/**', 'docs/business-rules/**', '.claude/**', 'scripts/**', 'orchestrator/src/**', '**/.git/**', '**/CLAUDE.md', '**/.mcp.json', '**/package.json', '**/Cargo.toml', '**/build.rs', '**/.npmrc', '**/.env*']) {
+    assert.ok(DEFAULT_DISALLOWED_TOOLS.includes(`Edit(${glob})`), `Edit(${glob})`);
+    assert.ok(DEFAULT_DISALLOWED_TOOLS.includes(`Write(${glob})`), `Write(${glob})`);
   }
   // A deny rule is never also an allow rule.
   for (const rule of DEFAULT_DISALLOWED_TOOLS) {

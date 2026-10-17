@@ -2,6 +2,8 @@
 // Nothing else in the orchestrator reads process.env. A bad value fails fast with a message that names the
 // variable and never echoes a secret (there are none in v1).
 
+import { protectedDenyRules } from './diff-guard.ts';
+
 export interface Config {
   /** host:port of the Temporal frontend. */
   readonly address: string;
@@ -151,9 +153,17 @@ export const DEFAULT_ALLOWED_TOOLS: readonly string[] = [
 ];
 
 /**
- * Denied whatever an allow rule or a settings file says (deny beats allow). Paths are rules for the file tools; the
- * orchestrator's diff guard (`src/diff-guard.ts`) refuses the same paths after the session, because the path syntax of
- * a deny rule was not verified against a real session (README, "Before the first real run").
+ * Denied whatever an allow rule or a settings file says (deny beats allow). The paths are rules for the file tools, the
+ * same set the orchestrator's diff guard refuses after the session (`protectedDenyRules` in `src/diff-guard.ts`, which
+ * also says why each is protected). The guard is the backstop, because the path syntax of a deny rule was not verified
+ * against a real session (README, "Before the first real run").
+ *
+ * `git diff`, `git log` and `git show` are allowed, and `--output=<file>` makes any of them write to any path, so it is
+ * denied on every git command. `git diff --no-index` reads any two files, whatever the repo holds, into the session.
+ * The other allowed git verbs (`status`, `rev-parse`, `add`, `rm`, `mv`, `commit -m`) were read in `git help` for a
+ * write-anywhere or run-a-program option and have none that a command line in this list reaches: `add`, `rm` and `mv`
+ * write only in the work tree, and `commit` runs the repo's hooks, which a session cannot write (any `.git` directory is
+ * denied, and so are `.husky/` and `.githooks/`).
  */
 export const DEFAULT_DISALLOWED_TOOLS: readonly string[] = [
   'Bash(gh api *)',
@@ -161,9 +171,12 @@ export const DEFAULT_DISALLOWED_TOOLS: readonly string[] = [
   'Bash(gh issue comment * --body-file *)',
   'Bash(gh issue comment * -F *)',
   'Bash(git push *)',
+  'Bash(git * --output*)',
+  'Bash(git diff --no-index*)',
+  'Bash(git diff * --no-index*)',
   'WebFetch',
   'WebSearch',
-  ...['.github/**', 'CLAUDE.md', '.claude/**', 'docs/adr/**', 'docs/business-rules/**', '.env*'].flatMap((path) => [`Edit(${path})`, `Write(${path})`]),
+  ...protectedDenyRules(),
 ];
 
 /** The settings files a session loads. The host user's own settings and hooks are left out. */
