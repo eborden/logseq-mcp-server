@@ -17,12 +17,14 @@ export interface ServerConfig {
   readonly cliPath: string | undefined;
 }
 
-export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+// The choices of `claude --permission-mode` in CLI 2.1.302 (`claude --help`). A value outside this set makes every
+// session exit non-zero, so the set is closed here and re-checked against the CLI help when the CLI is upgraded.
+export type PermissionMode = 'acceptEdits' | 'auto' | 'bypassPermissions' | 'manual' | 'dontAsk' | 'plan';
 
 export interface ClaudeConfig {
   /** The `claude` executable: a bare name looked up on PATH, or an absolute path. Tests point it at a fake. */
   readonly claudeBin: string;
-  /** Passed as `--permission-mode`. Absent leaves the CLI's own default. */
+  /** Passed as `--permission-mode`. Absent means no flag at all, so the CLI's own default applies. */
   readonly permissionMode: PermissionMode | undefined;
 }
 
@@ -76,7 +78,10 @@ export function loadConfig(env: Env): Config {
 }
 
 const CLAUDE_BIN = /^(\/[^\0]{1,1023}|[A-Za-z0-9._-]{1,100})$/;
-const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
+const PERMISSION_MODES: readonly PermissionMode[] = ['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan'];
+/** `bypassPermissions` lets an unattended session do anything the OS user can. It needs this second variable too. */
+export const BYPASS_OPT_IN_VARIABLE = 'ORCHESTRATOR_ALLOW_BYPASS_PERMISSIONS';
+export const BYPASS_OPT_IN_VALUE = 'yes-skip-all-permission-checks';
 
 export function loadClaudeConfig(env: Env): ClaudeConfig {
   const claudeBin = blankAsAbsent(env['CLAUDE_BIN']) ?? 'claude';
@@ -87,6 +92,11 @@ export function loadClaudeConfig(env: Env): ClaudeConfig {
   const permissionMode = rawMode === undefined ? undefined : PERMISSION_MODES.find((mode) => mode === rawMode);
   if (rawMode !== undefined && permissionMode === undefined) {
     throw new ConfigError(`CLAUDE_PERMISSION_MODE must be one of ${PERMISSION_MODES.join(', ')}`);
+  }
+  if (permissionMode === 'bypassPermissions' && blankAsAbsent(env[BYPASS_OPT_IN_VARIABLE]) !== BYPASS_OPT_IN_VALUE) {
+    throw new ConfigError(
+      `CLAUDE_PERMISSION_MODE=bypassPermissions skips every permission check; it also needs ${BYPASS_OPT_IN_VARIABLE}=${BYPASS_OPT_IN_VALUE}`,
+    );
   }
   return { claudeBin, permissionMode };
 }
