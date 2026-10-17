@@ -468,14 +468,17 @@ test('a second start for the same issue is rejected while the run is open and af
     w.sessionEntered = entered;
   });
 
-  const first = await startIssueRun(client, FAKE_QUEUE, inputFor(issue));
-  assert.equal(first.status, 'started');
-  await enteredPromise;
+  try {
+    const first = await startIssueRun(client, FAKE_QUEUE, inputFor(issue));
+    assert.equal(first.status, 'started');
+    await enteredPromise;
 
-  const whileOpen = await startIssueRun(client, FAKE_QUEUE, inputFor(issue));
-  assert.deepEqual(whileOpen, { status: 'already_running', workflowId: issueWorkflowId(issue) });
-
-  release();
+    const whileOpen = await startIssueRun(client, FAKE_QUEUE, inputFor(issue));
+    assert.deepEqual(whileOpen, { status: 'already_running', workflowId: issueWorkflowId(issue) });
+  } finally {
+    // Always let the session finish, so a failed assertion cannot leave the worker waiting on it.
+    release();
+  }
   await client.workflow.getHandle(issueWorkflowId(issue)).result();
   const afterClose = await startIssueRun(client, FAKE_QUEUE, inputFor(issue));
   assert.deepEqual(afterClose, { status: 'already_finished', workflowId: issueWorkflowId(issue), closedAs: 'COMPLETED' });
