@@ -25,10 +25,13 @@ import {
   MalformedFindingsError,
   MAX_FINDINGS,
   MAX_OUTPUT_FILE_BYTES,
+  advisorySection,
+  changedLines,
   parseFixerOutput,
   parseReviewStepInput,
   parseReviewerOutput,
   sanitiseText,
+  splitFindings,
 } from '../src/review-types.ts';
 import type { IssueView, ReviewThread } from '../src/types.ts';
 import { createFake, emptyState, rawIssue, rawOpenPr, rawThread, recordedSleep } from './github-support.ts';
@@ -99,14 +102,65 @@ test('sanitising: no hidden marker, no mention, no suggestion button, no control
   assert.equal(sanitiseText('ping @alice and (@bob)'), 'ping @​alice and (@​bob)');
   assert.equal(sanitiseText('mail alice@example.com and `@code`'), 'mail alice@\u200bexample.com and `@\u200bcode`', 'a mention is broken in a code span too');
   assert.equal(sanitiseText('`@alice please'), '`@\u200balice please', 'a lone backtick closes no code span');
-  assert.equal(sanitiseText('![x](https://host.example/p.png?d=1) and [t](https://h.example)'), '!\u200b[x]\u200b(https://host.example/p.png?d=1) and [t]\u200b(https://h.example)', 'no image or link target');
-  assert.equal(sanitiseText('[ref]: https://h.example'), '[ref]\u200b: https://h.example');
-  assert.equal(sanitiseText('<img src="https://h.example/x.png"> and Vec<T>'), '&lt;img src="https://h.example/x.png"> and Vec&lt;T>', 'no HTML tag');
+  assert.equal(sanitiseText('![x](https://host.example/p.png?d=1) and [t](https://h.example)'), '!\u200b[x]\u200b(https:\u200b//host.example/p.png?d=1) and [t]\u200b(https:\u200b//h.example)', 'no image or link target');
+  assert.equal(sanitiseText('[ref]: https://h.example'), '[ref]\u200b: https:\u200b//h.example');
+  assert.equal(sanitiseText('<img src="https://h.example/x.png"> and Vec<T>'), '&lt;img src="https:\u200b//h.example/x.png"> and Vec&lt;T>', 'no HTML tag');
+  assert.equal(sanitiseText('see https://h.example/a and www.h.example'), 'see https:\u200b//h.example/a and www\u200b.h.example', 'a raw URL does not autolink');
+  assert.equal(sanitiseText(sanitiseText('`@alice [x](https://h.example) www.h.example')), sanitiseText('`@alice [x](https://h.example) www.h.example'), 'sanitising twice changes nothing more');
   assert.equal(sanitiseText('```suggestion\nx\n```'), '``` suggestion\nx\n```');
   assert.equal(sanitiseText('a\u0000b\u001bc‮d e\r\nf'), 'abcde\nf');
   const parsed = parseReviewerOutput(reviewerFile({ summary: 'See <!-- x --> @alice', findings: [{ path: 'a.ts', line: 1, body: '<!-- orchestrator-reply:k -->' }] }));
   assert.ok(!parsed.summary.includes('<!--'));
   assert.ok(parsed.findings.every((finding) => !finding.body.includes('<!--')));
+});
+
+test('changedLines reads the new side of a -U0 diff, follows hunk counts and skips deletions and removed files', () => {
+  const diff = [
+    'diff --git a/a.ts a/a.ts',
+    '--- a/a.ts',
+    '+++ a.ts',
+    '@@ -3,0 +4,2 @@ ctx',
+    '+one',
+    '+++ two (an added line whose text is "++ two", which looks like a file header)',
+    '@@ -9 +11 @@',
+    '-old',
+    '+new',
+    '@@ -20,2 +21,0 @@',
+    '-gone',
+    '-gone',
+    '\\ No newline at end of file',
+    'diff --git b.ts b.ts',
+    '--- b.ts',
+    '+++ /dev/null',
+    '@@ -1,2 +0,0 @@',
+    '-x',
+    '-y',
+    'diff --git c.ts c.ts',
+    '+++ c.ts\t',
+    '@@ -0,0 +1 @@',
+    '+only',
+  ].join('\n');
+  const changed = changedLines(diff);
+  assert.deepEqual([...changed.keys()], ['a.ts', 'c.ts']);
+  assert.deepEqual(changed.get('a.ts'), [[4, 5], [11, 11]]);
+  assert.deepEqual(changed.get('c.ts'), [[1, 1]]);
+  const finding = (path: string, line: number) => ({ path, line, body: `at ${path}:${line}` });
+  const split = splitFindings([finding('a.ts', 4), finding('a.ts', 5), finding('a.ts', 6), finding('a.ts', 21), finding('b.ts', 1), finding('c.ts', 1), finding('d.ts', 1)], changed);
+  assert.deepEqual(split.inline.map((f) => `${f.path}:${f.line}`), ['a.ts:4', 'a.ts:5', 'c.ts:1']);
+  assert.deepEqual(split.advisory.map((f) => `${f.path}:${f.line}`), ['a.ts:6', 'a.ts:21', 'b.ts:1', 'd.ts:1']);
+  assert.equal(splitFindings([finding('a.ts', 4)], undefined).inline.length, 0, 'an unreadable diff puts nothing inline');
+  assert.deepEqual(changedLines(''), new Map());
+});
+
+test('the advisory section lists what fits, says it is advisory, and counts what it leaves out', () => {
+  assert.deepEqual(advisorySection([]), { text: '', listed: 0, omitted: 0 });
+  const one = advisorySection([{ path: 'a.ts', line: 3, body: 'first\nsecond' }]);
+  assert.ok(one.text.includes('advisory') && one.text.includes('open no thread') && one.text.includes('`a.ts:3`') && one.text.includes('  > second'));
+  assert.deepEqual([one.listed, one.omitted], [1, 0]);
+  const many = advisorySection(Array.from({ length: 20 }, (_, index) => ({ path: 'a.ts', line: index + 1, body: 'x'.repeat(2_900) })));
+  assert.ok(many.listed > 0 && many.listed < 20 && many.listed + many.omitted === 20);
+  assert.ok(many.text.length < 21_000);
+  assert.ok(many.text.includes(`${many.omitted} more advisory`));
 });
 
 test('a fixer file: replies are typed, and a reply to something that is not a thread id is refused', () => {
@@ -364,11 +418,11 @@ test('the reviewer: one session, one COMMENT review with its inline comments, an
   assert.equal(await git(`${s.worktree}-review-0`, 'rev-parse', 'HEAD'), s.head);
 
   const posted = await s.run(s.activities.postSessionReview);
-  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 1 });
+  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 1, advisory: 0, omitted: 0 });
   // A retry of either step changes nothing: no second session, no second review.
   assert.deepEqual(await s.run(s.activities.runReviewerSession), session);
   assert.equal(await s.invocations(), 1, 'a finished session is not run again');
-  assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: false, comments: 1 });
+  assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: false, comments: 1, advisory: 0, omitted: 0 });
 
   const reviews = await s.fake.callsMatching('/pulls/77/reviews');
   const sent = reviews.filter((call) => call.argv.includes('POST'));
@@ -382,6 +436,46 @@ test('the reviewer: one session, one COMMENT review with its inline comments, an
   assert.ok(!JSON.stringify([session, posted]).includes('SECRET-FINDING-TEXT'));
 });
 
+async function postedReviewBody(s: Scenario): Promise<{ body: string; comments: { path: string; line: number }[] }> {
+  const sent = (await s.fake.callsMatching('/pulls/77/reviews')).filter((call) => call.argv.includes('POST'));
+  assert.equal(sent.length, 1, 'one review');
+  const parsed: unknown = JSON.parse(sent[0]?.stdin ?? '{}');
+  assert.ok(typeof parsed === 'object' && parsed !== null && 'body' in parsed && 'comments' in parsed && typeof parsed.body === 'string' && Array.isArray(parsed.comments));
+  return { body: parsed.body, comments: parsed.comments };
+}
+
+test('the reviewer: a finding on a line the commit does not change goes in the body, not into an inline comment GitHub would reject', async () => {
+  const s = await scenario();
+  await s.script(
+    1,
+    `cat > review-findings.json <<'JSON'
+{"summary":"Checked.","findings":[{"path":"atlas.txt","line":1,"body":"ON-DIFF finding"},{"path":"atlas.txt","line":40,"body":"OFF-DIFF-LINE finding"},{"path":"untouched.txt","line":2,"body":"OFF-DIFF-FILE finding"}],"acceptedThreadIds":[]}
+JSON
+`,
+  );
+  const session = await s.run(s.activities.runReviewerSession);
+  const posted = await s.run(s.activities.postSessionReview);
+  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 1, advisory: 2, omitted: 0 });
+  const review = await postedReviewBody(s);
+  assert.deepEqual(review.comments.map((comment) => `${comment.path}:${comment.line}`), ['atlas.txt:1'], 'only the finding on a changed line is inline');
+  assert.ok(review.body.includes('OFF-DIFF-LINE finding') && review.body.includes('OFF-DIFF-FILE finding') && !review.body.includes('ON-DIFF'));
+  assert.ok(review.body.includes('advisory') && review.body.includes('open no thread'));
+  // No finding text reaches what the workflow records.
+  assert.ok(!/DIFF/.test(JSON.stringify([session, posted])));
+  assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: false, comments: 1, advisory: 2, omitted: 0 }, 'a retry changes nothing');
+});
+
+test('the reviewer: when the diff cannot be read, every finding goes in the body and the review is still posted', async () => {
+  const s = await scenario();
+  await s.script(1, WRITE_FINDINGS);
+  await s.run(s.activities.runReviewerSession);
+  const posted = await s.run(s.activities.postSessionReview, { base: 'no-such-branch' });
+  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 0, advisory: 1, omitted: 0 });
+  const review = await postedReviewBody(s);
+  assert.equal(review.comments.length, 0);
+  assert.ok(review.body.includes('SECRET-FINDING-TEXT'));
+});
+
 test('the reviewer: a file that is missing, malformed or too large is refused, and nothing is posted', async () => {
   for (const [name, script, type] of [
     ['no file', 'true', 'MalformedFindings'],
@@ -389,8 +483,6 @@ test('the reviewer: a file that is missing, malformed or too large is refused, a
     ['the wrong shape', 'echo \'{"findings":[]}\' > review-findings.json', 'MalformedFindings'],
     ['too large', `head -c ${MAX_OUTPUT_FILE_BYTES + 10} /dev/zero | tr '\\0' 'x' > review-findings.json`, 'FindingsTooLarge'],
     ['a symlink to a valid findings file', `printf '{"summary":"s","findings":[],"acceptedThreadIds":[]}' > ../valid-findings.json\nln -s ../valid-findings.json review-findings.json`, 'MalformedFindings'],
-    ['a finding on a line the diff does not change', `printf '{"summary":"s","findings":[{"path":"atlas.txt","line":99,"body":"x"}]}' > review-findings.json`, 'MalformedFindings'],
-    ['a finding in a file the diff does not touch', `printf '{"summary":"s","findings":[{"path":"other.txt","line":1,"body":"x"}]}' > review-findings.json`, 'MalformedFindings'],
   ] as const) {
     const s = await scenario();
     await s.script(1, script);
@@ -523,4 +615,10 @@ test('postReview ignores a marker copied into a review by an author who is not t
   });
   const posted: { posted: boolean } = await new MockActivityEnvironment().run(s.github.postReview, { pr: 77, commitId: SHA, idempotencyKey: key, body: 'Real review.', comments: [] });
   assert.equal(posted.posted, true, 'a stranger cannot stop the review by copying its key');
+});
+
+test('the reviewer: a session that rewrites a findings file the PR tracks is refused too', async () => {
+  const s = await scenario(undefined, { 'review-findings.json': '{"summary":"COMMITTED-SUMMARY","findings":[],"acceptedThreadIds":[]}' });
+  await s.script(1, WRITE_FINDINGS);
+  assert.equal((await failureOf(s.run(s.activities.runReviewerSession))).type, 'MalformedFindings');
 });

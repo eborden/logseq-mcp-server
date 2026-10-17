@@ -93,7 +93,12 @@ export interface ReviewerSessionResult {
 export interface PostedReviewResult {
   readonly reviewId: number;
   readonly posted: boolean;
+  /** Findings posted as inline comments, on lines the commit changes. */
   readonly comments: number;
+  /** Findings on lines the commit does not change, listed in the review body (advisory: they open no thread). */
+  readonly advisory: number;
+  /** Findings on unchanged lines left out of the body because it is at its size bound. Counted, never silent. */
+  readonly omitted: number;
 }
 
 export interface FixerSessionResult {
@@ -130,7 +135,7 @@ const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u20
 
 /**
  * Text from a session, made safe to post. It cannot carry the hidden idempotency markers (`<!--`), notify anyone
- * (`@name` gets a zero-width space), name a link or image target, offer an "apply suggestion" button, or hide text
+ * (`@name` gets a zero-width space), name a link or image target, autolink a URL, offer an "apply suggestion" button, or hide text
  * behind control characters. Plain `<` in review text (a generic type) becomes `&lt;`: the cost of closing HTML.
  */
 export function sanitiseText(text: string): string {
@@ -147,8 +152,108 @@ export function sanitiseText(text: string): string {
     .replace(/!\[/g, '!\u200b[')
     .replace(/\]\(/g, ']\u200b(')
     .replace(/\]:/g, ']\u200b:')
+    // A raw URL must not autolink (a zero-width space after the scheme's colon, and in `www.`).
+    .replace(/\b([A-Za-z][A-Za-z0-9+.-]{1,31}):\/\//g, '$1:\u200b//')
+    .replace(/\bwww\./gi, (match) => `${match.slice(0, 3)}\u200b.`)
     .replace(/```[ \t]*suggestion/gi, '``` suggestion')
     .trim();
+}
+
+// ---- changed lines --------------------------------------------------------------------------------------------
+
+/** Changed lines of the new side of a diff, per path, as inclusive ranges. */
+export type ChangedLines = ReadonlyMap<string, readonly (readonly [number, number])[]>;
+
+const HUNK = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/**
+ * Parses `git diff -U0 --no-prefix --no-renames` into the lines each file changes on its new side. GitHub accepts an
+ * inline comment only on a line the diff shows; with no context lines that is exactly these. The hunk's counts are
+ * followed, so a changed line that reads `++ x` (shown as `+++ x`) is not taken for a file header. Pure, no I/O.
+ */
+export function changedLines(diff: string): ChangedLines {
+  const files = new Map<string, [number, number][]>();
+  let current: [number, number][] | undefined;
+  let old = 0;
+  let added = 0;
+  for (const line of diff.split('\n')) {
+    if (old > 0 || added > 0) {
+      if (line.startsWith('-')) {
+        old -= 1;
+      } else if (line.startsWith('+')) {
+        added -= 1;
+      }
+      continue;
+    }
+    if (line.startsWith('+++ ')) {
+      const path = line.slice(4).split('\t')[0] ?? '';
+      current = path === '/dev/null' ? undefined : (files.get(path) ?? []);
+      if (current !== undefined) {
+        files.set(path, current);
+      }
+      continue;
+    }
+    const hunk = HUNK.exec(line);
+    if (hunk !== null && current !== undefined) {
+      old = hunk[1] === undefined ? 1 : Number(hunk[1]);
+      added = hunk[3] === undefined ? 1 : Number(hunk[3]);
+      if (added > 0) {
+        const start = Number(hunk[2]);
+        current.push([start, start + added - 1]);
+      }
+    }
+  }
+  return files;
+}
+
+export interface SplitFindings {
+  /** On a line the commit changes: an inline comment GitHub accepts. */
+  readonly inline: readonly Finding[];
+  /** Anywhere else: GitHub would reject the whole review (422), so these go in the review body. */
+  readonly advisory: readonly Finding[];
+}
+
+/** `undefined` for `changed` means the diff could not be read: nothing can be shown to sit on a changed line. */
+export function splitFindings(findings: readonly Finding[], changed: ChangedLines | undefined): SplitFindings {
+  const inline: Finding[] = [];
+  const advisory: Finding[] = [];
+  for (const finding of findings) {
+    const ranges = changed?.get(finding.path) ?? [];
+    (ranges.some(([from, to]) => finding.line >= from && finding.line <= to) ? inline : advisory).push(finding);
+  }
+  return { inline, advisory };
+}
+
+/** The most the advisory findings add to a review body, so the body stays far under GitHub's limit. */
+export const MAX_ADVISORY_CHARS = 20_000;
+
+/**
+ * The advisory findings as a section of the review body: what fits, then a count of the rest. The text of a finding
+ * is already sanitised. Returns the section and how many were left out.
+ */
+export function advisorySection(advisory: readonly Finding[]): { readonly text: string; readonly listed: number; readonly omitted: number } {
+  if (advisory.length === 0) {
+    return { text: '', listed: 0, omitted: 0 };
+  }
+  const lines = [
+    `${advisory.length} finding${advisory.length === 1 ? ' is' : 's are'} on lines this commit does not change, so GitHub cannot attach ${advisory.length === 1 ? 'it' : 'them'} to the diff. ${advisory.length === 1 ? 'It is' : 'They are'} listed here, are **advisory** and open no thread, so ${advisory.length === 1 ? 'it does' : 'they do'} not hold the gate.`,
+  ];
+  let size = lines[0]?.length ?? 0;
+  let listed = 0;
+  for (const finding of advisory) {
+    const entry = `\n- \`${finding.path}:${finding.line}\`\n${finding.body.split('\n').map((row) => `  > ${row}`).join('\n')}`;
+    if (size + entry.length > MAX_ADVISORY_CHARS) {
+      break;
+    }
+    lines.push(entry);
+    size += entry.length;
+    listed += 1;
+  }
+  const omitted = advisory.length - listed;
+  if (omitted > 0) {
+    lines.push(`\n${omitted} more advisory finding${omitted === 1 ? ' was' : 's were'} left out because this list is at its size bound.`);
+  }
+  return { text: lines.join('\n'), listed, omitted };
 }
 
 // ---- parsing --------------------------------------------------------------------------------------------------

@@ -32,10 +32,13 @@ import {
   MAX_OUTPUT_FILE_BYTES,
   MalformedFindingsError,
   REVIEWER_OUTPUT_FILE,
+  advisorySection,
+  changedLines,
   openThreadRefs,
   parseFixerOutput,
   parseReviewStepInput,
   parseReviewerOutput,
+  splitFindings,
 } from '../review-types.ts';
 import type {
   FixerOutput,
@@ -47,6 +50,7 @@ import type {
   ReviewerOutput,
   ReviewerSessionResult,
 } from '../review-types.ts';
+import type { ChangedLines } from '../review-types.ts';
 import { MalformedSessionOutputError, parseClaudeOutput } from '../types.ts';
 import type { IssueView, PostReviewInput, PostReviewResult, ReplyToThreadInput, ReplyToThreadResult, ReviewThread } from '../types.ts';
 
@@ -117,8 +121,13 @@ function markerKey(kind: Kind, input: ReviewStepInput): string {
   return kind === 'reviewer' ? `orchestrator.reviewer-${input.pr}-r${input.round}-${input.headSha.slice(0, SHORT)}` : `orchestrator.fixer-${input.pr}-r${input.round}`;
 }
 
-/** The file's text, refused when it is missing, not a plain file or over the byte bound. The text is never put in a message. */
-async function readOutputFile(path: string): Promise<string> {
+/**
+ * The file's text, refused when it is missing, not a plain file (a link is refused, not followed), tracked by git, or
+ * over the byte bound. A tracked file is one the PR's own tree carries, not one the session wrote. The text is never
+ * put in a message.
+ */
+async function readOutputFile(dir: string, name: string): Promise<string> {
+  const path = join(dir, name);
   let info;
   try {
     info = await lstat(path);
@@ -128,6 +137,9 @@ async function readOutputFile(path: string): Promise<string> {
   if (!info.isFile()) {
     throw failure('the session output is not a plain file', 'MalformedFindings');
   }
+  if ((await gitOk(dir, ['ls-files', '--', name])).trim() !== '') {
+    throw failure('the session output file is tracked by git, so the session did not write it', 'MalformedFindings');
+  }
   if (info.size > MAX_OUTPUT_FILE_BYTES) {
     throw failure(`the session output is larger than ${MAX_OUTPUT_FILE_BYTES} bytes`, 'FindingsTooLarge');
   }
@@ -135,7 +147,7 @@ async function readOutputFile(path: string): Promise<string> {
 }
 
 async function readReviewerOutput(input: ReviewStepInput): Promise<ReviewerOutput> {
-  const content = await readOutputFile(join(reviewerDir(input), REVIEWER_OUTPUT_FILE));
+  const content = await readOutputFile(reviewerDir(input), REVIEWER_OUTPUT_FILE);
   try {
     return parseReviewerOutput(content);
   } catch (error) {
@@ -143,50 +155,8 @@ async function readReviewerOutput(input: ReviewStepInput): Promise<ReviewerOutpu
   }
 }
 
-/**
- * The (path, line) pairs the PR changes on their new side: `git diff -U0` of the base to the head, read in the review
- * worktree. GitHub answers 422 for a whole review when one inline comment is on any other line.
- */
-async function changedLines(dir: string, base: string, headSha: string): Promise<Map<string, Set<number>>> {
-  const diff = await gitOk(dir, ['diff', '-U0', '--no-color', '--no-ext-diff', '--no-renames', `origin/${base}...${headSha}`]);
-  const changed = new Map<string, Set<number>>();
-  let lines: Set<number> | undefined;
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+++ ')) {
-      const path = line.slice(4).replace(/\t.*$/, '');
-      lines = path.startsWith('b/') ? new Set<number>() : undefined;
-      if (lines !== undefined) {
-        changed.set(path.slice(2), lines);
-      }
-      continue;
-    }
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
-    if (hunk !== null && lines !== undefined) {
-      const start = Number(hunk[1]);
-      const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
-      for (let at = start; at < start + count; at += 1) {
-        lines.add(at);
-      }
-    }
-  }
-  return changed;
-}
-
-/** The reviewer's file, refused whole when a finding is not on a line the diff changes (the count only, no text). */
-async function readCheckedReviewerOutput(input: ReviewStepInput): Promise<ReviewerOutput> {
-  const output = await readReviewerOutput(input);
-  if (output.findings.length > 0) {
-    const changed = await changedLines(reviewerDir(input), input.base, input.headSha);
-    const outside = output.findings.filter((finding) => changed.get(finding.path)?.has(finding.line) !== true).length;
-    if (outside > 0) {
-      throw failure(`${outside} finding${outside === 1 ? ' is' : 's are'} not on a line the diff changes, which GitHub would reject`, 'MalformedFindings');
-    }
-  }
-  return output;
-}
-
 async function readFixerOutput(input: ReviewStepInput): Promise<FixerOutput> {
-  const content = await readOutputFile(join(input.worktreeDir, FIXER_OUTPUT_FILE));
+  const content = await readOutputFile(input.worktreeDir, FIXER_OUTPUT_FILE);
   try {
     return parseFixerOutput(content);
   } catch (error) {
@@ -309,11 +279,25 @@ export function createReviewActivities(deps: ReviewDeps) {
       };
       await runOnce('reviewer', input, dir, prompt, reviewerAllowedTools(input.base), prepare, context);
 
-      const output = await readCheckedReviewerOutput(input);
+      const output = await readReviewerOutput(input);
       // Only a thread that is open and the reviewer could read is accepted; an id the session invented is dropped.
       const acceptable = new Set(threads.filter((thread) => thread.trusted).map((thread) => thread.id));
       return { findings: output.findings.length, acceptedThreadIds: output.acceptedThreadIds.filter((id) => acceptable.has(id)) };
     });
+  }
+
+  /**
+   * The lines the head commit changes against the base, or `undefined` when the diff cannot be read within the bounds
+   * (then every finding goes to the body: GitHub rejects the whole review for one inline comment off the diff). No diff
+   * text is kept or logged. `-U0` shows exactly the changed lines, which is what an inline comment may sit on.
+   */
+  async function changedOnHead(input: ReviewStepInput): Promise<ChangedLines | undefined> {
+    try {
+      const result = await git(input.repoDir, ['-c', 'core.quotePath=false', 'diff', '-U0', '--no-color', '--no-ext-diff', '--no-prefix', '--no-renames', `origin/${input.base}...${input.headSha}`, '--']);
+      return result.code === 0 ? changedLines(result.stdout) : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Posts the reviewer's findings as one review (event COMMENT) on the head commit, through `postReview`. */
@@ -322,22 +306,25 @@ export function createReviewActivities(deps: ReviewDeps) {
     if ((await readConfig(input.repoDir, markerKey('reviewer', input))) !== 'success') {
       throw failure('there is no finished reviewer session to post', 'SessionError');
     }
-    const output = await readCheckedReviewerOutput(input);
+    const output = await readReviewerOutput(input);
+    const { inline, advisory } = splitFindings(output.findings, await changedOnHead(input));
+    const section = advisorySection(advisory);
     const body = [
       `Review of commit \`${input.headSha.slice(0, SHORT)}\` (round ${input.round}), by a fresh reviewer session of the orchestrator. Its text is model output, checked for size and shape and cleaned before it was posted.`,
       '',
       output.summary,
       '',
-      output.findings.length === 0 ? 'No findings.' : `${output.findings.length} finding${output.findings.length === 1 ? '' : 's'}, as inline comments.`,
+      output.findings.length === 0 ? 'No findings.' : `${inline.length} finding${inline.length === 1 ? '' : 's'}, as inline comments.`,
+      ...(section.text === '' ? [] : ['', section.text]),
     ].join('\n');
     const posted = await deps.postReview({
       pr: input.pr,
       commitId: input.headSha,
       idempotencyKey: `review-${input.pr}-r${input.round}-${input.headSha.slice(0, SHORT)}`,
       body,
-      comments: output.findings.map((finding) => ({ path: finding.path, line: finding.line, side: 'RIGHT', body: finding.body })),
+      comments: inline.map((finding) => ({ path: finding.path, line: finding.line, side: 'RIGHT', body: finding.body })),
     });
-    return { reviewId: posted.reviewId, posted: posted.posted, comments: output.findings.length };
+    return { reviewId: posted.reviewId, posted: posted.posted, comments: inline.length, advisory: section.listed, omitted: section.omitted };
   }
 
   async function runFixerSession(raw: unknown): Promise<FixerSessionResult> {
