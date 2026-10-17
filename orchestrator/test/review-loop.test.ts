@@ -364,7 +364,7 @@ function newWorld(configure: (world: World) => void = () => undefined): { issue:
 }
 
 function inputFor(issue: number, extra: Partial<IssueWorkflowInput> = {}): IssueWorkflowInput {
-  return { issueNumber: issue, repoDir: '/work/repo', worktreeDir: `/work/repo/.claude/worktrees/issue-${issue}`, base: 'main', ...extra };
+  return { issueNumber: issue, repoDir: '/work/repo', worktreeDir: `/work/repo/.claude/worktrees/issue-${issue}`, base: 'main', awaitDecision: false, ...extra };
 }
 
 async function runIssue(taskQueue: string, issue: number, extra: Partial<IssueWorkflowInput> = {}): Promise<IssueRunResult> {
@@ -849,7 +849,7 @@ async function realStack(name: string, issue: number, scripts: Record<number, st
   });
   const taskQueue = `review-loop-real-${name}`;
   await startWorker(taskQueue, { ...github, ...createBranchActivities(), ...implementer, ...review });
-  const input: IssueWorkflowInput = { issueNumber: issue, repoDir: repo, worktreeDir: join(home, 'wt'), base: 'main' };
+  const input: IssueWorkflowInput = { issueNumber: issue, repoDir: repo, worktreeDir: join(home, 'wt'), base: 'main', awaitDecision: false };
   const sessions = async (): Promise<number> => {
     try {
       return (await readFile(logFile, 'utf8')).split('\n').filter((line) => line !== '').length;
