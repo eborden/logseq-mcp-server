@@ -34,6 +34,13 @@ const PROTECTED = [
   // CI and release
   '.github/workflows/ci.yml',
   '.github/pull_request_template.md',
+  '.claude-plugin/plugin.json',
+  '.claude-plugin/marketplace.json',
+  'pypi/pyproject.toml',
+  'pypi/src/launcher.py',
+  'CODEOWNERS',
+  'docs/CODEOWNERS',
+  'codeowners',
   'about.toml',
   'about.hbs',
   'Dockerfile',
@@ -72,6 +79,9 @@ const PROTECTED = [
   '.cargo/config.toml',
   '.gitattributes',
   'sub/.gitattributes',
+  '.gitignore',
+  'sub/dir/.gitignore',
+  '.GITIGNORE',
   '.gitmodules',
   '.mcp.json',
   'sub/.mcp.json',
@@ -613,7 +623,7 @@ test('a symlink, an executable file or a mode change in any commit is refused as
 });
 
 test('new protected entries are refused by the guard on a real branch too: a manifest, a build script and the orchestrator', async () => {
-  for (const [index, path] of ['package.json', 'orchestrator/package.json', 'crates/x/build.rs', 'Cargo.toml', '.npmrc', '.mcp.json', 'orchestrator/src/workflows/issue.ts', '.husky/pre-commit'].entries()) {
+  for (const [index, path] of ['package.json', 'orchestrator/package.json', 'crates/x/build.rs', 'Cargo.toml', '.npmrc', '.mcp.json', 'orchestrator/src/workflows/issue.ts', '.husky/pre-commit', '.claude-plugin/plugin.json', 'pypi/pyproject.toml', 'CODEOWNERS', '.gitignore'].entries()) {
     const name = `claude/${600 + index}`;
     const sha = await branchWithCommits(name, [{ files: { 'src/ok.ts': 'x\n', [path]: 'x\n' } }]);
     assert.equal((await failureOf(guard(input(name, sha)))).type, 'ProtectedPath', path);

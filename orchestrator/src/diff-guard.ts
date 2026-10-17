@@ -11,9 +11,10 @@
 //      (their scripts run), `build.rs`, `scripts/`, hooks (`.husky/`, `.githooks/`), test and build tool configs
 //      (`vitest.config.*` and the like are JavaScript that runs);
 //   2. a configuration that changes how git, npm, cargo, node or claude behave: `.npmrc`, `.cargo/`,
-//      `rust-toolchain*`, `.gitattributes`, `.gitmodules`, `.mcp.json`, `.claude/`, `CLAUDE.md` at any depth, anything
-//      under a `.git` directory, `.env*`, keys and database files;
-//   3. a CI or release file, or a rule CI enforces: `.github/`, `about.toml`, `Dockerfile*`, `docs/adr/`,
+//      `rust-toolchain*`, `.gitattributes`, `.gitmodules`, `.gitignore` (it decides what `git add` skips), `.mcp.json`, `.claude/`,
+//      `CLAUDE.md` at any depth, anything under a `.git` directory, `.env*`, keys and database files;
+//   3. a CI or release file, or a rule CI enforces: `.github/`, `CODEOWNERS`, `.claude-plugin/` (its
+//      entry runs the launcher for users), `pypi/` (release packaging), `about.toml`, `Dockerfile*`, `docs/adr/`,
 //      `docs/business-rules/`, `tests/guards/`, `tests/rust-guards/`;
 //   4. the orchestrator itself (`orchestrator/src/`), which decides what the next session may do, and the
 //      dependencies it installs.
@@ -35,6 +36,8 @@ export const MAX_CHANGED_FILES = 300;
 export const PROTECTED_PREFIXES: readonly string[] = [
   '.github/',
   '.claude/',
+  '.claude-plugin/',
+  'pypi/',
   '.cargo/',
   '.husky/',
   '.githooks/',
@@ -71,6 +74,8 @@ export const PROTECTED_BASENAMES: readonly string[] = [
   'Makefile',
   'Dockerfile',
   '.pre-commit-config.yaml',
+  'CODEOWNERS',
+  '.gitignore',
 ];
 
 /** File name prefixes protected at any depth: `.env`, `.env.local`, `Dockerfile.dev`, `docker-compose.yml`. */
