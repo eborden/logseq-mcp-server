@@ -20,8 +20,11 @@
 //! inside the failed attempt: `[[a[[b]]` holds `b`, and `[[[a]]` holds `a`.
 //!
 //! A tag is a `#` followed by one or more characters that are neither white space
-//! ([`char::is_whitespace`]) nor `#`. The run ends at the next `#`, which starts a tag of its own,
-//! and takes in everything else, so `#a,` is the tag `a,`.
+//! ([`char::is_whitespace`]) nor `#`. The `#` starts a tag only at the start of the text, after
+//! white space, or right where another tag's run ends. So `a #b` and `#a#b` hold tags, but
+//! `page#section`, `issue#12` and `a#b#c` hold none (a `#` inside a word or a URL fragment is text).
+//! The run ends at the next `#`, which starts a tag of its own, and takes in everything else, so
+//! `#a,` is the tag `a,`.
 //!
 //! A bracketed tag, `#[[tag with spaces]]`, is another spelling of `#abc` for a name with spaces.
 //! It is one tag whose text is the name between the brackets (no `#`, no brackets), under the name
@@ -217,18 +220,28 @@ pub fn page_refs(text: &str) -> Vec<PageRef<'_>> {
 pub fn tags(text: &str) -> Vec<&str> {
     let mut found = Vec::new();
     let mut at = 0;
+    // where the last tag's run ended, so a `#` right there starts the next tag
+    let mut tag_end = None;
     while let Some(offset) = text[at..].find('#') {
-        let start = at + offset + 1;
+        let hash = at + offset;
+        let start = hash + 1;
+        let starts_tag = hash == 0 || tag_end == Some(hash) || text[..hash].ends_with(char::is_whitespace);
+        if !starts_tag {
+            at = start;
+            continue;
+        }
         // A name that follows the ref grammar, closed on its line. Without a closing `]]` the run
         // rule below reads `#[[weekly` as it always did.
         if let Some((name, rest)) = leaf_ref_at(&text[start..]) {
             found.push(name);
             at = text.len() - rest.len();
+            tag_end = Some(at);
             continue;
         }
         let len = text[start..].find(|c: char| c == '#' || c.is_whitespace()).unwrap_or(text.len() - start);
         if len > 0 {
             found.push(&text[start..start + len]);
+            tag_end = Some(start + len);
         }
         // The run stops before the `#` or space that ended it, so a `#` there starts the next tag
         at = start + len;
@@ -465,7 +478,12 @@ mod tests {
         assert_eq!(tags("#a #b-c, # d #\u{e9}t\u{e9}\n#e"), ["a", "b-c,", "\u{e9}t\u{e9}", "e"]);
         assert_eq!(tags("###"), Vec::<&str>::new());
         assert_eq!(tags("end#"), Vec::<&str>::new());
-        assert_eq!(tags("a#b#c"), ["b", "c"]);
+        assert_eq!(tags("#a#b"), ["a", "b"]);
+        // a `#` inside a word or a URL fragment is text (#641)
+        assert_eq!(tags("a#b#c"), Vec::<&str>::new());
+        assert_eq!(tags("see https://example.com/page#section"), Vec::<&str>::new());
+        assert_eq!(tags("issue#12"), Vec::<&str>::new());
+        assert_eq!(tags("#[[x y]]#z"), ["x y", "z"]);
         assert_eq!(tags(""), Vec::<&str>::new());
     }
 
