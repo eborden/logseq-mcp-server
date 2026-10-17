@@ -22,7 +22,8 @@ export function issueBranch(issueNumber: number): string {
 /**
  * The longest the whole run may take. The client sets it as the workflow execution timeout. The work to an open PR
  * and its review loop are bounded at 8 hours; the maintainer's decision and the merge after it each get at most
- * MAX_DECISION_TIMEOUT_MS (10 days, #631), so 21 days covers the longest run the input can ask for.
+ * MAX_DECISION_TIMEOUT_MS (10 days, #631), so 21 days covers the longest run the input can ask for. Before the gate, only the step
+ * bound (2 hours each) and the review loop's own timer bound the run; there is no 8 hour cap on it any more.
  */
 export const ISSUE_RUN_TIMEOUT = '21 days';
 /** The longest any one step may take, retries included (`scheduleToCloseTimeout` of its activities). */
@@ -181,6 +182,8 @@ export type IssueRunResult =
       readonly headSha: string;
       /** True when the issue was still open after the PR merged and the run closed it. */
       readonly issueClosedByRun: boolean;
+      /** False when the maintainer merged without sending a decision: the run noted that on the PR and carried on to Done. */
+      readonly decisionRecorded: boolean;
       readonly ignoredSignals: number;
     }
   /** The maintainer approved and the PR did not merge in time (#631). Nothing was moved to Done. */

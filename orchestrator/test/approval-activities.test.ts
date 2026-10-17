@@ -88,9 +88,9 @@ test('getPrChanges returns counts, never a path', async () => {
 
   const changes = await github.getPrChanges(10);
 
-  assert.deepEqual(changes, { files: 4, golden: 1, ceilings: 1, adrs: 1, businessRules: 0 });
+  assert.deepEqual(changes, { files: 4, golden: 1, ceilings: 1, adrs: 1, businessRules: 0, complete: true });
   assert.equal(JSON.stringify(changes).includes('atlas'), false);
-  assert.deepEqual(await github.getPrChanges(11), { files: 0, golden: 0, ceilings: 0, adrs: 0, businessRules: 0 });
+  assert.deepEqual(await github.getPrChanges(11), { files: 0, golden: 0, ceilings: 0, adrs: 0, businessRules: 0, complete: true });
 });
 
 test('closeIssue closes an open issue as completed, reads it back, and a repeat writes nothing', async () => {
@@ -122,4 +122,16 @@ test('closeIssue leaves a closed issue alone, refuses an untrusted author, and f
   assert.deepEqual(await failureOf(github.closeIssue(3)), { type: 'BoardReadbackMismatch', nonRetryable: false });
   assert.deepEqual(await failureOf(github.closeIssue(0)), { type: 'InvalidInput', nonRetryable: true });
   assert.equal((await fake.callsMatching('-X PATCH')).length, 1, 'only the open, trusted issue was written to');
+});
+
+test('getPrChanges counts a rename by the name it left, and a PR with more files than one call reads is reported incomplete, not failed', async () => {
+  const { github } = await setup((state) => {
+    state.prFiles = {
+      '10': [{ filename: 'orchestrator/src/atlas.ts', previous_filename: 'docs/adr/0042-atlas.md' }] ,
+      '11': Array.from({ length: 1001 }, (_, index) => `orchestrator/src/atlas-${index}.ts`),
+    };
+  });
+
+  assert.deepEqual(await github.getPrChanges(10), { files: 2, golden: 0, ceilings: 0, adrs: 1, businessRules: 0, complete: true });
+  assert.deepEqual(await github.getPrChanges(11), { files: 0, golden: 0, ceilings: 0, adrs: 0, businessRules: 0, complete: false });
 });

@@ -3,7 +3,7 @@
 // foundations 4.2, 4.5 and 4.8.
 //
 // What it does, in order:
-//   hold      read the merge gate (`getGateStatus`, then the pure `gateClear`) until it is clear. A decision that
+//   hold      read the PR (`getPrState`) and the merge gate (`getGateStatus`, then the pure `gateClear`) until it is clear. A decision that
 //             arrived earlier is HELD in the inbox, not applied and not rejected: it is used only on a clear gate. A
 //             gate that is still open (a thread nobody resolved) is read again every `decisionPollMs`.
 //   wait      on a clear gate with no decision, wait for the `maintainerDecision` signal, at no cost, up to the
@@ -16,6 +16,10 @@
 //             approval (an approval does not survive a push), stops the run with one comment on the issue.
 //   done      PR and issue to Done with a read-back (the #635 activities), then the issue is checked closed and closed
 //             if not: a PR merged into a branch other than the default does not close its issue.
+//
+// The maintainer may merge on GitHub and send no signal. The PR's state is read on every pass, so a merged PR goes
+// to Done and the closed check with one comment saying no decision was recorded, and a PR closed unmerged stops the run.
+// A decision binds to the head the gate reads clear, not to the head the maintainer saw when they sent it.
 //
 // A timeout never approves. At the decision timeout the run comments on the PR and ends `decision_timeout`.
 //
@@ -36,6 +40,8 @@ import {
   decisionTimeoutCommentKey,
   mergeTimeoutComment,
   mergeTimeoutCommentKey,
+  mergedWithoutDecisionComment,
+  mergedWithoutDecisionKey,
   parseMaintainerDecision,
 } from '../approval-types.ts';
 import type { MaintainerDecision } from '../approval-types.ts';
@@ -118,15 +124,27 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
     return await stop('board_done', 'BoardDisagrees');
   }
 
-  // ---- hold and wait: until the gate is clear and a decision is in hand ----------------------------------------
+  // ---- hold and wait: until the gate is clear and a decision is in hand, or the PR is merged without one -----------
   const decideBy = Date.now() + timeoutMs;
-  let decision: MaintainerDecision;
-  let head: string;
-  /** The head of the last gate read: the head a timeout reports. */
-  let lastHead = '';
+  let decision: MaintainerDecision | undefined;
+  let head = '';
+  let merged = false;
   for (;;) {
+    // Only a decision already in hand BEFORE this pass's gate read may be used on it: one that arrived during the read
+    // is checked against a fresh read.
+    const heldBefore = inbox.decision();
     const gate = await step('decision_gate', () => github.getGateStatus(pr));
-    lastHead = gate.headSha;
+    // The maintainer merges on GitHub and may send no signal: the PR's state is read on every pass, not only after an approval.
+    const seen = await step('decision_gate', () => github.getPrState(pr));
+    head = seen.headSha;
+    if (seen.merged) {
+      merged = true;
+      decision = inbox.decision();
+      break;
+    }
+    if (seen.state === 'closed') {
+      return await stop('decision_gate', 'PrClosedUnmerged');
+    }
     const left = decideBy - Date.now();
     if (!gateClear(gate)) {
       if (left <= 0) {
@@ -135,37 +153,47 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
       await sleep(Math.min(pollMs, left));
       continue;
     }
-    const kept = inbox.decision();
-    if (kept !== undefined) {
-      decision = kept;
-      head = gate.headSha;
+    head = gate.headSha;
+    if (heldBefore !== undefined) {
+      decision = heldBefore;
       break;
     }
-    if (left <= 0 || !(await condition(() => inbox.decision() !== undefined, left))) {
+    if (inbox.decision() !== undefined) {
+      continue;
+    }
+    if (left <= 0) {
       return await timedOut();
     }
-    // A decision arrived: read the gate again before it is used.
+    // Wake on the signal or on the poll, whichever comes first, then read the gate and the PR again.
+    await condition(() => inbox.decision() !== undefined, Math.min(left, pollMs));
   }
 
   async function timedOut(): Promise<IssueRunResult> {
     await step('decision_comment', () =>
       github.commentIssue({ issue: pr, key: decisionTimeoutCommentKey(pr), body: decisionTimeoutComment(workflowId, pr, timeoutMs) }),
     );
-    return { outcome: 'decision_timeout', issueNumber: issue, pr, headSha: lastHead, ignoredSignals: inbox.ignored() };
+    return { outcome: 'decision_timeout', issueNumber: issue, pr, headSha: head, ignoredSignals: inbox.ignored() };
   }
 
   // ---- comment ---------------------------------------------------------------------------------------------------
-  const changes = await step('decision_comment', () => github.getPrChanges(pr));
-  await step('decision_comment', () =>
-    github.commentIssue({ issue: pr, key: decisionCommentKey(pr), body: decisionComment(workflowId, pr, head, decision, changes) }),
-  );
-  if (decision.decision === 'changes_requested') {
-    return { outcome: 'changes_requested', issueNumber: issue, pr, headSha: head, ignoredSignals: inbox.ignored() };
+  if (decision !== undefined) {
+    const recorded = decision;
+    const changes = await step('decision_comment', () => github.getPrChanges(pr));
+    await step('decision_comment', () =>
+      github.commentIssue({ issue: pr, key: decisionCommentKey(pr), body: decisionComment(workflowId, pr, head, recorded, changes) }),
+    );
+    if (decision.decision === 'changes_requested' && !merged) {
+      return { outcome: 'changes_requested', issueNumber: issue, pr, headSha: head, ignoredSignals: inbox.ignored() };
+    }
+  } else {
+    await step('decision_comment', () =>
+      github.commentIssue({ issue: pr, key: mergedWithoutDecisionKey(pr), body: mergedWithoutDecisionComment(workflowId, pr) }),
+    );
   }
 
   // ---- merge: observed, never made ---------------------------------------------------------------------------------
   const mergeBy = Date.now() + timeoutMs;
-  for (;;) {
+  while (!merged) {
     const seen = await step('merge_wait', () => github.getPrState(pr));
     if (seen.merged) {
       break;
@@ -202,5 +230,5 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
       return await stop('issue_close', 'IssueStillOpen');
     }
   }
-  return { outcome: 'merged', issueNumber: issue, pr, headSha: head, issueClosedByRun: closedByRun, ignoredSignals: inbox.ignored() };
+  return { outcome: 'merged', issueNumber: issue, pr, headSha: head, issueClosedByRun: closedByRun, decisionRecorded: decision !== undefined, ignoredSignals: inbox.ignored() };
 }

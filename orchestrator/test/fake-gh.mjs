@@ -258,7 +258,7 @@ if (argv[0] === 'api') {
     found === undefined ? respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 }) : send(200, found);
   }
   if ((match = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/files$/.exec(path))) {
-    send(200, page(((state.prFiles ?? {})[match[1]] ?? []).map((filename) => ({ filename })), params));
+    send(200, page(((state.prFiles ?? {})[match[1]] ?? []).map((file) => (typeof file === 'string' ? { filename: file } : file)), params));
   }
   if ((match = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(path))) {
     if (method === 'POST') {

@@ -52,7 +52,7 @@ export interface FakeState {
   addStatusAfterReads?: number;
   /** Raw PR answers by number, the files of a PR by number, and the issues a PATCH leaves unchanged (#631). */
   prStates?: Record<string, unknown>;
-  prFiles?: Record<string, string[]>;
+  prFiles?: Record<string, (string | { filename: string; previous_filename?: string })[]>;
   patchIgnored?: number[];
   faults: Fault[];
 }
