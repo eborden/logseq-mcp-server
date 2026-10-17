@@ -120,6 +120,40 @@ export function classifyRateLimit(stdout: string, stderr: string): RateLimitSign
   return undefined;
 }
 
+/** A GraphQL error entry GitHub marks as `NOT_FOUND` (a missing issue or PR). Only its `type` is read, never its message. */
+function isNotFoundError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'type' in error && error.type === 'NOT_FOUND';
+}
+
+/** The `errors` of a GraphQL answer body, when it has some. */
+function graphqlErrors(body: unknown): unknown[] | undefined {
+  if (typeof body === 'object' && body !== null && 'errors' in body && Array.isArray(body.errors) && body.errors.length > 0) {
+    const errors: unknown[] = body.errors;
+    return errors;
+  }
+  return undefined;
+}
+
+/**
+ * Whether `gh api graphql` stdout is an answer whose only errors are NOT_FOUND, with a `data` object. The real API
+ * answers a missing issue or PR as `{"data":{"repository":{"pullRequest":null}},"errors":[{"type":"NOT_FOUND",...}]}`
+ * and `gh` exits 1 on it, so the call is a failure by exit code and a plain "not there" by content.
+ */
+function isNotFoundOnlyAnswer(stdout: string): boolean {
+  const response = splitHttpResponse(stdout);
+  if (response === undefined) {
+    return false;
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(response.body);
+  } catch {
+    return false;
+  }
+  const errors = graphqlErrors(body);
+  return errors !== undefined && errors.every(isNotFoundError) && typeof body === 'object' && body !== null && 'data' in body && typeof body.data === 'object' && body.data !== null;
+}
+
 function parseJson(text: string, what: string): unknown {
   try {
     return JSON.parse(text);
@@ -176,13 +210,17 @@ export class GhCli {
     return response.body.trim() === '' ? null : parseJson(response.body, 'gh api');
   }
 
-  /** A GraphQL query through `gh api graphql`. Returns the `data` object. A string variable goes in with `-f`, a number with `-F`. */
+  /**
+   * A GraphQL query through `gh api graphql`. Returns the `data` object. A string variable goes in with `-f`, a number with `-F`.
+   * An answer whose only errors are NOT_FOUND is returned as its `data` (the missing item is `null` in it), not
+   * thrown: a missing issue or PR is an answer, and retrying it cannot change it. Any other error is a `graphql` error.
+   */
   async graphql(query: string, variables: Readonly<Record<string, string | number>>): Promise<unknown> {
     const args = ['api', '-i', 'graphql', '-f', `query=${query}`];
     for (const [name, value] of Object.entries(variables)) {
       args.push(typeof value === 'number' ? '-F' : '-f', `${name}=${String(value)}`);
     }
-    const stdout = await this.exec(args, undefined);
+    const stdout = await this.exec(args, undefined, isNotFoundOnlyAnswer);
     const response = splitHttpResponse(stdout);
     if (response === undefined) {
       throw new GhError('gh api graphql: no HTTP status line in the answer', 'malformed');
@@ -191,7 +229,8 @@ export class GhCli {
     if (typeof body !== 'object' || body === null) {
       throw new GhError('gh api graphql: the answer is not an object', 'malformed');
     }
-    if ('errors' in body && Array.isArray(body.errors) && body.errors.length > 0) {
+    const errors = graphqlErrors(body);
+    if (errors !== undefined && !errors.every(isNotFoundError)) {
       throw new GhError('gh api graphql: GitHub answered with errors', 'graphql');
     }
     if (!('data' in body) || typeof body.data !== 'object' || body.data === null) {
@@ -210,11 +249,12 @@ export class GhCli {
     return parseJson(await this.project(args), 'gh project');
   }
 
-  private async exec(args: readonly string[], input: string | undefined): Promise<string> {
+  /** `acceptFailure` names a non-zero exit whose stdout is still an answer to use (see `graphql`). */
+  private async exec(args: readonly string[], input: string | undefined, acceptFailure?: (stdout: string) => boolean): Promise<string> {
     const policy = this.config.rateLimit;
     for (;;) {
       const raw = await this.spawnOnce(args, input);
-      if (raw.exitCode === 0) {
+      if (raw.exitCode === 0 || (acceptFailure?.(raw.stdout) ?? false)) {
         return raw.stdout;
       }
       const signal = classifyRateLimit(raw.stdout, raw.stderr);
