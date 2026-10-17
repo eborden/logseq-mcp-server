@@ -479,14 +479,20 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     if (!lookup.onBoard) {
       throw new GithubRefusal('InvalidState', `${describeItem(item)} is not on the board`);
     }
+    if (lookup.status === undefined) {
+      // Still no Status after the bounded re-reads. That is the board's own workflow running late, not a refusal of
+      // this move, so it is retryable: BOARD_ACTIVITY_MAX_ATTEMPTS attempts cover about 40 seconds (#629). A refusal
+      // of the move itself (below) stays non-retryable, and nothing was written here.
+      throw new BoardReadbackError(`${describeItem(item)} is on the board but shows no status yet`);
+    }
     if (lookup.status === status) {
       return { changed: false, status };
     }
-    const allowed = lookup.status === undefined ? undefined : ALLOWED_MOVES.get(item.kind)?.get(lookup.status);
+    const allowed = ALLOWED_MOVES.get(item.kind)?.get(lookup.status);
     if (allowed !== status) {
       throw new GithubRefusal(
         'InvalidState',
-        `${describeItem(item)} is ${lookup.status ?? 'without a status'}; setStatus allows only ${allowedMovesText(item.kind)}` +
+        `${describeItem(item)} is ${lookup.status}; setStatus allows only ${allowedMovesText(item.kind)}` +
           (item.kind === 'issue' ? ' (claimIssue claims a Ready item)' : ''),
       );
     }
