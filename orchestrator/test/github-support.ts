@@ -33,7 +33,7 @@ export interface Fault {
 }
 
 export interface FakeState {
-  board: { number: number; status?: string; repository?: string; type?: string }[];
+  board: { number: number; status?: string; repository?: string; type?: string; pendingStatus?: string; pendingReads?: number }[];
   issues: Record<string, unknown>;
   comments: Record<string, unknown[]>;
   blockedBy: Record<string, unknown[]>;
@@ -44,6 +44,8 @@ export interface FakeState {
   rateLimit: unknown;
   /** The Status a newly added board item gets (the board's default). Backlog when unset. */
   addStatus?: string;
+  /** A new item shows no Status for this many board reads, then its default (the board's own workflow is slow). */
+  addStatusAfterReads?: number;
   faults: Fault[];
 }
 

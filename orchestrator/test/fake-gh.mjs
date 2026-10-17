@@ -5,7 +5,7 @@
 //
 // State (JSON, rewritten after each call) holds the raw shapes GitHub answers with, so the activities' parsers see
 // realistic input: `board`, `issues`, `comments`, `blockedBy`, `pulls`, `refs`, `reviews`, `gate`, `rateLimit` (and `addStatus`, the Status
-// `gh project item-add` gives a new item; Backlog when unset). A board entry of `type: 'PullRequest'` is a PR's item.
+// `gh project item-add` gives a new item, Backlog when unset; `addStatusAfterReads: n` gives it only after n board reads). A board entry of `type: 'PullRequest'` is a PR's item.
 // Every call is appended to `<state>.calls.jsonl` as { argv, stdin }, which is what the tests assert on.
 // `faults` is a queue of canned answers: the first fault whose `match` is a substring of the joined argv and that
 // still has `times` left (after `skip` calls let through) is answered instead of the real handler (rate limits, malformed output, HTTP errors, a hang
@@ -99,7 +99,12 @@ if (argv[0] === 'project') {
       respond({ stderr: 'fake gh: no such issue or pull request\n', exit: 1 });
     }
     if (!state.board.some((item) => item.number === number)) {
-      state.board.push({ number, status: state.addStatus ?? 'Backlog', type: isPr ? 'PullRequest' : 'Issue' });
+      const type = isPr ? 'PullRequest' : 'Issue';
+      state.board.push(
+        state.addStatusAfterReads === undefined
+          ? { number, status: state.addStatus ?? 'Backlog', type }
+          : { number, type, pendingStatus: state.addStatus ?? 'Backlog', pendingReads: state.addStatusAfterReads },
+      );
       save();
     }
     respond({ stdout: JSON.stringify({ id: `PVTI_${number}` }) });
@@ -136,6 +141,18 @@ if (argv[0] === 'api') {
   const params = url.searchParams;
   const send = (status, body) => respond({ stdout: http(status, body) });
 
+  // What the real API does for a missing issue or PR (checked against it, read-only): HTTP 200, the item `null`, one
+  // NOT_FOUND error, and `gh` exits 1 with the message on stderr.
+  const notFound = (key) =>
+    respond({
+      stdout: http(200, {
+        data: { repository: { [key]: null } },
+        errors: [{ type: 'NOT_FOUND', path: ['repository', key], locations: [{ line: 1, column: 86 }], message: `Could not resolve to a ${key} with the number of ${fields.get('number')}.` }],
+      }),
+      stderr: 'gh: Could not resolve to an item with that number.\n',
+      exit: 1,
+    });
+
   if (path === 'graphql') {
     const query = fields.get('query') ?? '';
     const number = Number(fields.get('number'));
@@ -145,6 +162,18 @@ if (argv[0] === 'api') {
       const key = isPr ? 'pullRequest' : 'issue';
       const item = state.board.find((candidate) => candidate.number === number && (candidate.type === 'PullRequest') === isPr);
       const exists = item !== undefined || (isPr ? state.pulls.some((pr) => pr.number === number) : state.issues[number] !== undefined);
+      // An item whose default Status arrives later (the board's own workflow runs after the add): the first
+      // `pendingReads` reads show no Status, the next one shows `pendingStatus`.
+      if (item?.pendingReads !== undefined) {
+        if (item.pendingReads > 0) {
+          item.pendingReads -= 1;
+        } else {
+          item.status = item.pendingStatus;
+          delete item.pendingReads;
+          delete item.pendingStatus;
+        }
+        save();
+      }
       const nodes = item === undefined ? [] : [
         {
           id: `PVTI_${number}`,
@@ -152,10 +181,16 @@ if (argv[0] === 'api') {
           fieldValueByName: item.status === undefined ? null : { name: item.status },
         },
       ];
-      send(200, { data: { repository: { [key]: exists ? { projectItems: { pageInfo: { hasNextPage: false }, nodes } } : null } } });
+      if (!exists) {
+        notFound(key);
+      }
+      send(200, { data: { repository: { [key]: { projectItems: { pageInfo: { hasNextPage: false }, nodes } } } } });
     }
     if (query.includes('reviewThreads')) {
-      send(200, { data: { repository: { pullRequest: state.gate[number] ?? null } } });
+      if (state.gate[number] === undefined) {
+        notFound('pullRequest');
+      }
+      send(200, { data: { repository: { pullRequest: state.gate[number] } } });
     }
     respond({ stderr: 'fake gh: unhandled graphql\n', exit: 1 });
   }
