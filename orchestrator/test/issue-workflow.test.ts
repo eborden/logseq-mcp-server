@@ -22,12 +22,13 @@ import type { TestWorkflowEnvironment } from '@temporalio/testing';
 import { bundleWorkflowCode, Worker } from '@temporalio/worker';
 import type { WorkflowBundleWithSourceMap } from '@temporalio/worker';
 import { createClaudeSessionActivities } from '../src/activities/claude-session.ts';
+import { createBranchActivities } from '../src/activities/branch.ts';
 import { createGithubActivities } from '../src/activities/github.ts';
 import { createImplementerActivities } from '../src/activities/implementer.ts';
 import { loadClaudeConfig, loadServerConfig } from '../src/config.ts';
 import { startDevServer } from '../src/dev-server.ts';
 import { startIssueRun } from '../src/issue-client.ts';
-import { ISSUE_STOPPED_FAILURE, ISSUE_WORKFLOW_NAME, issueBranch, issueWorkflowId } from '../src/issue-types.ts';
+import { ISSUE_STOPPED_FAILURE, ISSUE_WORKFLOW_NAME, issueBranch, issueWorkflowId, stopCommentKey } from '../src/issue-types.ts';
 import type { IssueRunResult, IssueWorkflowInput } from '../src/issue-types.ts';
 import type { BoardItemRef, BoardStatus, SessionExitStatus } from '../src/types.ts';
 import { freePort } from './support.ts';
@@ -79,7 +80,7 @@ after(async () => {
 
 // ---- layer 1: fake activities with counters ------------------------------------------------------------------
 
-type LostStep = 'claimIssue' | 'runImplementerSession' | 'openPr' | 'addToBoard' | 'setStatusPr' | 'setStatusIssue';
+type LostStep = 'claimIssue' | 'runImplementerSession' | 'guardBranch' | 'pushBranch' | 'openPr' | 'addToBoard' | 'setStatusPr' | 'setStatusIssue';
 
 class World {
   issueOpen = true;
@@ -89,14 +90,19 @@ class World {
   /** The PR's Status the board shows to a read, whatever was written (a board that does not show the move). */
   stalePrStatus: BoardStatus | undefined;
   prOpened = false;
+  guarded = false;
+  pushed = false;
   sessionStarted = false;
   sessionExit: SessionExitStatus = 'success';
   /** The failure type the session activity ends with, non-retryable, as `SessionTimeout` does. */
   sessionFails: string | undefined;
   checkFails: string | undefined;
+  /** The failure type the guard or the push ends with, non-retryable. */
+  guardFails: string | undefined;
+  pushFails: string | undefined;
   claimProceeds = true;
   /** Each side effect, counted once however many attempts ran. */
-  readonly counters = { claims: 0, sessions: 0, prs: 0, adds: 0, prWrites: 0, issueWrites: 0, comments: 0 };
+  readonly counters = { claims: 0, sessions: 0, guards: 0, pushes: 0, prs: 0, adds: 0, prWrites: 0, issueWrites: 0, comments: 0 };
   readonly attempts: Record<string, number> = {};
   /** The order in which the side effects first happened. */
   readonly order: string[] = [];
@@ -174,6 +180,34 @@ function fakeActivities(worlds: Map<number, World>) {
       }
       w.maybeLose('runImplementerSession');
       return { branch: issueBranch(raw.issueNumber), headSha: HEAD_SHA, exitStatus: w.sessionExit };
+    },
+    guardBranch: async (raw: { branch: string; headSha: string }) => {
+      const w = world(Number(/^claude\/(\d+)$/.exec(raw.branch)?.[1]));
+      w.attempt('guardBranch');
+      if (w.guardFails !== undefined) {
+        throw ApplicationFailure.nonRetryable('the branch changes 2 file(s), 1 of them protected', w.guardFails);
+      }
+      if (!w.guarded) {
+        w.guarded = true;
+        w.counters.guards += 1;
+        w.order.push('guard');
+      }
+      w.maybeLose('guardBranch');
+      return { branch: raw.branch, headSha: raw.headSha, files: 1 };
+    },
+    pushBranch: async (raw: { branch: string; headSha: string }) => {
+      const w = world(Number(/^claude\/(\d+)$/.exec(raw.branch)?.[1]));
+      w.attempt('pushBranch');
+      if (w.pushFails !== undefined) {
+        throw ApplicationFailure.nonRetryable('the remote refused the push', w.pushFails);
+      }
+      if (!w.pushed) {
+        w.pushed = true;
+        w.counters.pushes += 1;
+        w.order.push('push');
+      }
+      w.maybeLose('pushBranch');
+      return { branch: raw.branch, headSha: raw.headSha };
     },
     openPr: async (input: { head: string; base: string; title: string; body: string }) => {
       const issue = Number(/^claude\/(\d+)$/.exec(input.head)?.[1]);
@@ -292,8 +326,8 @@ test('happy path: check, claim, session, PR, then the PR and the issue In review
   const result = await runIssue(FAKE_QUEUE, issue);
 
   assert.deepEqual(result, { outcome: 'in_review', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD_SHA, pr: issue + PR_OFFSET });
-  assert.deepEqual(world.order, ['claim', 'session', 'openPr', 'addToBoard', 'setStatus:pr', 'setStatus:issue']);
-  assert.deepEqual(world.counters, { claims: 1, sessions: 1, prs: 1, adds: 1, prWrites: 1, issueWrites: 1, comments: 0 });
+  assert.deepEqual(world.order, ['claim', 'session', 'guard', 'push', 'openPr', 'addToBoard', 'setStatus:pr', 'setStatus:issue']);
+  assert.deepEqual(world.counters, { claims: 1, sessions: 1, guards: 1, pushes: 1, prs: 1, adds: 1, prWrites: 1, issueWrites: 1, comments: 0 });
   assert.equal(world.prStatus, 'In review', 'the PR is In review on the board with no manual step');
   assert.equal(world.issueStatus, 'In review');
   // The board was read back, not assumed: after the claim, and for the PR and the issue after their moves.
@@ -312,7 +346,7 @@ test('the finished run replays against the current workflow code', { timeout: 12
 
 test('a result lost after any one step is retried, and the run still ends In review with each side effect once', { timeout: 180_000 }, async () => {
   await ensureFakeWorker();
-  const steps: LostStep[] = ['claimIssue', 'runImplementerSession', 'openPr', 'addToBoard', 'setStatusPr', 'setStatusIssue'];
+  const steps: LostStep[] = ['claimIssue', 'runImplementerSession', 'guardBranch', 'pushBranch', 'openPr', 'addToBoard', 'setStatusPr', 'setStatusIssue'];
   const runs = steps.map((step) => ({ step, ...newWorld((world) => world.loseOnce.add(step)) }));
 
   // Side by side: each has its own issue, so its own workflow ID and world.
@@ -320,17 +354,21 @@ test('a result lost after any one step is retried, and the run still ends In rev
 
   for (const [index, { step, issue, world }] of runs.entries()) {
     assert.equal(results[index]?.outcome, 'in_review', step);
-    assert.deepEqual(world.counters, { claims: 1, sessions: 1, prs: 1, adds: 1, prWrites: 1, issueWrites: 1, comments: 0 }, `${step}: each side effect once`);
-    assert.deepEqual(world.order, ['claim', 'session', 'openPr', 'addToBoard', 'setStatus:pr', 'setStatus:issue'], step);
+    assert.deepEqual(world.counters, { claims: 1, sessions: 1, guards: 1, pushes: 1, prs: 1, adds: 1, prWrites: 1, issueWrites: 1, comments: 0 }, `${step}: each side effect once`);
+    assert.deepEqual(world.order, ['claim', 'session', 'guard', 'push', 'openPr', 'addToBoard', 'setStatus:pr', 'setStatus:issue'], step);
     assert.equal(world.loseOnce.size, 0, `${step}: the loss really happened`);
   }
   // The lost step ran twice (the attempt that died, and its retry). The ones before it did not run again.
-  const [claim, session, openPr, addToBoard, setStatusPr, setStatusIssue] = runs.map(({ world }) => world);
+  const [claim, session, guard, pushed, openPr, addToBoard, setStatusPr, setStatusIssue] = runs.map(({ world }) => world);
   assert.equal(claim?.attempts['claimIssue'], 2);
   assert.equal(session?.attempts['runImplementerSession'], 2);
   assert.equal(session?.attempts['claimIssue'], 1, 'a step that finished is not run again after the replay');
+  assert.equal(guard?.attempts['guardBranch'], 2);
+  assert.equal(guard?.attempts['runImplementerSession'], 1);
+  assert.equal(pushed?.attempts['pushBranch'], 2);
+  assert.equal(pushed?.attempts['guardBranch'], 1);
   assert.equal(openPr?.attempts['openPr'], 2);
-  assert.equal(openPr?.attempts['runImplementerSession'], 1);
+  assert.equal(openPr?.attempts['pushBranch'], 1);
   assert.equal(addToBoard?.attempts['addToBoard'], 2);
   assert.equal(setStatusPr?.attempts['setStatus:pr'], 2);
   assert.equal(setStatusIssue?.attempts['setStatus:issue'], 2);
@@ -360,7 +398,7 @@ test('proceed false is a stop without a session, a PR or a comment: an open PR, 
   const result = await runIssue(FAKE_QUEUE, issue);
 
   assert.deepEqual(result, { outcome: 'skipped', issueNumber: issue, reason: 'open_pr' });
-  assert.deepEqual(world.counters, { claims: 0, sessions: 0, prs: 0, adds: 0, prWrites: 0, issueWrites: 0, comments: 0 });
+  assert.deepEqual(world.counters, { claims: 0, sessions: 0, guards: 0, pushes: 0, prs: 0, adds: 0, prWrites: 0, issueWrites: 0, comments: 0 });
 });
 
 test('a closed issue is skipped before any claim', { timeout: 120_000 }, async () => {
@@ -386,7 +424,7 @@ test('a session that fails permanently ends with one comment on the issue and a 
   assert.equal(stopped.reason, 'SessionTimeout');
   assert.equal(world.attempts['runImplementerSession'], 1, 'a failed premise is not retried');
   assert.equal(world.counters.comments, 1);
-  assert.deepEqual([...world.commentKeys.keys()], ['stopped-session']);
+  assert.deepEqual([...world.commentKeys.keys()], ['stopped-session-SessionTimeout']);
   const comment = [...world.commentKeys.values()][0] ?? '';
   assert.ok(comment.includes('SessionTimeout') && comment.includes(issueWorkflowId(issue)));
   assert.equal(world.counters.prs, 0, 'no PR for a failed session');
@@ -444,6 +482,63 @@ test('a board that does not show the PR In review stops the run with a comment: 
   assert.equal(world.counters.comments, 1);
   assert.equal(world.issueStatus, 'In progress', 'the issue is not moved on a board that disagreed');
   assert.equal(world.counters.issueWrites, 0);
+});
+
+test('a branch that changes a protected path stops the run before any push or PR, with a comment that names no path', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  const { issue, world } = newWorld((w) => {
+    w.guardFails = 'ProtectedPath';
+  });
+
+  const stopped = await stoppedWith(issue, FAKE_QUEUE);
+
+  assert.equal(stopped.step, 'guard');
+  assert.equal(stopped.reason, 'ProtectedPath');
+  assert.equal(world.attempts['guardBranch'], 1, 'a failed premise is not retried');
+  assert.equal(world.counters.pushes, 0, 'nothing is pushed');
+  assert.equal(world.counters.prs, 0);
+  assert.deepEqual([...world.commentKeys.keys()], ['stopped-guard-ProtectedPath']);
+  assert.equal(world.issueStatus, 'In progress');
+});
+
+test('a push the remote refuses stops the run with a comment, before any PR', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  const { issue, world } = newWorld((w) => {
+    w.pushFails = 'PushRejected';
+  });
+
+  const stopped = await stoppedWith(issue, FAKE_QUEUE);
+
+  assert.equal(stopped.step, 'push');
+  assert.equal(stopped.reason, 'PushRejected');
+  assert.equal(world.attempts['pushBranch'], 1);
+  assert.equal(world.counters.guards, 1, 'the guard ran first');
+  assert.equal(world.counters.prs, 0);
+  assert.deepEqual([...world.commentKeys.keys()], ['stopped-push-PushRejected']);
+});
+
+test('the stop comment is keyed by step and reason: a different reason at the same step is not deduped away, the same one is', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  assert.equal(stopCommentKey('session', 'SessionError'), 'stopped-session-SessionError');
+  assert.notEqual(stopCommentKey('session', 'SessionError'), stopCommentKey('session', 'SessionTimeout'));
+
+  // An earlier run stopped at this step for another reason: its comment is already there.
+  const different = newWorld((w) => {
+    w.sessionFails = 'SessionError';
+    w.commentKeys.set('stopped-session-SessionTimeout', 'older stop');
+  });
+  await stoppedWith(different.issue, FAKE_QUEUE);
+  assert.equal(different.world.counters.comments, 1, 'the new reason posts its own comment');
+  assert.ok(different.world.commentKeys.has('stopped-session-SessionError'));
+
+  // The same step and the same reason are the same comment.
+  const same = newWorld((w) => {
+    w.sessionFails = 'SessionError';
+    w.commentKeys.set('stopped-session-SessionError', 'older stop');
+  });
+  await stoppedWith(same.issue, FAKE_QUEUE);
+  assert.equal(same.world.counters.comments, 0, 'an identical stop is not posted twice');
+  assert.equal(same.world.attempts['commentIssue'], 1);
 });
 
 test('a bad input stops before any activity', { timeout: 60_000 }, async () => {
@@ -536,7 +631,7 @@ async function realStack(name: string, issue: number, configure: (state: ReturnT
   const claude = createClaudeSessionActivities({ ...loadClaudeConfig({}), claudeBin: FAKE_CLAUDE });
   const implementer = createImplementerActivities({ readIssue: github.readIssue, runClaudeSession: claude.runClaudeSession, repo: fake.config.repo });
   const taskQueue = `issue-wf-real-${name}`;
-  await startWorker(taskQueue, { ...github, ...implementer });
+  await startWorker(taskQueue, { ...github, ...createBranchActivities(), ...implementer });
   const input: IssueWorkflowInput = { issueNumber: issue, repoDir: repo, worktreeDir: join(home, 'wt'), base: 'main' };
   const sessions = async (): Promise<number> => {
     try {
@@ -545,7 +640,7 @@ async function realStack(name: string, issue: number, configure: (state: ReturnT
       return 0;
     }
   };
-  return { fake, taskQueue, input, sessions };
+  return { fake, taskQueue, input, sessions, bare };
 }
 
 function seed(issue: number): (state: ReturnType<typeof emptyState>) => void {
@@ -556,12 +651,15 @@ function seed(issue: number): (state: ReturnType<typeof emptyState>) => void {
   };
 }
 
-/** Every payload of a history, decoded to text: what Temporal stores about a run. */
-function historyText(history: unknown): string[] {
-  const found: string[] = [];
+/** Everything a history stores that is text: every payload decoded, and every string value (failure messages, types, details). */
+function historyText(history: unknown): { payloads: string[]; strings: string[] } {
+  const payloads: string[] = [];
+  const strings: string[] = [];
   const walk = (value: unknown): void => {
     if (value instanceof Uint8Array) {
-      found.push(Buffer.from(value).toString('utf8'));
+      payloads.push(Buffer.from(value).toString('utf8'));
+    } else if (typeof value === 'string') {
+      strings.push(value);
     } else if (Array.isArray(value)) {
       value.forEach(walk);
     } else if (typeof value === 'object' && value !== null) {
@@ -569,7 +667,19 @@ function historyText(history: unknown): string[] {
     }
   };
   walk(history);
-  return found;
+  return { payloads, strings };
+}
+
+/** Text of an issue, of a stranger, of a brief and of a session's output: none may be in a stored history, in any field. */
+const MARKERS = [SECRET_BODY, SECRET_COMMENT, STRANGER, 'mallory', 'issue-data', 'Co-Authored-By', 'Untrusted GitHub content', '"session_id"', 'error_max_turns'];
+
+function assertNoIssueText(history: unknown, label: string): void {
+  const { payloads, strings } = historyText(history);
+  assert.ok(payloads.length > 3 && strings.length > 10, `${label}: the history was read`);
+  for (const marker of MARKERS) {
+    assert.ok(!payloads.some((text) => text.includes(marker)), `${label}: ${marker} must not be in a payload`);
+    assert.ok(!strings.some((text) => text.includes(marker)), `${label}: ${marker} must not be in any string, a failure message included`);
+  }
 }
 
 test('the real activities against the fake gh and claude: the PR is In review, and the history holds identifiers only', { timeout: 240_000 }, async () => {
@@ -587,12 +697,11 @@ test('the real activities against the fake gh and claude: the PR is In review, a
   assert.equal(await stack.sessions(), 1);
 
   const history = await client.workflow.getHandle(issueWorkflowId(stack.input.issueNumber)).fetchHistory();
-  const texts = historyText(history);
-  assert.ok(texts.length > 10, 'the history was read');
-  for (const leaked of [SECRET_BODY, SECRET_COMMENT, STRANGER, 'mallory', 'issue-data', 'Co-Authored-By', 'Untrusted GitHub content']) {
-    assert.ok(!texts.some((text) => text.includes(leaked)), `${leaked} must not be in the workflow history`);
-  }
-  assert.ok(texts.every((text) => text.length < 2_000), 'no payload carries a document');
+  assertNoIssueText(history, 'the finished run');
+  assert.ok(historyText(history).payloads.every((text) => text.length < 2_000), 'no payload carries a document');
+  // The real push happened, to the bare origin, at the commit the session ended at.
+  const remote = await execFileAsync('git', ['ls-remote', '--heads', stack.bare, 'refs/heads/claude/201']);
+  assert.ok(remote.stdout.startsWith((result as { headSha: string }).headSha));
   await Worker.runReplayHistory({ workflowBundle: bundle }, history, issueWorkflowId(stack.input.issueNumber));
 });
 
@@ -610,6 +719,13 @@ test('the real activities: a failed session leaves one comment on the issue and 
   assert.equal(state.pulls.length, 0);
   assert.equal(state.board.find((item) => item.number === stack.input.issueNumber)?.status, 'In progress');
   assert.equal(await stack.sessions(), 1);
+  // The history of the failed run, failure messages and details included, holds no issue text and no session output.
+  const history = await client.workflow.getHandle(issueWorkflowId(stack.input.issueNumber)).fetchHistory();
+  assertNoIssueText(history, 'the failed run');
+  const failedStrings = historyText(history).strings.join('\n');
+  assert.ok(failedStrings.includes('IssueStopped') && failedStrings.includes('SessionError'), 'the failure is in the history, as type and reason');
+  const remote = await execFileAsync('git', ['ls-remote', '--heads', stack.bare]);
+  assert.ok(!remote.stdout.includes('claude/'), 'nothing was pushed for a failed session');
 });
 
 test('the real activities: an untrusted issue never reaches claim or session', { timeout: 120_000 }, async () => {
@@ -626,4 +742,5 @@ test('the real activities: an untrusted issue never reaches claim or session', {
   assert.equal(await stack.sessions(), 0);
   assert.equal(Object.values(state.comments).flat().length, 0, 'nothing posted on a stranger issue');
   assert.equal((await stack.fake.callsMatching('item-edit')).length, 0);
+  assertNoIssueText(await client.workflow.getHandle(issueWorkflowId(stack.input.issueNumber)).fetchHistory(), 'the untrusted run');
 });

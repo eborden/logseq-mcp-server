@@ -19,6 +19,9 @@ import {
   CLAUDE_SESSION_ACTIVITY_OPTIONS,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
+  IMPLEMENTER_ACTIVITY_OPTIONS,
+  IMPLEMENTER_READ_BUDGET_MS,
+  IMPLEMENTER_START_TO_CLOSE_MS,
   SESSION_TIMEOUT_MS,
   START_TO_CLOSE_MS,
 } from '../src/claude-session-policy.ts';
@@ -630,6 +633,21 @@ test('the Temporal bounds are set, and the activity stops its own session before
   // The heartbeat is a timer over the whole activity, so a few missed beats are the most a stalled loop can cost.
   assert(HEARTBEAT_TIMEOUT_MS >= 3 * HEARTBEAT_INTERVAL_MS);
   assert.equal(typeof CLAUDE_SESSION_ACTIVITY_OPTIONS.retry?.maximumAttempts, 'number');
+});
+
+test('the implementer activity has its own start-to-close: the read, the session and a margin fit, inside the 2 hour step bound', async () => {
+  const waits = 3 * 10 * 60_000; // three rate-limit waits of ten minutes (DEFAULT_RATE_LIMIT), the most one read can wait
+  assert.ok(IMPLEMENTER_READ_BUDGET_MS >= waits + 5 * 60_000, 'the read budget covers the waits and its requests');
+  assert.ok(IMPLEMENTER_START_TO_CLOSE_MS >= IMPLEMENTER_READ_BUDGET_MS + SESSION_TIMEOUT_MS + 5 * 60_000, 'then the whole session, then a margin');
+  assert.ok(IMPLEMENTER_START_TO_CLOSE_MS > START_TO_CLOSE_MS, 'longer than the session activity alone, which has no read in it');
+  assert.ok(IMPLEMENTER_START_TO_CLOSE_MS < 2 * 60 * 60_000, 'inside the step bound of the workflow (ISSUE_STEP_TIMEOUT, 2 hours)');
+  assert.equal(IMPLEMENTER_ACTIVITY_OPTIONS.startToCloseTimeout, IMPLEMENTER_START_TO_CLOSE_MS);
+  assert.equal(IMPLEMENTER_ACTIVITY_OPTIONS.heartbeatTimeout, HEARTBEAT_TIMEOUT_MS);
+  assert.deepEqual(IMPLEMENTER_ACTIVITY_OPTIONS.retry, CLAUDE_SESSION_ACTIVITY_OPTIONS.retry);
+  // The workflow uses it, not the session options that a long read would run out.
+  const source = await readFile(new URL('../src/workflows/issue.ts', import.meta.url), 'utf8');
+  assert.ok(source.includes('...IMPLEMENTER_ACTIVITY_OPTIONS'));
+  assert.ok(!source.includes('CLAUDE_SESSION_ACTIVITY_OPTIONS'));
 });
 
 test('a file written by the session stays out of the main checkout', { timeout: 30_000 }, async () => {
