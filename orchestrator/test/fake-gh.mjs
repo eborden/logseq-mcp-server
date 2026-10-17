@@ -4,10 +4,11 @@
 // so the activities' own `ghPath` setting selects it and the production code needs no test switch.
 //
 // State (JSON, rewritten after each call) holds the raw shapes GitHub answers with, so the activities' parsers see
-// realistic input: `board`, `issues`, `comments`, `blockedBy`, `pulls`, `refs`, `reviews`, `gate`, `rateLimit`.
+// realistic input: `board`, `issues`, `comments`, `blockedBy`, `pulls`, `refs`, `reviews`, `gate`, `rateLimit` (and `addStatus`, the Status
+// `gh project item-add` gives a new item; Backlog when unset). A board entry of `type: 'PullRequest'` is a PR's item.
 // Every call is appended to `<state>.calls.jsonl` as { argv, stdin }, which is what the tests assert on.
 // `faults` is a queue of canned answers: the first fault whose `match` is a substring of the joined argv and that
-// still has `times` left is answered instead of the real handler (rate limits, malformed output, HTTP errors, a hang
+// still has `times` left (after `skip` calls let through) is answered instead of the real handler (rate limits, malformed output, HTTP errors, a hang
 // with `delayMs`, a race with `addPulls`).
 //
 // Every name in the tests' state is made up (Alice, issue 123, "project atlas"); nothing here comes from a real graph.
@@ -48,6 +49,12 @@ function page(items, params) {
 const joined = argv.join(' ');
 for (const fault of state.faults ?? []) {
   if (fault.times > 0 && joined.includes(fault.match)) {
+    // `skip` lets the first calls through, so a fault can hit a later call (the read after a write).
+    if ((fault.skip ?? 0) > 0) {
+      fault.skip -= 1;
+      save();
+      continue;
+    }
     fault.times -= 1;
     // `add` lets a fault stand for a race: the thing the caller is about to create appears first.
     state.pulls.push(...(fault.addPulls ?? []));
@@ -81,8 +88,24 @@ if (argv[0] === 'project') {
     }));
     respond({ stdout: JSON.stringify({ items, totalCount: matching.length }) });
   }
+  if (argv[1] === 'item-add') {
+    // Like the real command: adding an item that is already on the board changes nothing. A new item gets the
+    // board's default Status (`addStatus`, Backlog unless a test says otherwise).
+    const [, kindPath, numberText] = /\/(issues|pull)\/(\d+)$/.exec(flag('--url')) ?? [];
+    const number = Number(numberText);
+    const isPr = kindPath === 'pull';
+    const exists = isPr ? state.pulls.some((pr) => pr.number === number) : state.issues[number] !== undefined;
+    if (!exists) {
+      respond({ stderr: 'fake gh: no such issue or pull request\n', exit: 1 });
+    }
+    if (!state.board.some((item) => item.number === number)) {
+      state.board.push({ number, status: state.addStatus ?? 'Backlog', type: isPr ? 'PullRequest' : 'Issue' });
+      save();
+    }
+    respond({ stdout: JSON.stringify({ id: `PVTI_${number}` }) });
+  }
   if (argv[1] === 'item-edit') {
-    const number = Number(/\/issues\/(\d+)$/.exec(flag('--url'))?.[1]);
+    const number = Number(/\/(?:issues|pull)\/(\d+)$/.exec(flag('--url'))?.[1]);
     const item = state.board.find((candidate) => candidate.number === number);
     if (item === undefined) {
       respond({ stderr: 'fake gh: no such item\n', exit: 1 });
@@ -117,15 +140,19 @@ if (argv[0] === 'api') {
     const query = fields.get('query') ?? '';
     const number = Number(fields.get('number'));
     if (query.includes('projectItems')) {
-      const item = state.board.find((candidate) => candidate.number === number);
-      const exists = item !== undefined || state.issues[number] !== undefined;
+      // The query names `issue(number...)` or `pullRequest(number...)`; the answer carries the same key.
+      const isPr = query.includes('pullRequest(number');
+      const key = isPr ? 'pullRequest' : 'issue';
+      const item = state.board.find((candidate) => candidate.number === number && (candidate.type === 'PullRequest') === isPr);
+      const exists = item !== undefined || (isPr ? state.pulls.some((pr) => pr.number === number) : state.issues[number] !== undefined);
       const nodes = item === undefined ? [] : [
         {
+          id: `PVTI_${number}`,
           project: { number: 1, owner: { login: 'eborden' } },
           fieldValueByName: item.status === undefined ? null : { name: item.status },
         },
       ];
-      send(200, { data: { repository: { issue: exists ? { projectItems: { pageInfo: { hasNextPage: false }, nodes } } : null } } });
+      send(200, { data: { repository: { [key]: exists ? { projectItems: { pageInfo: { hasNextPage: false }, nodes } } : null } } });
     }
     if (query.includes('reviewThreads')) {
       send(200, { data: { repository: { pullRequest: state.gate[number] ?? null } } });
@@ -137,7 +164,9 @@ if (argv[0] === 'api') {
   }
   let match;
   if ((match = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(path)) && method === 'GET') {
-    const issue = state.issues[match[1]];
+    // `issues/<n>` answers for a PR too, with a `pull_request` key (GitHub does the same).
+    const pr = state.pulls.find((candidate) => String(candidate.number) === match[1]);
+    const issue = state.issues[match[1]] ?? (pr === undefined ? undefined : { number: pr.number, author_association: pr.author_association, pull_request: {} });
     issue === undefined ? respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 }) : send(200, issue);
   }
   if ((match = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(path))) {

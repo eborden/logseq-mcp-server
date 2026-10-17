@@ -27,6 +27,8 @@ export interface Fault {
   readonly stderr?: string;
   readonly exit?: number;
   readonly delayMs?: number;
+  /** Calls to let through before the fault starts to apply, so it can hit a later call (the read after a write). */
+  readonly skip?: number;
   readonly addPulls?: readonly unknown[];
 }
 
@@ -40,6 +42,8 @@ export interface FakeState {
   reviews: Record<string, unknown[]>;
   gate: Record<string, unknown>;
   rateLimit: unknown;
+  /** The Status a newly added board item gets (the board's default). Backlog when unset. */
+  addStatus?: string;
   faults: Fault[];
 }
 
