@@ -175,8 +175,8 @@ export function rawGate(overrides: Record<string, unknown> = {}): Record<string,
   };
 }
 
-export function rawGateReview(oid: string | null, body: string, association = 'OWNER'): Record<string, unknown> {
-  return { body, authorAssociation: association, commit: oid === null ? null : { oid } };
+export function rawGateReview(oid: string | null, body: string, association = 'OWNER', state = 'COMMENTED'): Record<string, unknown> {
+  return { state, body, authorAssociation: association, commit: oid === null ? null : { oid } };
 }
 
 /** An `-i` style HTTP answer, as `gh api -i` prints it. */

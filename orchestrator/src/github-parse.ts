@@ -308,6 +308,8 @@ export function parseCreatedReviewId(raw: unknown): number {
 export interface GateFacts {
   readonly headSha: string;
   readonly reviews: readonly {
+    /** COMMENTED, APPROVED, CHANGES_REQUESTED, DISMISSED or PENDING. */
+    readonly state: string;
     readonly body: string;
     readonly trusted: boolean;
     /** The commit the review is on. `undefined` when GitHub no longer has it. */
@@ -342,6 +344,7 @@ export function parseGate(data: unknown): GateFacts | undefined {
     const review = obj(element, what, path);
     const commit = review.get('commit');
     return {
+      state: str(review, 'state', what, path),
       body: strOrEmpty(review, 'body', what, path),
       trusted: isTrustedAssociation(review.get('authorAssociation')),
       commitOid: commit === null || commit === undefined ? undefined : str(obj(commit, what, `${path}.commit`), 'oid', what, `${path}.commit`),

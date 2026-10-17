@@ -198,7 +198,7 @@ export interface IssueView {
 export type ClaimReason =
   /** This call moved the item from Ready to In progress. */
   | 'claimed'
-  /** The item was already In progress. A retry of a claim that succeeded lands here too, so the workflow ID (not this flag) is the claim. */
+  /** The item was already In progress. A retry of a claim that succeeded lands here too: carry on (`proceed` is true), the workflow ID is the claim. */
   | 'already_in_progress'
   | 'open_pr'
   | 'claude_branch'
@@ -206,8 +206,15 @@ export type ClaimReason =
   | 'already_past_in_progress';
 
 export interface ClaimResult {
+  /** True only for the call that moved the item. A retry of that call answers false. */
   readonly claimed: boolean;
   readonly reason: ClaimReason;
+  /**
+   * What the workflow acts on. True when the item is In progress, whether this call moved it or an earlier attempt
+   * did: the workflow ID decides ownership, so `already_in_progress` means carry on, never "someone else has it".
+   * False when a PR or branch exists, or the item is already past In progress.
+   */
+  readonly proceed: boolean;
 }
 
 export interface SetStatusResult {
@@ -258,7 +265,7 @@ export interface PostReviewResult {
 
 export interface GateStatus {
   readonly headSha: string;
-  /** Reviews with a non-empty body, by a trusted author, on the head commit. */
+  /** Submitted reviews (COMMENTED, APPROVED or CHANGES_REQUESTED, not PENDING or DISMISSED) with a non-empty body, by a trusted author, on the head commit. */
   readonly reviewsOnHead: number;
   /** Review threads that are not resolved, whoever started them. */
   readonly unresolvedThreads: number;
