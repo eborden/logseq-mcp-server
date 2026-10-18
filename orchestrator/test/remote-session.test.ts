@@ -3,7 +3,7 @@
 // token and brief here is made up. A real fire of a routine is the maintainer's live smoke test, not run here.
 
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -48,6 +48,8 @@ const LIMITS: RemoteLimits = {
 
 // ---- fakes -----------------------------------------------------------------------------------------------------
 
+const MAX_SLEEPS = 10_000;
+
 class Clock {
   t = 1_000_000;
   /** Runs once the clock reaches `at`, so a test can make GitHub change while the activity waits. */
@@ -56,6 +58,10 @@ class Clock {
   now = (): number => this.t;
   sleep = (ms: number): Promise<void> => {
     this.sleeps.push(ms);
+    // A removed cap or budget would spin here without ever yielding, so the runner's timeout could not fire: fail loud.
+    if (this.sleeps.length > MAX_SLEEPS) {
+      throw new Error(`runaway wait: more than ${MAX_SLEEPS} sleeps`);
+    }
     this.t += ms;
     for (const event of this.events.filter((candidate) => candidate.at <= this.t)) {
       this.events.splice(this.events.indexOf(event), 1);
@@ -87,10 +93,13 @@ class FakeGithub implements RemoteGithub {
 
 class FakeFire implements FireClient {
   readonly calls: { routineId: string; text: string }[] = [];
+  /** The marker as it stood when each call was made: `firing` must already be there (the idempotency rule). */
+  readonly markerAtCall: string[] = [];
   /** Answers in order; the last repeats. A FireError is thrown, a receipt is returned. */
   script: (FireReceipt | FireError)[] = [{ sessionId: 'session_01AAA', url: 'https://claude.ai/code/session_01AAA' }];
   fire(routineId: string, text: string): Promise<FireReceipt> {
     this.calls.push({ routineId, text });
+    this.markerAtCall.push(currentMarker());
     const answer = this.script[Math.min(this.calls.length - 1, this.script.length - 1)];
     if (answer === undefined || answer instanceof FireError) {
       return Promise.reject(answer);
@@ -107,6 +116,15 @@ interface Scenario {
 }
 
 let scenario: Scenario;
+
+/** The marker value of any key, read synchronously from the scenario's repo. Empty when none. */
+function currentMarker(): string {
+  try {
+    return execFileSync('git', ['config', '--local', '--get-regexp', '^orchestratorremote\\.'], { cwd: scenario.repo, encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+}
 
 beforeEach(async () => {
   const dir = await mkdtemp(join(tmpdir(), 'orchestrator-remote-'));
@@ -182,6 +200,7 @@ test('the implementer is fired once with the brief untouched, and finishes when 
   const result = await run(implementerInput);
   assert.deepEqual(result, { sessionId: 'session_01AAA', outcome: 'finished', headSha: SHA_B });
   assert.deepEqual(scenario.fire.calls, [{ routineId: 'trig_impl1', text: BRIEF }]);
+  assert.match(scenario.fire.markerAtCall[0] ?? '', /state firing$/, 'the firing marker is written before the call is made');
   assert.match(await markers(), /fired session_01AAA \d+/);
 });
 
@@ -278,6 +297,7 @@ test('a firing marker with no id watches GitHub first: work that showed means no
   const lost = await run(implementerInput);
   assert.deepEqual(lost, { outcome: 'failed', failure: 'network' });
   assert.equal(scenario.fire.calls.length, 1, 'a lost answer is not retried inside the attempt');
+  assert.match(scenario.fire.markerAtCall[0] ?? '', /state firing$/, 'the firing marker is written before the call is made');
   assert.equal(await markers().then((text) => /firing$/m.test(text)), true);
   // The earlier session did push after all.
   pushLater(70_000);
@@ -571,7 +591,8 @@ test('the policy is workflow-safe and bounded', async () => {
   const options = REMOTE_SESSION_ACTIVITY_OPTIONS;
   assert.equal(options.startToCloseTimeout, REMOTE_START_TO_CLOSE_MS);
   assert.ok(REMOTE_START_TO_CLOSE_MS > REMOTE_LIMITS.capMs + REMOTE_LIMITS.orphanPollMs, 'the Temporal timeout is the backstop, not the first line');
-  assert.equal(options.retry?.maximumAttempts, 3);
+  assert.equal(options.retry?.maximumAttempts, 2);
+  assert.ok((options.retry?.maximumAttempts ?? 0) * REMOTE_LIMITS.fireAttempts <= 6, 'the worst case is at most 6 fire calls for one key');
   assert.deepEqual(options.retry?.nonRetryableErrorTypes, NON_RETRYABLE_REMOTE_FAILURES);
   for (const type of ['InvalidInput', 'RoutineRejected', 'RoutineAuth', 'MalformedMarker']) {
     assert.ok(NON_RETRYABLE_REMOTE_FAILURES.includes(type), type);
