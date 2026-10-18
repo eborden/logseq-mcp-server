@@ -13,9 +13,12 @@
 //   5. remove the worktree and the output.
 //
 // Rules the code keeps:
-// - Nothing but integers and one fixed word leaves the activity (BR-0001, foundations 4.9). The raw output of every
-//   command goes to a file in the run's own directory, capped in size, and is deleted with the worktree. The only part
-//   read back is the reporter's two counts. Log lines carry a step name and an exit code, never output.
+// - Nothing but integers and one fixed word leaves the activity (BR-0001, foundations 4.9), with one exception (#676): a
+//   `fail` of a run the activity itself proved to be on the fixture instance also returns a capped summary of the failing
+//   tests (`summariseHostFailures`), which the workflow gives only to the remote fixer. The raw output of every command
+//   goes to a file in the run's own directory, capped in size, and is deleted with the worktree. The only parts read
+//   back are the reporter's counts and, for that exception, its failing assertions. Log lines carry a step name and an
+//   exit code, never output.
 // - Re-running is safe (4.5): the same PR always uses the same directory, which a new run clears first, and `stop` is
 //   harmless when nothing runs.
 // - Bounded (4.6): one deadline for the whole run, a timeout per command inside it, a heartbeat from start to end, and
@@ -36,7 +39,9 @@ import {
   HOST_HEARTBEAT_INTERVAL_MS,
   HOST_RUN_DEADLINE_MS,
   InvalidHostIntegrationInputError,
+  isFixtureApiUrl,
   parseHostIntegrationInput,
+  summariseHostFailures,
 } from '../host-integration-policy.ts';
 import type { HostIntegrationInput, HostIntegrationResult } from '../host-integration-policy.ts';
 
@@ -368,8 +373,10 @@ export function createHostIntegrationActivities(options: HostIntegrationOptions)
       must(await step('cargo_build', 'cargo', ['build', '--locked'], tree, CARGO_TIMEOUT_MS), 'cargo_build', true);
 
       let suite: CommandResult;
+      let fixtureProven = false;
       try {
         must(await step('instance_start', 'npx', ['tsx', 'scripts/logseq-instance.ts', 'start'], tree, INSTANCE_START_TIMEOUT_MS), 'instance_start', true);
+        fixtureProven = await provedFixtureRun(tree);
         suite = await step('integration', 'npm', ['run', 'test:integration', '--', '--reporter=json', `--outputFile=${reportFile}`], tree, HOST_RUN_DEADLINE_MS);
       } finally {
         // Also after a timeout, a cancellation or a crash of the run. A repeated stop is harmless.
@@ -398,7 +405,34 @@ export function createHostIntegrationActivities(options: HostIntegrationOptions)
         throw new SetupFailure('report', false);
       }
       const ok = suite.code === 0 && counts.failed === 0;
-      return { outcome: ok ? 'pass' : 'fail', passed: counts.passed, failed: counts.failed };
+      if (ok) {
+        return { outcome: 'pass', passed: counts.passed, failed: counts.failed };
+      }
+      // The names and assertion lines of the failures leave the activity only for a run proved to be on the fixture (BR-0001).
+      const failureSummary = fixtureProven ? summariseHostFailures((await readSmall(reportFile, MAX_REPORT_BYTES)) ?? '') : undefined;
+      return { outcome: 'fail', passed: counts.passed, failed: counts.failed, ...(failureSummary === undefined ? {} : { failureSummary }) };
+    }
+
+    /**
+     * The proof that this run used the fixture instance, made here and not taken from the caller. All of: the instance
+     * script (`start`, which itself requires the fixture graph) exited 0 in this run; the suite's environment has no
+     * `LOGSEQ_MCP_CONFIG`, so `connectFixture()` can only resolve the config `start` wrote in this worktree; and that
+     * config names a loopback API in the fixture's port range, never LogSeq's own port. Anything else is not a fixture run.
+     */
+    async function provedFixtureRun(treeDir: string): Promise<boolean> {
+      if ('LOGSEQ_MCP_CONFIG' in commandEnv) {
+        return false;
+      }
+      const text = await readSmall(join(treeDir, '.logseq-instance', 'config.json'), 100_000);
+      if (text === undefined) {
+        return false;
+      }
+      try {
+        const config: unknown = JSON.parse(text);
+        return typeof config === 'object' && config !== null && 'apiUrl' in config && isFixtureApiUrl(config.apiUrl);
+      } catch {
+        return false;
+      }
     }
   }
 
