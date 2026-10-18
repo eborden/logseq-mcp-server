@@ -170,6 +170,11 @@ function fakeActivities() {
       return { findings: 1, acceptedThreadIds: [], commentNodeId: 'IC_raw1' };
     },
     postRemoteSessionReview: async () => ({ reviewId: 2, posted: true, comments: 1, advisory: 0, omitted: 0 }),
+    // The remote fixer (#675) has its own tests (test/remote-fixer.test.ts); here it only has to be reached, and it stops the run.
+    runRemoteFixerSession: async (input: { issue: number }) => {
+      worldOf(input.issue).hit('runRemoteFixerSession');
+      throw ApplicationFailure.nonRetryable('the remote fixer did not run (open_pr)', 'RemoteSessionFailed');
+    },
     minimizeFindingsComment: async () => ({ minimized: true as const }),
     listOpenThreads: async (pr: number) => ({
       threads: worldOf(pr - PR_OFFSET).openThread ? [{ id: 'PRRT_1', path: 'src/a.ts', line: 1, trusted: true, comments: [{ id: 1, trusted: true, body: 'a made-up remark' }] }] : [],
@@ -247,23 +252,25 @@ test('with no executor, and with local, the run is v1: one implementer and one r
   }
 });
 
-test('executor remote runs the implementer and the reviewer remotely, then stops at the fixer with RemoteExecutorUnavailable', { timeout: 120_000 }, async () => {
+test('executor remote runs the implementer, the reviewer and the fixer remotely: a fixer that did not run stops the run at fix_session', { timeout: 120_000 }, async () => {
   const { issue, world, started } = start({ executor: 'remote' });
   world.openThread = true;
   const cause = await failure(issue, started);
   const [step, reason] = cause.details ?? [];
   assert.equal(cause.type, ISSUE_STOPPED_FAILURE);
-  assert.equal(reason, REMOTE_EXECUTOR_UNAVAILABLE);
-  assert.equal(step, 'fix_session', 'the fixer is the one session that is not remote yet');
+  assert.equal(reason, 'RemoteSessionFailed');
+  assert.equal(step, 'fix_session');
+  assert.equal(world.called('runRemoteFixerSession'), 1, 'the fixer is remote too: no RemoteExecutorUnavailable');
+  assert.equal(world.called('runFixerSession'), 0, 'and no local fixer session is started');
   assert.equal(world.called('runImplementerSession'), 0, 'no local implementer session is started');
   assert.equal(world.called('runRemoteImplementerSession'), 1);
   assert.equal(world.called('guardRemoteBranch'), 1);
   assert.equal(world.called('runReviewerSession'), 0, 'no local reviewer session either');
   assert.equal(world.called('runRemoteReviewerSession'), 1);
   assert.equal(world.called('openPr'), 1);
-  assert.deepEqual([...world.comments.keys()], [stopCommentKey('fix_session', REMOTE_EXECUTOR_UNAVAILABLE)]);
+  assert.deepEqual([...world.comments.keys()], [stopCommentKey('fix_session', 'RemoteSessionFailed')]);
   const body = [...world.comments.values()][0] ?? '';
-  assert.ok(body.includes(REMOTE_EXECUTOR_UNAVAILABLE) && body.includes(issueWorkflowId(issue)));
+  assert.ok(body.includes('RemoteSessionFailed') && body.includes(issueWorkflowId(issue)));
 });
 
 test('an invalid executor value fails the run as InvalidInput before any activity', { timeout: 60_000 }, async () => {

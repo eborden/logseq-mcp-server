@@ -29,10 +29,8 @@
 // It never merges, never labels, never resolves a thread and never moves an item to Ready or Backlog.
 
 import {
-  ActivityFailure,
   ApplicationFailure,
   CancellationScope,
-  TimeoutFailure,
   isCancellation,
   proxyActivities,
   setHandler,
@@ -49,6 +47,7 @@ import { DEFAULT_REVIEW_LOOP_TIMEOUT_MS } from '../review-policy.ts';
 import { maintainerDecisionSignal } from '../approval-types.ts';
 import { createDecisionInbox, decisionStage } from './decision.ts';
 import { onExecutor } from './executor.ts';
+import { failureReason, guardCounts } from './failure-reason.ts';
 import { remoteImplementer } from './remote-implementer.ts';
 import { reviewLoop } from './review-loop.ts';
 import {
@@ -99,26 +98,6 @@ const SKIP_REASONS: readonly string[] = ['open_pr', 'claude_branch', 'already_pa
 
 function isSkipReason(reason: string): reason is SkipReason {
   return SKIP_REASONS.includes(reason);
-}
-
-/** The type of the failure under an activity failure, as a plain word. Never the message: it can name a path or a PR. */
-function failureReason(error: unknown): StopReason {
-  const cause = error instanceof ActivityFailure ? error.cause : error;
-  if (cause instanceof ApplicationFailure && typeof cause.type === 'string' && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(cause.type)) {
-    return cause.type;
-  }
-  if (cause instanceof TimeoutFailure) {
-    return 'ActivityTimeout';
-  }
-  return 'ActivityFailed';
-}
-
-/** The counts line of a guard refusal (`the branch changes N file(s), ...`), which is numbers and fixed words, or undefined. */
-function guardCounts(error: unknown): string | undefined {
-  const cause = error instanceof ActivityFailure ? error.cause : error;
-  const message = cause instanceof ApplicationFailure ? cause.message : '';
-  const match = /^the branch changes \d{1,9} file\(s\), \d{1,9} protected path\(s\) and \d{1,9} special file\(s\) in its commits$/.exec(message);
-  return match === null ? undefined : `${match[0]}.`;
 }
 
 export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> {
