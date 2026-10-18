@@ -25,7 +25,7 @@ The repo and its GitHub project are public, and some paths still reach real data
 Real names can't be listed in a repo check without publishing them. A local hook that reads names from the graph at run time can check diffs and GitHub text without that.
 
 - none-yet: #98 (local hook)
-- none-yet: #643 (the host integration activity's fixture-only check, named by the task that routes a failure to a fixer; an unsound claim of "fixture" is the failure this rule must still catch)
+- test: `orchestrator/test/host-failure-routing.test.ts` (the host integration activity returns a failure summary only for a run it proved was on the fixture instance, and counts only for any other; an unsound claim of "fixture" is still the failure this rule must catch, so the proof is a reviewer's read as well)
 
 ## Changelog
 
@@ -37,3 +37,4 @@ Real names can't be listed in a repo check without publishing them. A local hook
 | 2026-10-06 | Rationale only: the integration tests and the probe no longer read the personal graph, so it names the paths that still can. Statement unchanged. | #158 |
 | 2026-10-08 | Mechanical enforcement: the test that checks tracked raw-output files moved from `src/` to `tests/guards/` with the TypeScript server's removal. Statement unchanged. | #370 |
 | 2026-10-18 | Statement narrowed: bounded output (test names, counts, assertion messages) from a run against the committed fixture graph may be posted; raw output of the probe, the measure scripts and any non-fixture integration run stays forbidden. Added `none-yet: #643` for the fixture-only check. | #669, #685 |
+| 2026-10-18 | Mechanical enforcement: the fixture-only check of the host integration activity is guarded by a test, replacing `none-yet: #643`. Statement unchanged. | #676 |

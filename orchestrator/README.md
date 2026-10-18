@@ -321,7 +321,7 @@ With `hostIntegration: 'auto'` the run checks the PR head on the host before it 
 1. `getHostIntegrationNeed`: the pure rule over the PR's changed files. A change under `src/`, `scripts/`, `tests/fixtures/` or `tests/integration/`, a `Cargo.*` file or the toolchain pin needs it, and so does a PR with more files than one call reads. `orchestrator/src/` is not `src/`. Only a boolean leaves the activity, never a path. If it is not needed the gate is as before and nothing is posted.
 2. `getHostIntegration` for the head. A `success` already on it ends here: the suite is not run again, so a replay or a restarted run does not run it twice.
 3. `postCommitStatus` `pending`, then `runHostIntegration` on the `host` queue (40 minute deadline, 50 minute backstop, two attempts, no retry of a test failure), then the result as the status: `pass` is `success`, `fail` is `failure`, and `conflict`, `fixture_dirty` and `setup_error` are `error`. The description is `<n> passed, <n> failed` or `no counts` (a conflict or a setup error ran no suite, so no counts are given).
-4. Anything but `pass` stops the run for a person (below). No fixer is started.
+4. Anything but `pass` stops the run for a person (below), with one exception: a `fail` of a fixture run, with `executor: remote`, goes to a remote fixer ("A failed check goes to the remote fixer" below).
 5. The gate reads `getHostIntegration` for the gate's own head on every pass and holds unless it shows `success` (`gateClear` with its `hostIntegration` field). A status on another commit counts for nothing: after a push the new head has no status, so once a person has reviewed it the check runs again for that head (once per settled head, not after each fix push), and the old pass does not clear the gate.
 
 A pass does not replace the maintainer: the decision comment, the merge and everything after it are as before. Nothing here merges, applies a label or resolves a thread.
@@ -330,7 +330,7 @@ A pass does not replace the maintainer: the decision comment, the merge and ever
 
 | Reason | Status written | What happened | What to do |
 |---|---|---|---|
-| `IntegrationFailed` | `failure` | The suite ran and some tests failed | Fix the change in the PR (by hand: no fixer is started for it yet), push, then delete the run and start again. The new head is checked afresh |
+| `IntegrationFailed` | `failure` | The suite ran and some tests failed, and no fixer took it: the run is local, or the activity could not prove a fixture run, or no fix round is left, or the fixer pushed nothing | Fix the change in the PR by hand, push, then delete the run and start again. The new head is checked afresh |
 | `IntegrationConflict` | `error` | The head does not merge onto its base, so no suite ran | Merge or rebase the base into the branch, push, then start again |
 | `IntegrationFixtureDirty` | `error` | The suite ran but changed the committed fixture graph, so its result is not trusted | Find what wrote to `tests/fixtures/graph/` (never commit a change LogSeq made to it), then start again |
 | `IntegrationSetupError` | `error` | The host could not set up or run the suite (fetch, install, build, instance start), or it produced no report | Read the host worker's log and "Host integration" above, fix the host, then start again |
@@ -338,7 +338,17 @@ A pass does not replace the maintainer: the decision comment, the merge and ever
 
 To start again after a stop, delete the closed run and start it ("Recovering a stuck run"). The restart finds the open PR, and the head is checked again unless it already shows `success`.
 
-**What it does not do.** Run the suite anywhere but the host, send a failure to a fixer (open question 4 of #643), post or log any output beyond the counts, or change the default to `auto` (a later change, after one real run). **UNVERIFIED:** a real run needs LogSeq and the host worker, and the tests use fakes for both.
+**What it does not do.** Run the suite anywhere but the host, post or log any suite output to GitHub (a comment or a commit status holds counts only), send anything but a `fail` of a proved fixture run to a fixer, or change the default to `auto` (a later change, after one real run). **UNVERIFIED:** a real run needs LogSeq and the host worker, and the tests use fakes for both.
+
+### A failed check goes to the remote fixer (#676)
+
+With `executor: remote` and `hostIntegration: auto`, a `fail` that carries a failure summary starts **one** remote fixer round instead of stopping the run.
+
+**What leaves the Mac, and why that is allowed.** The host activity returns, for a `fail` only, a bounded summary: up to 10 failing test names (200 characters each) and one assertion line each (300 characters each, first line, colour codes and control characters removed), plus the number of failing tests left out and the number of fields cut (BR-0006: a cap says so). It goes into the activity's result, so into workflow history, and from there into the remote fixer's brief as escaped data in a `<host-failure-data>` block. It never goes into a comment, a commit status or a log: the status and the stop comment keep the counts. BR-0001 as narrowed in #669 and #685 allows this only for a run on the committed fixture graph, whose every value is fictional. So the activity makes the proof itself, in this order, and a run that fails any step has **counts only and no summary**: `scripts/logseq-instance.ts start` exited 0 in that run, the suite's environment holds no `LOGSEQ_MCP_CONFIG` (the allowlist drops it, so `connectFixture()` can only read the config `start` wrote in that worktree), and that config's API address is loopback on a port in the fixture instance's range 12320 to 12399 (never 12315). The check is not a flag or a field of the input. **Limit:** the activity proves which instance the suite was pointed at, not that the suite called `connectFixture()`: it relies on the suite's global setup doing so, as `tests/integration/setup.md` says. The suite also refuses port 12315 by itself. The sanitiser (line, length and count bounds) is `summariseHostFailures` in `src/host-integration-policy.ts`.
+
+**What the workflow does.** `fix` in `src/workflows/host-integration.ts` calls the review loop (`reviewLoop` with `hostFailure`): one remote fixer round (`runRemoteFixerSession`, the same keyed replies comment, `guardRemoteBranch` on the fetched tip), then the review of the new head as after any fix. The round counts against `maxFixRounds` together with the rounds the review loop used. The new head is then checked once, when a review is on it and no thread is open, as for any head. A second failure may use another round if one is left, so the number of host fixer rounds is bounded by `maxFixRounds` and not by this feature.
+
+**What still stops for a person.** `error` (a run that did not finish), `conflict`, `setup_error` and `fixture_dirty`; a `fail` with no summary (not proved to be a fixture run, or a report with no failing test to name); a `fail` with no fix round left; a fixer that pushed nothing (`IntegrationFailed`, one comment, counts only); a guard refusal of the fixer's push (`FixerPushRejected`); and every `fail` with `executor: local`, which is unchanged. **UNVERIFIED:** a real remote fixer round on a real host failure was not run; the tests use fakes for the host and the sessions.
 
 ## Remote sessions (#672)
 
