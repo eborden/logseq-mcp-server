@@ -258,6 +258,9 @@ test('the wrapper builds the brief inside the activity and starts runRemoteSessi
   assert.equal(seen[0]?.attempt, 2);
   assert.equal('headSha' in (seen[0] ?? {}), false);
   assert.ok(seen[0]?.brief.includes('Alice asked for the thing.'), 'the issue text is in the brief');
+  assert.ok(seen[0]?.brief.includes('git push -u origin claude/30'), 'the session is told to push its own branch');
+  assert.ok(seen[0]?.brief.includes('You do NOT open a pull request'));
+  assert.ok(!seen[0]?.brief.includes('cannot push'), 'the local brief\'s claim is false on the remote path');
   assert.ok(!JSON.stringify(result).includes('Alice'), 'and not in the result that goes into the history');
   await run(runRemoteImplementerSession, WRAPPER_INPUT);
   assert.equal('attempt' in (seen[1] ?? {}), false, 'no attempt in, none out: the default key');
