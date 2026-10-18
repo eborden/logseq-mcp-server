@@ -43,8 +43,8 @@ export const FIRE_BASE_URL = 'https://api.anthropic.com';
 export const FIRE_BETA_HEADER = 'experimental-cc-routine-2026-04-01';
 export const FIRE_TIMEOUT_MS = 30_000;
 const ROUTINE_ID = /^[A-Za-z0-9_-]{1,100}$/;
-const SESSION_ID = /^session_[A-Za-z0-9]{1,100}$/;
-const SESSION_URL = /^https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]{1,100}$/;
+const SESSION_ID = /^(?:session|cse)_[A-Za-z0-9]{1,100}$/;
+const SESSION_URL = /^https:\/\/claude\.ai\/code\/(?:session|cse)_[A-Za-z0-9]{1,100}$/;
 const MAX_RETRY_AFTER_S = 86_400;
 
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) => Promise<{
