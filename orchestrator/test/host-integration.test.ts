@@ -158,6 +158,37 @@ test('a non-zero exit with no failed test is still a fail', async () => {
   assert.deepEqual(await run(), { outcome: 'fail', passed: 12, failed: 0 });
 });
 
+test('a report that counts no test at all is a setup error, never a pass and never a 0/0 fail', async () => {
+  runner.report = { numPassedTests: 0, numFailedTests: 0 };
+  assert.deepEqual(await run(), { outcome: 'setup_error', passed: 0, failed: 0 });
+  runner.integrationCode = 1;
+  assert.deepEqual(await run(), { outcome: 'setup_error', passed: 0, failed: 0 });
+  assert.ok(runner.steps.includes('instance_stop'));
+  assert.ok(await gone(runDir()));
+});
+
+test('a registered but missing worktree is pruned before the new one is added, with no run directory present', async () => {
+  assert.ok(await gone(runDir()));
+  await run();
+  const prune = indexOfStep('worktree_prune');
+  assert.ok(prune >= 0 && prune < indexOfStep('worktree_add'), 'pruned before worktree add');
+  assert.ok(prune < indexOfStep('fetch'));
+});
+
+test('the heartbeat is sent at the start and on the interval, and stops when the run ends', async () => {
+  let beats = 0;
+  runner.on('cargo_build', () => new Promise<CommandResult>((resolve) => setTimeout(() => resolve(OK), 80)));
+  const environment = new MockActivityEnvironment({ attempt: 1 });
+  environment.on('heartbeat', () => {
+    beats += 1;
+  });
+  await environment.run(activities().runHostIntegration, INPUT);
+  assert.ok(beats >= 3, `expected a heartbeat at the start and on the interval, got ${beats}`);
+  const after = beats;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(beats, after, 'no heartbeat after the run returned');
+});
+
 test('a merge conflict is `conflict`: no install, no instance, no suite', async () => {
   runner.on('merge', () => ({ code: 1, timedOut: false, aborted: false }));
   assert.deepEqual(await run(), { outcome: 'conflict', passed: 0, failed: 0 });

@@ -325,6 +325,9 @@ export function createHostIntegrationActivities(options: HostIntegrationOptions)
         await removeRun();
       }
       await mkdir(outDir, { recursive: true });
+      // Git keeps a worktree registered after its directory is gone (a reaped temp directory, a killed worker), and
+      // `worktree add` then refuses the path. Prune the registrations of missing directories on every run.
+      await cleanup('worktree_prune', 'git', [...GIT_NO_HOOKS, 'worktree', 'prune'], options.repoDir, GIT_TIMEOUT_MS);
 
       try {
         return await runSteps();
@@ -388,6 +391,10 @@ export function createHostIntegrationActivities(options: HostIntegrationOptions)
       }
       if (counts === undefined) {
         // The suite ended without a report (its global setup refused, or the run crashed): there is nothing to count.
+        throw new SetupFailure('report', false);
+      }
+      if (counts.passed === 0 && counts.failed === 0) {
+        // A report that counts nothing (a suite file that failed to load, an empty run) is not a pass and not a test failure.
         throw new SetupFailure('report', false);
       }
       const ok = suite.code === 0 && counts.failed === 0;
