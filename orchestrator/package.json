@@ -14,7 +14,7 @@
     "run-hello": "tsx src/client.ts",
     "run-issue": "tsx src/run-issue.ts",
     "signal": "tsx src/signal.ts",
-    "test:unit": "node --import tsx --test test/activities.test.ts test/claude-session.test.ts test/gh.test.ts test/github.test.ts test/github-board.test.ts test/brief.test.ts test/implementer.test.ts test/branch.test.ts test/review.test.ts test/approval-activities.test.ts test/integration-policy.test.ts test/host-status.test.ts test/host-integration.test.ts test/remote-session.test.ts test/remote-reviewer.test.ts",
+    "test:unit": "node --import tsx --test test/activities.test.ts test/claude-session.test.ts test/gh.test.ts test/github.test.ts test/github-board.test.ts test/brief.test.ts test/implementer.test.ts test/branch.test.ts test/review.test.ts test/approval-activities.test.ts test/integration-policy.test.ts test/host-status.test.ts test/host-integration.test.ts test/remote-session.test.ts test/remote-reviewer.test.ts test/worker-wiring.test.ts",
     "test:github": "node --import tsx --test test/gh.test.ts test/github.test.ts test/github-board.test.ts",
     "test:server": "node --import tsx --test test/start-server.test.ts",
     "test:workflow": "node --import tsx --test test/issue-workflow.test.ts test/review-loop.test.ts test/approval.test.ts test/host-integration-loop.test.ts test/executor-flag.test.ts test/remote-reviewer-loop.test.ts test/remote-implementer.test.ts test/remote-fixer.test.ts test/host-failure-routing.test.ts",

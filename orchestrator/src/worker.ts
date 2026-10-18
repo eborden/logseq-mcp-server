@@ -3,7 +3,7 @@
 //
 // Activities registered: `hello` (the engine check of #626, kept on purpose: `npm run run-hello` and the crash test
 // use it), `runClaudeSession` (#627), the GitHub activities (#628, #635, #629), `guardBranch` and `pushBranch` (the only push) `runImplementerSession` (#629), and the review activities (#630: a fresh reviewer, a fixer, the posting of their output).
-// With the six `REMOTE_ROUTINE_*` variables set, `runRemoteSession` (#672) is registered too; without them it is not.
+// With the six `REMOTE_ROUTINE_*` variables set, `runRemoteSession` (#672) and `runRemoteImplementerSession` (#673) are registered too; without them they are not.
 // With `HOST_TASK_QUEUE` set, a second worker in this process polls the `host` queue and registers only
 // `runHostIntegration` (#647), one activity at a time. Without it the worker is exactly as before.
 // Their settings are read once here, from the environment, and a bad value stops the worker before it polls.
@@ -47,6 +47,11 @@ async function main(): Promise<void> {
           fire: createRoutineFireClient({ tokens: remoteConfig.tokens }),
           github: createRemoteGithubReads(ghConfig),
         });
+  // The remote implementer (#673) runs only when the remote session activity does.
+  const remoteImplementer =
+    remote.runRemoteSession === undefined
+      ? {}
+      : createRemoteImplementerActivities({ readIssue: github.readIssue, runRemoteSession: remote.runRemoteSession, repo: ghConfig.repo });
   const review = createReviewActivities({
     readIssue: github.readIssue,
     listReviewThreads: github.listReviewThreads,
@@ -66,7 +71,7 @@ async function main(): Promise<void> {
     namespace: config.namespace,
     taskQueue: config.taskQueue,
     workflowsPath: fileURLToPath(new URL('./workflows/index.ts', import.meta.url)),
-    activities: { ...hello, ...claude, ...github, ...branches, ...implementer, ...review, ...remote },
+    activities: { ...hello, ...claude, ...github, ...branches, ...implementer, ...review, ...remote, ...remoteImplementer },
   });
 
   // The host worker runs one activity at a time: the host's LogSeq serves one suite, and `stop` must finish before the next start.
