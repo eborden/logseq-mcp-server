@@ -11,7 +11,8 @@ import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ApplicationFailure } from '@temporalio/activity';
 import { MockActivityEnvironment } from '@temporalio/testing';
-import { createGithubActivities } from '../src/activities/github.ts';
+import { createGithubActivities, createRemoteGithubReads } from '../src/activities/github.ts';
+import { findingsMarker } from '../src/findings-comment.ts';
 import { BOARD_ACTIVITY_OPTIONS } from '../src/board-policy.ts';
 import { GITHUB_ACTIVITY_TIMEOUTS } from '../src/gh-config.ts';
 import { GITHUB_ACTIVITY_MAX_ATTEMPTS, GITHUB_ACTIVITY_OPTIONS } from '../src/github-policy.ts';
@@ -874,4 +875,26 @@ test('across every activity, no call merges, labels, resolves a thread, or moves
     writes.map((call) => call.argv.at(-1)),
     ['repos/eborden/logseq-mcp-server/pulls', 'repos/eborden/logseq-mcp-server/pulls/7/reviews', 'repos/eborden/logseq-mcp-server/issues/123/comments'],
   );
+});
+
+// ---- the remote wait's findings-comment read (#682) -----------------------------------------------------------------
+
+test('findingsCommented of the remote reads: a trusted comment with the marker is true, the rest is false', async () => {
+  const marker = findingsMarker(77, HEAD, 1);
+  const withComments = (comments: unknown[]) => async () => {
+    const { fake } = await setup((state) => {
+      state.comments['77'] = comments;
+    });
+    return createRemoteGithubReads(fake.config);
+  };
+  const keyed = (id: number, association: string, first: string) => ({ ...rawComment(id, association, `${first}\n\nbody`), node_id: `IC_${id}` });
+
+  const trusted = await withComments([keyed(1, 'NONE', 'a remark'), keyed(2, 'OWNER', marker)])();
+  assert.equal(await trusted.findingsCommented?.(77, marker), true);
+  const forged = await withComments([keyed(3, 'NONE', marker)])();
+  assert.equal(await forged.findingsCommented?.(77, marker), false, 'a stranger with the marker is data');
+  const otherKey = await withComments([keyed(4, 'OWNER', findingsMarker(77, HEAD, 2)), keyed(5, 'OWNER', findingsMarker(77, OLDER, 1))])();
+  assert.equal(await otherKey.findingsCommented?.(77, marker), false, 'another round or head does not match');
+  const otherPr = await withComments([keyed(6, 'OWNER', marker)])();
+  assert.equal(await otherPr.findingsCommented?.(78, marker), false, 'the PR number picks the route');
 });
