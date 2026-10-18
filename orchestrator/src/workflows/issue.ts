@@ -58,6 +58,7 @@ import {
   ISSUE_STOPPED_FAILURE,
   InvalidIssueInputError,
   NO_COMMENT_FAILURES,
+  REMOTE_BRANCH_MOVED,
   issueBranch,
   issueWorkflowId,
   parseIssueWorkflowInput,
@@ -69,7 +70,7 @@ import {
 import type { IssueRunResult, IssueStep, SkipReason, StopReason } from '../issue-types.ts';
 import type { BoardItemRef, SessionExitStatus, SettableStatus } from '../types.ts';
 
-const github = proxyActivities<Pick<GithubActivities, 'checkIssue' | 'claimIssue' | 'openPr' | 'commentIssue'>>({
+const github = proxyActivities<Pick<GithubActivities, 'checkIssue' | 'claimIssue' | 'openPr' | 'commentIssue' | 'getPrState'>>({
   ...GITHUB_ACTIVITY_OPTIONS,
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
 });
@@ -215,6 +216,15 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
     github.openPr({ head: branch, base: input.base, title: pullRequestTitle(issue), body: pullRequestBody(issue, branch) }),
   );
   pr = opened.number;
+
+  // Remote only (#673): the session cannot be stopped, so the branch can move between the guard's last read and the PR's
+  // creation. The PR carries whatever the tip was then, so its head is read back and must be the guarded sha.
+  if (input.executor === 'remote') {
+    const seen = await step('guard', () => github.getPrState(opened.number));
+    if (seen.headSha !== checked.headSha) {
+      return await stop('guard', REMOTE_BRANCH_MOVED, `The branch moved after the guard, so the pull request #${opened.number} is on a commit that was not checked. The branch was not deleted.`);
+    }
+  }
 
   const prItem: BoardItemRef = { kind: 'pr', number: opened.number };
   await step('board_pr', () => board.addToBoard(prItem));
