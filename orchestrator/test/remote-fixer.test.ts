@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, afterEach, before, beforeEach, test } from 'node:test';
@@ -406,23 +406,36 @@ test('a clean remote fix: guarded on the fetched tip, the replies posted after i
   assert.equal(world.comments.size, 0);
 });
 
-test('a fix push that touches a protected path stops the run with FixerPushRejected: nothing is posted for that head, and the branch stays', { timeout: 120_000 }, async () => {
-  const world = await makeWorld();
-  world.fixer = fixWith({ '.github/workflows/ci.yml': 'on: push\n' });
-  const first = world.head;
-  const stop = await stopOf(await runLoop(world));
-  assert.deepEqual(stop.details, ['fix_guard', FIXER_PUSH_REJECTED, 77]);
-  const pushed = await world.tip();
-  assert.notEqual(pushed, first, 'the push is on the branch, and nothing deleted or reset it');
-  assert.deepEqual(world.reviews, [first], 'no review is posted for the pushed head');
-  assert.equal(world.replies.length, 0, 'no reply is posted either');
-  assert.equal(world.sessions.filter((s) => s.role === 'reviewer').length, 1, 'no reviewer session for the pushed head');
-  assert.deepEqual([...world.comments.keys()], [stopCommentKey('fix_guard', FIXER_PUSH_REJECTED)], 'one keyed comment');
-  const body = [...world.comments.values()][0] ?? '';
-  assert.match(body, /the branch changes \d+ file\(s\), \d+ protected path\(s\) and \d+ special file\(s\) in its commits/);
-  assert.ok(body.includes('ProtectedPath') && body.includes('left as it is'));
-  assert.ok(!body.includes('.github') && !body.includes('ci.yml'), 'counts and the reason class only, no path');
-  assert.ok(world.minimized.includes('IC_fixer'), 'the raw replies comment is hidden');
+test('a fix push the guard refuses (a protected path, a symlink) stops the run with FixerPushRejected: nothing is posted for that head, and the branch stays', { timeout: 180_000 }, async () => {
+  const cases: [string, FixerBehaviour, string][] = [
+    ['a protected path', fixWith({ '.github/workflows/ci.yml': 'on: push\n' }), 'ProtectedPath'],
+    [
+      'a symlink',
+      async (world) => {
+        await symlink('/etc/passwd', join(world.session, 'atlas-link'));
+        return await fixWith({})(world, { headSha: world.head, attempt: 1 });
+      },
+      'SpecialFile',
+    ],
+  ];
+  for (const [label, fixer, refusal] of cases) {
+    const world = await makeWorld();
+    world.fixer = fixer;
+    const first = world.head;
+    const stop = await stopOf(await runLoop(world));
+    assert.deepEqual(stop.details, ['fix_guard', FIXER_PUSH_REJECTED, 77], label);
+    const pushed = await world.tip();
+    assert.notEqual(pushed, first, `${label}: the push is on the branch, and nothing deleted or reset it`);
+    assert.deepEqual(world.reviews, [first], `${label}: no review is posted for the pushed head`);
+    assert.equal(world.replies.length, 0, `${label}: no reply is posted either`);
+    assert.equal(world.sessions.filter((s) => s.role === 'reviewer').length, 1, `${label}: no reviewer session for the pushed head`);
+    assert.deepEqual([...world.comments.keys()], [stopCommentKey('fix_guard', FIXER_PUSH_REJECTED)], `${label}: one keyed comment`);
+    const body = [...world.comments.values()][0] ?? '';
+    assert.match(body, /the branch changes \d+ file\(s\), \d+ protected path\(s\) and \d+ special file\(s\) in its commits/);
+    assert.ok(body.includes(refusal) && body.includes('left as it is'), label);
+    assert.ok(!body.includes('.github') && !body.includes('ci.yml') && !body.includes('atlas-link'), `${label}: counts and the reason class only, no path`);
+    assert.ok(world.minimized.includes('IC_fixer'), `${label}: the raw replies comment is hidden`);
+  }
 });
 
 test('a branch that moves again after the fixer reported its tip stops on the guard with BranchMoved, not as a refusal, and is not reset', { timeout: 120_000 }, async () => {
