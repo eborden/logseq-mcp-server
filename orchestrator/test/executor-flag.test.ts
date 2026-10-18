@@ -1,5 +1,6 @@
 // The executor flag (#671, plan #643): `executor: 'local' | 'remote'`, parsed at the boundary, with `local` (the default)
-// leaving v1 as it was and `remote` stopping the run for a person before any session, because no remote activity is wired.
+// leaving v1 as it was. `remote` runs the implementer (#673) and the reviewer (#674) remotely and stops the run for a person
+// at the first fixer step, the one session that is not remote yet.
 // Real Temporal dev server and fake activities with counters; nothing calls GitHub, `claude` or LogSeq. Names are made up.
 
 import assert from 'node:assert/strict';
@@ -84,6 +85,8 @@ test('run-issue builds the input from its flags: --executor reaches it, no flag 
 // ---- the workflow ------------------------------------------------------------------------------------------------
 
 class World {
+  /** One open thread the reviewer did not accept, so the review loop goes on to the fixer. */
+  openThread = false;
   issueStatus: string | undefined = 'Ready';
   prStatus: string | undefined;
   readonly calls: Record<string, number> = {};
@@ -158,7 +161,19 @@ function fakeActivities() {
       return { findings: 0, acceptedThreadIds: [] };
     },
     postSessionReview: async () => ({ reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0 }),
-    getGateStatus: async (pr: number) => ({ headSha: HEAD, reviewsOnHead: 1, unresolvedThreads: 0, clear: true, pr }),
+    getGateStatus: async (pr: number) => {
+      const open = worldOf(pr - PR_OFFSET).openThread;
+      return { headSha: HEAD, reviewsOnHead: 1, unresolvedThreads: open ? 1 : 0, clear: !open, pr };
+    },
+    runRemoteReviewerSession: async (input: { issue: number }) => {
+      worldOf(input.issue).hit('runRemoteReviewerSession');
+      return { findings: 1, acceptedThreadIds: [], commentNodeId: 'IC_raw1' };
+    },
+    postRemoteSessionReview: async () => ({ reviewId: 2, posted: true, comments: 1, advisory: 0, omitted: 0 }),
+    minimizeFindingsComment: async () => ({ minimized: true as const }),
+    listOpenThreads: async (pr: number) => ({
+      threads: worldOf(pr - PR_OFFSET).openThread ? [{ id: 'PRRT_1', path: 'src/a.ts', line: 1, trusted: true, comments: [{ id: 1, trusted: true, body: 'a made-up remark' }] }] : [],
+    }),
     commentIssue: async (input: { issue: number; key: string; body: string }) => {
       const w = worldOf(input.issue);
       const posted = !w.comments.has(input.key);
@@ -232,19 +247,21 @@ test('with no executor, and with local, the run is v1: one implementer and one r
   }
 });
 
-test('executor remote runs the implementer remotely, guards before the PR, then stops at the reviewer with RemoteExecutorUnavailable and no review session', { timeout: 120_000 }, async () => {
+test('executor remote runs the implementer and the reviewer remotely, then stops at the fixer with RemoteExecutorUnavailable', { timeout: 120_000 }, async () => {
   const { issue, world, started } = start({ executor: 'remote' });
+  world.openThread = true;
   const cause = await failure(issue, started);
   const [step, reason] = cause.details ?? [];
   assert.equal(cause.type, ISSUE_STOPPED_FAILURE);
   assert.equal(reason, REMOTE_EXECUTOR_UNAVAILABLE);
-  assert.equal(step, 'review_session', 'the reviewer is not remote yet (a later task of #643)');
+  assert.equal(step, 'fix_session', 'the fixer is the one session that is not remote yet');
   assert.equal(world.called('runImplementerSession'), 0, 'no local implementer session is started');
   assert.equal(world.called('runRemoteImplementerSession'), 1);
   assert.equal(world.called('guardRemoteBranch'), 1);
-  assert.equal(world.called('runReviewerSession'), 0);
+  assert.equal(world.called('runReviewerSession'), 0, 'no local reviewer session either');
+  assert.equal(world.called('runRemoteReviewerSession'), 1);
   assert.equal(world.called('openPr'), 1);
-  assert.deepEqual([...world.comments.keys()], [stopCommentKey('review_session', REMOTE_EXECUTOR_UNAVAILABLE)]);
+  assert.deepEqual([...world.comments.keys()], [stopCommentKey('fix_session', REMOTE_EXECUTOR_UNAVAILABLE)]);
   const body = [...world.comments.values()][0] ?? '';
   assert.ok(body.includes(REMOTE_EXECUTOR_UNAVAILABLE) && body.includes(issueWorkflowId(issue)));
 });

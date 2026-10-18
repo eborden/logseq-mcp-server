@@ -457,6 +457,23 @@ function fakeActivities() {
       worldOf(input.issue).hit('runReviewerSession');
       return { findings: 0, acceptedThreadIds: [] };
     },
+    // The remote reviewer finds one open thread, so the review loop goes on to the fixer, the one session not remote yet.
+    runRemoteReviewerSession: async (input: { issue: number }) => {
+      worldOf(input.issue).hit('runRemoteReviewerSession');
+      return { findings: 1, acceptedThreadIds: [], commentNodeId: 'IC_raw1' };
+    },
+    postRemoteSessionReview: async () => ({ reviewId: 2, posted: true, comments: 1, advisory: 0, omitted: 0 }),
+    minimizeFindingsComment: async () => ({ minimized: true as const }),
+    getGateStatus: async (pr: number) => ({
+      headSha: await remoteTip(worldOf(pr - PR_OFFSET).repos, `claude/${pr - PR_OFFSET}`),
+      reviewsOnHead: 1,
+      unresolvedThreads: 1,
+      clear: false,
+      pr,
+    }),
+    listOpenThreads: async () => ({
+      threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 1, trusted: true, comments: [{ id: 1, trusted: true, body: 'a made-up remark' }] }],
+    }),
     commentIssue: async (input: { issue: number; key: string; body: string }) => {
       const w = worldOf(input.issue);
       const posted = !w.comments.has(input.key);
@@ -519,15 +536,15 @@ async function finish(world: World): Promise<void> {
   await rm(world.repos.dir, { recursive: true, force: true });
 }
 
-// The one expected end of a run that gets past the implementer: the reviewer is not remote yet (a later task), so the run
-// stops at its first step, after the PR is open and In review.
-const STOPS_AT_REVIEWER = 'review_session';
+// The one expected end of a run that gets past the implementer: the remote reviewer leaves an open thread and the fixer is not
+// remote yet, so the run stops at the first fixer step, after the PR is open and In review.
+const STOPS_AT_FIXER = 'fix_session';
 
 test('a clean remote branch is guarded on the fetched tip, then the PR opens; no local session, no push', { timeout: 120_000 }, async () => {
   const { issue, world, started } = await start((n) => async (r) => reported(await sessionPush(r, `claude/${n}`, { 'src/a.ts': 'a\n' })));
   const cause = await failure(issue, started);
   assert.equal(cause.type, ISSUE_STOPPED_FAILURE);
-  assert.equal(cause.details?.[0], STOPS_AT_REVIEWER);
+  assert.equal(cause.details?.[0], STOPS_AT_FIXER);
   assert.equal(world.called('runImplementerSession'), 0);
   assert.equal(world.called('guardRemoteBranch'), 1, 'the guard ran on the fetched branch');
   assert.equal(world.called('guardBranch'), 0, 'not the local guard');
@@ -601,7 +618,7 @@ test('a session that ended with no push gets a second attempt, which is attempt 
 
   const recovers = await start((n) => async (r, input) => (input.attempt === 1 ? { outcome: 'timed_out' } : reported(await sessionPush(r, `claude/${n}`, { 'src/a.ts': 'a\n' }))));
   const next = await failure(recovers.issue, recovers.started);
-  assert.equal(next.details?.[0], STOPS_AT_REVIEWER);
+  assert.equal(next.details?.[0], STOPS_AT_FIXER);
   assert.deepEqual(recovers.world.attempts, [1, 2]);
   assert.equal(recovers.world.called('openPr'), 1);
   await finish(recovers.world);
