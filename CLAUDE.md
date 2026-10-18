@@ -117,7 +117,7 @@ These rules stay in force whether or not the skill loads:
 - **CI** (`.github/workflows/ci.yml`) must be green, and the PR must merge cleanly against its current base branch.
 - **The `golden-change` label goes on only after the maintainer's explicit OK, recorded on the PR**, and the maintainer adds it. Nobody applies it on their own: not a PR's author, not a reviewer, and not under the feature-branch self-merge grant.
 - **Never raise a call ceiling to make a case pass.** A PR that raises or adds one needs the maintainer's explicit OK and the `golden-change` label, and only the maintainer adds the label.
-- **Privacy grep** of the diff, commit messages, PR body and review comments/replies. Don't paste measure-script or non-fixture-run output on GitHub; a bounded fixture-run summary is fine (BR-0001).
+- **Privacy grep** of the diff, commit messages, PR body and review comments/replies. Don't paste measure-script, probe or non-fixture integration output on GitHub; a bounded fixture-integration summary is fine.
 
 ### Merge policy
 - **Three actions need the maintainer's explicit OK:** merging a PR, moving a board item from *Backlog* to *Ready*, and merging any PR that adds, changes, supersedes or retires an ADR or business rule, even with self-merge. The exception is a PR that adds or strengthens Mechanical enforcement lines on ADRs and business rules, and changes no other ADR or business-rule content (see "ADRs and business rules"). Everything else (issues, PRs, reviews, resolving threads, pushing to feature branches, other status moves) is allowed by default.
