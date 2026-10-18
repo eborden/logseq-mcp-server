@@ -238,6 +238,36 @@ After the review loop the run waits for the maintainer, with a signal, at no cos
 
 **Not done here.** A webhook, a UI, the merge, and the `golden-change` label.
 
+## Host integration (#647)
+
+`runHostIntegration` (`src/activities/host-integration.ts`) runs the integration suite on a PR head. The suite needs the LogSeq desktop app, which is macOS only, so this is the one activity that runs on the maintainer's Mac and the only one on the `host` task queue. It uses no model and no GitHub call. **No workflow calls it yet** (a later task of plan #643 does); until then it only exists.
+
+**What runs.** For `{ pr, headSha, base }`, in a throwaway detached worktree under the OS temp directory (`logseq-mcp-orchestrator-host/pr-<n>/tree`, never inside your working copy):
+
+1. remove what an earlier run of the same PR left (stop its instance, remove its worktree);
+2. `git fetch` the base and `refs/pull/<n>/head`, `git worktree add --detach` at `origin/<base>`, `git merge --no-edit <headSha>`. A merge conflict is the outcome `conflict` and no suite starts;
+3. `npm ci`, `cargo build --locked`, `npx tsx scripts/logseq-instance.ts start`, `npm run test:integration -- --reporter=json --outputFile=<file>`, and `npx tsx scripts/logseq-instance.ts stop` (in a `finally`: after a failure, a timeout and a cancellation too);
+4. `git status --porcelain -- tests/fixtures/graph` must be empty, or the outcome is `fixture_dirty`;
+5. remove the worktree and every output file.
+
+**The result** is `{ outcome: 'pass' | 'fail' | 'conflict' | 'fixture_dirty' | 'setup_error', passed, failed }`: one fixed word and two integers (from the JSON reporter's `numPassedTests` and `numFailedTests`). No test name, message or path is returned. The raw output of every command goes to a file in the run's directory, capped at 64 MiB per command, and is deleted with the worktree. Log lines carry a step name and an exit code only.
+
+**Bounds.** One deadline for the whole run (40 minutes), cut into a timeout per command, a heartbeat from start to end, and a start-to-close backstop of 50 minutes. A failing suite is returned as `fail` and never retried. A failure before the suite starts (fetch, worktree, install, build, instance start) is thrown once and retried once; the second attempt returns `setup_error`. A timeout returns `setup_error` and is not retried. A report-less suite (its global setup refused, or it crashed) is `setup_error`, never a pass.
+
+**The commands run the PR's code** (install scripts, `build.rs`, the tests) as the worker's user, so they get an allowlist of environment variables (`PATH`, `HOME`, `CARGO_HOME` and a few more) and not the worker's: no token reaches them, and no `LOGSEQ_MCP_CONFIG`. Send a branch here only after `guardBranch` accepted it. LogSeq starts only through `scripts/logseq-instance.ts`, which sandboxes the app's profile; the suite refuses port 12315 and never reads `~/.logseq-mcp/config.json`.
+
+**Turning it on.** The worker starts a second worker in the same process, for the `host` queue, only when `HOST_TASK_QUEUE` is set (`host`, `1` or `true`; anything else stops the worker at startup). It registers only `runHostIntegration` with `maxConcurrentActivityTaskExecutions: 1`: **one run at a time**, because one LogSeq instance serves one suite. Run exactly one such worker. `HOST_REPO_DIR` (an absolute path) names the working copy the worktrees are made from; without it the worker uses the directory it started in. Without `HOST_TASK_QUEUE` the worker is exactly as before.
+
+```bash
+HOST_TASK_QUEUE=host HOST_REPO_DIR=$HOME/src/logseq-mcp-server npm run worker
+```
+
+**Recovering.**
+
+- *A stuck worktree.* The next run of the same PR removes it first. By hand: `git -C <repo> worktree remove --force <tmp>/logseq-mcp-orchestrator-host/pr-<n>/tree`, then `git -C <repo> worktree prune`, then delete `<tmp>/logseq-mcp-orchestrator-host/pr-<n>`.
+- *A LogSeq instance left running* (the worker was killed with SIGKILL, so no `finally` ran). From the worktree, if it still exists: `npx tsx scripts/logseq-instance.ts stop`. The next run of the same PR does this itself. Otherwise `npx tsx scripts/logseq-instance.ts status` in the worktree shows it, and a second LogSeq app on its own profile can be quit by hand. Your own LogSeq is never touched.
+- *`fixture_dirty`.* Something wrote to the committed fixture. Find out what before running again; never commit a change LogSeq made to it (`tests/integration/setup.md`).
+
 ## GitHub activities (#628)
 
 `src/activities/github.ts` holds the activities the workflow calls, built by `createGithubActivities(config)`: `listReadyIssues`, `readIssue`, `checkIssue`, `commentIssue`, `claimIssue`, `addToBoard`, `getBoardStatus`, `setStatus`, `openPr`, `postReview`, `getGateStatus` and, for the maintainer's decision (#631), `getPrState` (open, closed, merged: flags and the head SHA), `getPrChanges` (counts of golden, ceiling, ADR and business-rule files a PR changes, no paths) and `closeIssue` (closes an open issue of a trusted author as completed and reads it back). `checkIssue` is `readIssue` answered as numbers and flags (`{ number, open, trustedComments, droppedUntrustedComments }`), so the workflow can gate on an issue without the issue's text entering the stored history. `commentIssue({ issue, key, body })` posts one comment and a retry finds it by a hidden `<!-- orchestrator-comment:<key> -->` marker, looking only at comments of trusted authors (the same rule as `postReview`; it assumes this account's own comments count as trusted). Each is a thin wrapper over `gh` (`src/gh.ts`): one process per call, an argv array and never a shell string, a timeout (30 s) and an output cap, and an answer parsed at the boundary (`src/github-parse.ts`). A malformed answer fails with the path of the first mismatch, never a value and never a partial result.
@@ -308,6 +338,7 @@ Settings (all optional, read once in `src/gh-config.ts`): `ORCHESTRATOR_GH_PATH`
 | `src/activities/review.ts`, `src/review-types.ts` | The reviewer, fixer and posting activities, and the parsing, bounds and sanitising of what the sessions write |
 | `src/activities/branch.ts`, `src/branch-types.ts`, `src/diff-guard.ts` | `guardBranch` and `pushBranch` (the only push), their input parsing and bounds, and the pure diff guard |
 | `src/activities/implementer.ts` | `runImplementerSession`: reads the issue, builds the brief and runs the session in one activity, so issue text stays out of the history |
+| `src/activities/host-integration.ts`, `src/host-integration-policy.ts` | `runHostIntegration` (#647): the integration suite on a PR head, on the host only; its input, result, queue name and bounds (importable from workflow code) |
 | `src/start-server.ts`, `src/dev-server.ts` | The dev server launcher |
 | `src/activities/claude-session.ts` | `runClaudeSession`: one worktree, one branch, one `claude -p` session |
 | `src/claude-session-policy.ts` | Its timeouts, heartbeat and retry bounds (importable from workflow code) |
@@ -408,6 +439,8 @@ A checklist for the maintainer, by hand, in a scratch repository with a local ba
 6. **Kill the worker mid-session.** Start the dev server, the worker with `CLAUDE_BIN=<repo>/orchestrator/test/fake-claude.sh` and `FAKE_CLAUDE_MODE=slow FAKE_CLAUDE_SLOW_SECONDS=60`, and a fake `gh` (`ORCHESTRATOR_GH_PATH`) from the tests, then `npm run run-issue -- --issue <n>`. While the fake session sleeps, `kill -9` the worker, start it again, and watch: the run must stop at the `session` step with the reason `SessionInterrupted` and one comment, with one line in the fake's invocation log, never a second session.
 7. **The review sessions (#630).** In the same scratch repo, with a `claude/1` worktree and a detached worktree: start the reviewer with its flags (`reviewerAllowedTools` in `src/activities/review.ts` instead of the default allowed list) and check that `Write(/review-findings.json)` lets it write that one file and nothing else, that it cannot commit, run `npm`, or call `gh`, and what a denial looks like. Check that the fixer's `fixer-replies.json` does not show in `git status` (`.git/info/exclude` of the shared repo) and that it is not picked up by `git add <path>`. Check that a committed `review-findings.json`, or a link of that name, in the PR's tree does not survive into the session (the activity removes it after `git worktree add`), and whether `Write(/review-findings.json)` writes through a link.
 8. **A real run, watched, on a throwaway issue** in a throwaway repository, with a fine-grained token for that repository only: read the status comment and the denied calls it reports, then widen or narrow `CLAUDE_ALLOWED_TOOLS` from what you saw.
+
+9. **The host integration activity (#647), once by hand on a small PR.** On the Mac, with LogSeq installed: start `HOST_TASK_QUEUE=host npm run worker`, start `runHostIntegration` on the `host` queue for a small open PR (`temporal workflow start` of a one-activity workflow, or a throwaway client), and wait for the result. Check that it is `pass` with plausible counts, and that `git status` in your working copy is clean (and that the worktree under the temp directory and the instance are gone). Then kill the worker with `kill -9` while the suite runs, start it again, run the same PR once more, and check that the stale instance and worktree were cleared first.
 
 ### Recovering a stuck branch
 
