@@ -57,6 +57,33 @@ export function parseBranchInput(raw: unknown): BranchInput {
   return { repoDir, branch, headSha, base };
 }
 
+export interface DeleteBranchInput {
+  readonly repoDir: string;
+  readonly branch: string;
+}
+
+/** Parses the input of `deleteRemoteBranch` (#673): a directory and `claude/<number>`, nothing else. */
+export function parseDeleteBranchInput(raw: unknown): DeleteBranchInput {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new InvalidBranchInputError('input must be an object');
+  }
+  const repoDir: unknown = 'repoDir' in raw ? raw.repoDir : undefined;
+  const branch: unknown = 'branch' in raw ? raw.branch : undefined;
+  if (typeof repoDir !== 'string' || !repoDir.startsWith('/') || repoDir.length > MAX_PATH_CHARS || repoDir.includes('\0')) {
+    throw new InvalidBranchInputError('repoDir must be an absolute path');
+  }
+  if (!isPushableBranch(branch)) {
+    throw new InvalidBranchInputError('branch must be claude/<number>');
+  }
+  return { repoDir, branch };
+}
+
+export interface DeleteBranchResult {
+  readonly branch: string;
+  /** False when the branch was already gone: that is success too. */
+  readonly deleted: boolean;
+}
+
 export interface GuardResult {
   readonly branch: string;
   readonly headSha: string;
@@ -79,6 +106,8 @@ export const NON_RETRYABLE_BRANCH_FAILURES: string[] = [
   'MalformedGitOutput',
   'BranchMoved',
   'PushRejected',
+  'DeleteRejected',
+  'BranchMissing',
 ];
 
 /**
