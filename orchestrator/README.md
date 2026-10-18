@@ -313,7 +313,7 @@ To start again after a stop, delete the closed run and start it ("Recovering a s
 
 ## Remote sessions (#672)
 
-`runRemoteSession` (`src/activities/remote-session.ts`) runs one implementer, reviewer or fixer as a **remote Claude Code session**, started by firing a routine (`POST /v1/claude_code/routines/{id}/fire`, a bearer token per routine, one routine per role, `src/routine-fire.ts`). The brief built by `brief.ts` goes in the per-run `text` (at most 65,536 characters; a longer brief is refused, never cut) and is data to the session. **No workflow calls it yet** (later tasks of plan #643 do). It is registered only when the six `REMOTE_ROUTINE_*` variables are set, so a worker without them is exactly as before.
+`runRemoteSession` (`src/activities/remote-session.ts`) runs one implementer, reviewer or fixer as a **remote Claude Code session**, started by firing a routine (`POST /v1/claude_code/routines/{id}/fire`, a bearer token per routine, one routine per role, `src/routine-fire.ts`). The brief built by `brief.ts` goes in the per-run `text` (at most 65,536 characters; a longer brief is refused, never cut) and is data to the session. The review loop calls it for the reviewer when a run has `executor: 'remote'` ("The remote reviewer" below); nothing else calls it yet (later tasks of plan #643 do). It is registered only when the six `REMOTE_ROUTINE_*` variables are set, so a worker without them is exactly as before.
 
 A remote session cannot be stopped or messaged from the workflow, and the fire call is not idempotent (each success makes a session). So the activity, in order:
 
@@ -339,6 +339,45 @@ A remote session cannot be stopped or messaged from the workflow, and the fire c
 - *`MalformedMarker`.* Something other than this code wrote the key. Look at it with `git config --local --get-regexp '^orchestratorremote\.'` and unset it.
 
 **Not verified.** No real fire has been made: the first acceptance item of #672 is a live no-op fire by the maintainer once the tokens exist, and the result is recorded on the issue. Until then the activity is tested against a fake fire client and fake GitHub reads only.
+
+## The remote reviewer (#674)
+
+With `executor: 'remote'` the review step of the loop (`src/workflows/review-loop.ts`) runs the reviewer as a **remote session** through `runRemoteSession` (role `reviewer`, used as it is) and posts the review itself. A remote session cannot hand text to the worker, and a review it posted itself would skip the sanitiser, so it writes its findings as JSON into **one keyed comment**, and the worker parses, cleans and posts them (plan #643, open question 3, option b). The local path (`executor: 'local'`, the default) is untouched. The fixer and the implementer stay unavailable for `remote` (`RemoteExecutorUnavailable`), so a whole `issueWorkflow` run with `remote` still stops at its first session step; this path is exercised through the review loop alone until a remote implementer exists.
+
+**Per round, in order** (`runRemoteReviewerSession`, `postRemoteSessionReview`, `minimizeFindingsComment` in `src/activities/review.ts`):
+
+1. The activity builds the brief (`buildRemoteReviewerBrief`, `src/brief.ts`: the issue and threads as data, the marker, the one-comment rule; a brief over 65,536 characters is `BriefTooLarge`) and calls `runRemoteSession` with the PR, the branch and the head. A launch that failed or a claim that refuses (`open_pr`, `branch_exists`, `branch_moved`) stops the run as `RemoteSessionFailed` with the fixed word in the message. `already_reviewed` is not a stop: the comment is what counts.
+2. It reads the PR's comments and `parseFindingsComment` (`src/findings-comment.ts`) picks the findings. **The findings comment** starts with this line alone, naming the PR, the exact head and the round, then holds exactly one fenced `json` block of the shape the local reviewer's file has (`summary`, `findings` of `path`, `line`, `body`, `acceptedThreadIds`):
+
+   ```
+   <!-- orchestrator-findings pr=<pr> head=<40 hex> round=<n> -->
+
+   ```json
+   {"summary": "...", "findings": [{"path": "a.ts", "line": 12, "body": "..."}], "acceptedThreadIds": []}
+   ```
+   ```
+
+   A reviewer that finds nothing writes `"findings": []`, which is accepted.
+3. The parsed findings are staged (a file in the repo's git directory, `orchestrator-remote-review-<pr>-r<round>-<head12>.json`) and the round's marker `orchestrator.remote-reviewer-<pr>-r<round>-<head12>` is set to `success`. Only counts, thread ids and the comment's node id reach the workflow history.
+4. `postRemoteSessionReview` posts the staged findings through the same `postFindings` the local path uses: placed against the diff of the head, cleaned by `sanitiseText`, one `COMMENT` review bound to the reviewed head, keyed so a retry posts once.
+5. `minimizeFindingsComment` hides the raw comment (`minimizeComment` with the classifier `OUTDATED`, idempotent). It runs after the review is posted, with the GitHub activity timeouts and attempts. If it fails the run goes on: it is counted in the result (`rawCommentsNotHidden`, present only for `remote`) and said once on the issue (key `findings-not-hidden-<pr>-r<round>`, identifiers only).
+
+**Trust.** The comment is untrusted input. Only a comment whose author association is `OWNER`, `MEMBER` or `COLLABORATOR` is read: the listing leaves an other author's body empty, and the parser ignores such a candidate again. Marker text from anyone else is data, including a copy of the marker in a longer comment or a marker for another head or round.
+
+**Stop reasons** (one comment on the issue, keyed by step and reason, a Failed run, nothing posted; counts only, never the comment's text):
+
+| Step and reason | Meaning | What to do |
+|---|---|---|
+| `review_session` `MalformedFindings` | No trusted comment carries the marker, more than one does, the comment has no or more than one `json` block, or the JSON is not in the asked shape | Look at the PR's comments. The review loop cannot be resumed (see "The review loop"): finish the PR by hand |
+| `review_session` `FindingsTooLarge` | The comment is over 66,000 characters, or the findings are over a bound (30 findings, 3000 characters per body, 4000 for the summary, 64,000 bytes of JSON) | The same |
+| `review_session` `RemoteSessionFailed` | `runRemoteSession` launched nothing: a claim (`open_pr`, `branch_exists`, `branch_moved`) or a launch failure (`rate_limited`, `server_error`, `network`) | See "Remote sessions" for each; then delete the run and start again |
+| `review_session` `BriefTooLarge` | The brief does not fit a routine's text | Shorten the issue or the threads |
+| `review_session` `RemoteExecutorUnavailable` | The worker has no remote session activity (the six `REMOTE_ROUTINE_*` variables are unset) | Set them, or run with `--executor local` |
+| `review_post` `DiffUnreadable` | The head is not in the working copy or the diff cannot be read, and there are findings to place | Fetch the branch and look |
+
+**Known limit.** `runRemoteSession` ends a reviewer's wait on a trusted review with a body on the head. This reviewer posts a comment and no review, so the wait normally runs to its cap (one hour) and returns `timed_out`; the comment is read after any outcome that launched. The result is correct but slow. Ending the wait on the findings comment needs a change to `runRemoteSession`, which this task does not make: the maintainer decides it.
+
+**Not verified.** No real remote session, no real routine and no real `minimizeComment` call have run: the activities are tested against a fake `gh`, a fake `runRemoteSession` and a Temporal dev server with fake activities.
 
 ## GitHub activities (#628)
 
@@ -415,6 +454,7 @@ Settings (all optional, read once in `src/gh-config.ts`): `ORCHESTRATOR_GH_PATH`
 | `src/workflows/executor.ts` | `onExecutor` (#671): the one place the workflow chooses `local` or `remote` for a session |
 | `src/workflows/host-integration.ts`, `src/integration-policy.ts` | The host integration check at the gate (#648): once per head, run, record, stop; the rule for when it is needed and the commit status (#646, importable from workflow code) |
 | `src/activities/remote-session.ts`, `src/remote-session-policy.ts`, `src/routine-fire.ts` | `runRemoteSession` (#672): claim, marker, fire and bounded wait for a remote session; its input, result and bounds (importable from workflow code); the routine fire client |
+| `src/findings-comment.ts` | `parseFindingsComment` (#674): the remote reviewer's keyed findings comment turned into the local reviewer's typed findings |
 | `src/start-server.ts`, `src/dev-server.ts` | The dev server launcher |
 | `src/activities/claude-session.ts` | `runClaudeSession`: one worktree, one branch, one `claude -p` session |
 | `src/claude-session-policy.ts` | Its timeouts, heartbeat and retry bounds (importable from workflow code) |
