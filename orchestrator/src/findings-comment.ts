@@ -42,13 +42,28 @@ function carriesMarker(body: string, marker: string): boolean {
   return body.trimStart().split('\n', 1)[0]?.trim() === marker;
 }
 
+/** The comments of a trusted author that carry `marker` on their first line. The one rule for "this comment counts". */
+function keyedComments(candidates: readonly FindingsCandidate[], marker: string): FindingsCandidate[] {
+  return candidates.filter((candidate) => candidate.trusted && carriesMarker(candidate.body, marker));
+}
+
+/** True when at least one trusted comment carries `marker`. The remote wait ends on this; the parse decides what it holds. */
+export function hasFindingsComment(candidates: readonly FindingsCandidate[], marker: string): boolean {
+  return keyedComments(candidates, marker).length > 0;
+}
+
+/** True when `value` is a marker `findingsMarker` could have made. */
+export function isFindingsMarker(value: string): boolean {
+  return /^<!-- orchestrator-findings pr=[1-9]\d{0,9} head=[0-9a-f]{40} round=[1-9]\d{0,5} -->$/.test(value);
+}
+
 /**
  * The findings of the one trusted comment that carries `marker`. Throws `MalformedFindingsError` for no such comment,
  * more than one, no or several JSON blocks, or JSON that is not in the asked shape, and `FindingsTooLargeError` for a
  * comment or a file over its bound. A comment by an author who is not trusted is never looked at, even with the marker.
  */
 export function parseFindingsComment(candidates: readonly FindingsCandidate[], marker: string): ParsedFindings {
-  const ours = candidates.filter((candidate) => candidate.trusted && carriesMarker(candidate.body, marker));
+  const ours = keyedComments(candidates, marker);
   const [only, ...rest] = ours;
   if (only === undefined) {
     throw new MalformedFindingsError(`no comment by a trusted author carries the findings marker (${candidates.length} comments read)`);
