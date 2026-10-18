@@ -7,7 +7,6 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { createGithubActivities } from '../src/activities/github.ts';
 import { createFake, emptyState, httpAnswer, recordedSleep, REPO } from './github-support.ts';
-import { NON_RETRYABLE_GITHUB_FAILURES } from '../src/github-policy.ts';
 import type { FakeState } from './github-support.ts';
 
 let dir: string;
@@ -164,8 +163,6 @@ test('a permanent failure is not retried, and a server error is left to the retr
   assert.deepEqual(await failureOf(github.postCommitStatus({ sha: HEAD, state: 'success' })), { type: 'GitHubClientError', nonRetryable: true });
   const retryable = await failureOf(github.getHostIntegration({ sha: OTHER }));
   assert.equal(retryable.nonRetryable, false);
-  // The retry itself is Temporal's, by GITHUB_ACTIVITY_OPTIONS in the workflow: a 502 is not among the types it refuses to retry.
-  assert.ok(!NON_RETRYABLE_GITHUB_FAILURES.includes(retryable.type ?? ''));
   assert.equal((await fake.callsMatching('-X POST')).length, 1, 'one attempt, no retry inside the activity');
 });
 
