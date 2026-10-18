@@ -5,6 +5,8 @@
 //
 // This file imports nothing from Node, so workflow code may import its types and constants.
 
+import { parseHostFailureSummary } from './host-integration-policy.ts';
+import type { HostFailureSummary } from './host-integration-policy.ts';
 import type { ReviewThread } from './types.ts';
 
 /** The files the sessions write, relative to their working directory. */
@@ -37,6 +39,8 @@ export interface ReviewStepInput {
   readonly round: number;
   /** Threads the reviewer already accepted a reply on. The fixer leaves them alone. */
   readonly acceptedThreadIds: readonly string[];
+  /** A host integration failure on a fixture run (#676): the remote fixer's brief carries it as data. Only the fixer round reads it. */
+  readonly hostFailure?: HostFailureSummary;
 }
 
 export class InvalidReviewInputError extends Error {
@@ -415,6 +419,12 @@ export function parseReviewStepInput(raw: unknown): ReviewStepInput {
     }
     return id;
   });
+  let hostFailure: HostFailureSummary | undefined;
+  try {
+    hostFailure = parseHostFailureSummary(from.get('hostFailure'));
+  } catch {
+    throw new InvalidReviewInputError('hostFailure has the wrong shape');
+  }
   return {
     pr: wholeNumber(from.get('pr'), 'pr', 1, 999_999_999),
     issue: wholeNumber(from.get('issue'), 'issue', 1, 999_999_999),
@@ -424,5 +434,6 @@ export function parseReviewStepInput(raw: unknown): ReviewStepInput {
     headSha,
     round: wholeNumber(from.get('round'), 'round', 0, 100),
     acceptedThreadIds,
+    ...(hostFailure === undefined ? {} : { hostFailure }),
   };
 }
