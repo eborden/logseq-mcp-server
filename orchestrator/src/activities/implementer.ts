@@ -10,6 +10,7 @@ import { ApplicationFailure, Context } from '@temporalio/activity';
 import { HEARTBEAT_INTERVAL_MS } from '../claude-session-policy.ts';
 import { BriefTooLargeError, buildBrief } from '../brief.ts';
 import { InvalidIssueInputError, issueBranch, issueWorkflowId, parseIssueWorkflowInput } from '../issue-types.ts';
+import type { RemoteSessionInput, RemoteSessionResult } from '../remote-session-policy.ts';
 import type { IssueView, SessionInput, SessionResult } from '../types.ts';
 
 export interface ImplementerDeps {
@@ -66,3 +67,57 @@ export function createImplementerActivities(deps: ImplementerDeps) {
 }
 
 export type ImplementerActivities = ReturnType<typeof createImplementerActivities>;
+
+export interface RemoteImplementerDeps {
+  readonly readIssue: (issueNumber: number) => Promise<IssueView>;
+  /** `runRemoteSession` (#672). */
+  readonly runRemoteSession: (input: RemoteSessionInput) => Promise<RemoteSessionResult>;
+  readonly repo: string;
+}
+
+/**
+ * The remote implementer (#673): the run input plus the attempt number, answered with a `RemoteSessionResult`. It exists for the
+ * same reason as `runImplementerSession`: the brief holds the issue body and its comments, so it is built here, inside the
+ * activity, and never passes through the workflow history. The session itself is `runRemoteSession` with role `implementer`.
+ */
+export function createRemoteImplementerActivities(deps: RemoteImplementerDeps) {
+  async function runRemoteImplementerSession(raw: unknown): Promise<RemoteSessionResult> {
+    let input;
+    try {
+      input = parseIssueWorkflowInput(raw);
+    } catch (error) {
+      if (error instanceof InvalidIssueInputError) {
+        throw ApplicationFailure.nonRetryable(error.message, 'InvalidInput');
+      }
+      throw error;
+    }
+    // Passed as it came: runRemoteSession parses the attempt (a positive whole number) with the rest of its input.
+    const attempt: unknown = typeof raw === 'object' && raw !== null && 'attempt' in raw ? raw.attempt : undefined;
+    const issue = await deps.readIssue(input.issueNumber);
+    if (issue.state !== 'open') {
+      throw ApplicationFailure.nonRetryable(`issue #${input.issueNumber} is closed, so no session is started`, 'InvalidState');
+    }
+    const branch = issueBranch(input.issueNumber);
+    let brief: string;
+    try {
+      brief = buildBrief({ issue, repo: deps.repo, branch, base: input.base, workflowId: issueWorkflowId(input.issueNumber) });
+    } catch (error) {
+      if (error instanceof BriefTooLargeError) {
+        throw ApplicationFailure.nonRetryable(error.message, 'BriefTooLarge');
+      }
+      throw error;
+    }
+    return await deps.runRemoteSession({
+      role: 'implementer',
+      issue: input.issueNumber,
+      branch,
+      base: input.base,
+      brief,
+      ...(attempt === undefined ? {} : { attempt: attempt as number }),
+    });
+  }
+
+  return { runRemoteImplementerSession };
+}
+
+export type RemoteImplementerActivities = ReturnType<typeof createRemoteImplementerActivities>;

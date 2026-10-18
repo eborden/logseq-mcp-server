@@ -14,7 +14,7 @@ import { createBranchActivities } from './activities/branch.ts';
 import { createClaudeSessionActivities } from './activities/claude-session.ts';
 import { createGithubActivities, createRemoteGithubReads } from './activities/github.ts';
 import * as hello from './activities/hello.ts';
-import { createImplementerActivities } from './activities/implementer.ts';
+import { createImplementerActivities, createRemoteImplementerActivities } from './activities/implementer.ts';
 import { createReviewActivities } from './activities/review.ts';
 import { createRemoteSessionActivities } from './activities/remote-session.ts';
 import type { RemoteSessionActivities } from './activities/remote-session.ts';
