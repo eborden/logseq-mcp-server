@@ -175,3 +175,20 @@ test('the statuses written never name another context or a label, merge or appro
   assert.equal(writes.length, 1);
   assert.ok(!/approv|merge|label/i.test(writes[0]?.stdin ?? ''));
 });
+
+test('getHostIntegrationNeed answers one boolean from the changed files, and never a path (#648)', async () => {
+  const { github } = await setup((state) => {
+    state.prFiles = {
+      '10': ['docs/atlas.md', 'orchestrator/src/atlas.ts'],
+      '11': ['docs/atlas.md', 'src/atlas.rs'],
+      '12': [{ filename: 'docs/bob.md', previous_filename: 'tests/fixtures/graph/pages/bob.md' }],
+      '13': Array.from({ length: 1001 }, (_, index) => `docs/atlas-${index}.md`),
+    };
+  });
+
+  assert.deepEqual(await github.getHostIntegrationNeed(10), { needed: false }, 'the orchestrator is not the server');
+  assert.deepEqual(await github.getHostIntegrationNeed(11), { needed: true });
+  assert.deepEqual(await github.getHostIntegrationNeed(12), { needed: true }, 'a rename counts by the name it left');
+  assert.deepEqual(await github.getHostIntegrationNeed(13), { needed: true }, 'an incomplete read is a yes');
+  assert.deepEqual(await failureOf(github.getHostIntegrationNeed(0)), { type: 'InvalidInput', nonRetryable: true });
+});

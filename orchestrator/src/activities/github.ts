@@ -51,6 +51,7 @@ import {
   HOST_STATUS_STATES,
   InvalidHostStatusError,
   buildHostDescription,
+  needsHostIntegration,
   parseHostDescription,
   parseHostSha,
   parseHostStatusInput,
@@ -58,7 +59,7 @@ import {
 import type { HostIntegrationState } from '../integration-policy.ts';
 import { UNCLASSIFIED_CHANGES, classifyChangedPaths } from '../approval-types.ts';
 import type { SensitiveChanges } from '../approval-types.ts';
-import type { HostIntegrationResult, PostCommitStatusInput, PostCommitStatusResult } from '../github-policy.ts';
+import type { HostIntegrationNeed, HostIntegrationResult, PostCommitStatusInput, PostCommitStatusResult } from '../github-policy.ts';
 import type {
   AddToBoardResult,
   BoardItemRef,
@@ -749,6 +750,24 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
   }
 
   /**
+   * Whether the PR's change needs the host integration check (#648): the pure rule of integration-policy.ts over the
+   * bounded changed-files read. Paths stay in this activity; the answer is one boolean. A PR with more files than one
+   * call reads is "needed", as the rule says for an incomplete read.
+   */
+  async function getHostIntegrationNeed(raw: unknown): Promise<HostIntegrationNeed> {
+    const number = parseIssueNumber(raw, 'pr');
+    try {
+      const { items } = await listAll(`${repoRoute}/pulls/${number}/files`, 'pull request files', parsePrFilePaths);
+      return { needed: needsHostIntegration(items.flat(), true) };
+    } catch (error) {
+      if (error instanceof GhError && error.kind === 'output_too_large') {
+        return { needed: needsHostIntegration([], false) };
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Closes an issue that is still open, with the reason `completed`, and reads it back (#631). The issue is the one
    * a merged PR was meant to close: a PR merged into a branch other than the default does not close it. It reads
    * first and writes only an issue that is open, so a repeat does nothing. A trusted-author read only.
@@ -814,6 +833,7 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     getGateStatus,
     getPrState,
     getPrChanges,
+    getHostIntegrationNeed,
     closeIssue,
     listReviewThreads,
     replyToThread,
@@ -852,6 +872,7 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     getGateStatus: activity((ops, pr: number) => ops.getGateStatus(pr)),
     getPrState: activity((ops, pr: number) => ops.getPrState(pr)),
     getPrChanges: activity((ops, pr: number) => ops.getPrChanges(pr)),
+    getHostIntegrationNeed: activity((ops, pr: number) => ops.getHostIntegrationNeed(pr)),
     closeIssue: activity((ops, issue: number) => ops.closeIssue(issue)),
     listReviewThreads: activity((ops, pr: number) => ops.listReviewThreads(pr)),
     replyToThread: activity((ops, input: ReplyToThreadInput) => ops.replyToThread(input)),
