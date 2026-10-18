@@ -400,8 +400,9 @@ export function createReviewActivities(deps: ReviewDeps) {
    * round returns its staged result, and `runRemoteSession` itself never fires a second session for the same key.
    *
    * The wait of `runRemoteSession` for a reviewer ends on a review on the head, which this reviewer never posts (it
-   * posts a comment), so the wait normally runs to its cap and returns `timed_out`. The comment is what counts: it is
-   * read after any outcome but a launch that failed.
+   * posts a comment), or on the keyed findings comment, which this step names with `findingsMarker` (#687), so the wait
+   * ends within about one poll of the comment. The comment is what counts: it is read after any outcome but a launch
+   * that failed.
    */
   async function runRemoteReviewerSession(raw: unknown): Promise<RemoteReviewerSessionResult> {
     const input = parseInput(raw);
@@ -432,7 +433,7 @@ export function createReviewActivities(deps: ReviewDeps) {
       if (brief.length > REMOTE_TEXT_MAX_CHARS) {
         throw failure(`the remote brief is ${brief.length} characters, more than the ${REMOTE_TEXT_MAX_CHARS} a routine takes`, 'BriefTooLarge');
       }
-      const session = await remote.runRemoteSession({ role: 'reviewer', issue: input.issue, pr: input.pr, branch: issueBranch(input.issue), base: input.base, headSha: input.headSha, brief });
+      const session = await remote.runRemoteSession({ role: 'reviewer', issue: input.issue, pr: input.pr, branch: issueBranch(input.issue), base: input.base, headSha: input.headSha, brief, findingsMarker: marker });
       if (session.outcome === 'failed' && session.claim !== 'already_reviewed') {
         // A fixed word only: the claim or the launch failure the session activity reported.
         throw failure(`the remote reviewer did not run (${session.claim ?? session.failure ?? 'failed'})`, 'RemoteSessionFailed');
