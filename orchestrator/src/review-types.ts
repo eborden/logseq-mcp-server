@@ -113,6 +113,11 @@ export interface FixerSessionResult {
   readonly replies: number;
 }
 
+/** What the workflow sees of a remote fixer round (#675): the tip the branch is at, whether it moved, a count and the node id of the raw comment to hide. */
+export interface RemoteFixerSessionResult extends FixerSessionResult {
+  readonly commentNodeId: string;
+}
+
 export interface PostedRepliesResult {
   readonly posted: number;
   /** Replies that were already there, or whose thread is gone. */

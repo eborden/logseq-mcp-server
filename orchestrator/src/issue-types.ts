@@ -100,6 +100,23 @@ export const REMOTE_LAUNCH_FAILED = 'RemoteLaunchFailed';
 export const REMOTE_SESSION_TIMED_OUT = 'RemoteSessionTimedOut';
 export const REMOTE_NO_HEAD = 'RemoteSessionNoHead';
 export const REMOTE_BRANCH_MOVED = 'BranchMoved';
+/** The stop reason of a remote fixer whose push the guard refuses (#675). The push cannot be undone by the worker: the branch is left for a person. */
+export const FIXER_PUSH_REJECTED = 'FixerPushRejected';
+
+/**
+ * The detail of the stop comment for a fixer push the guard refused (#675): the reason class (a fixed word) and the counts line
+ * the guard gave, never a path. The worker cannot delete or reset a PR's branch, so the text says the branch was left as it is.
+ */
+export function fixerPushRejectedDetail(branch: string, pr: number, round: number, refusal: string, counts: string | undefined): string {
+  return [
+    `The remote fixer's push to \`${branch}\` (PR #${pr}, fix round ${round + 1}) was refused by the guard (${refusal}), after it was already on the PR. No review was posted for that commit and no reply was posted.`,
+    counts ?? '',
+    `The branch was left as it is. A person has to look at the new commits and reset \`${branch}\` to the last reviewed head.`,
+  ]
+    .filter((line) => line !== '')
+    .join(' ');
+}
+
 /** The largest `attempt` a run may start at: a marker key per attempt is a git config entry, so the number stays small. */
 export const MAX_ATTEMPT = 99;
 

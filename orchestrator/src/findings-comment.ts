@@ -8,8 +8,8 @@
 // a partial result. The JSON itself goes through `parseReviewerOutput`, the parser the local path uses, which bounds the
 // size, checks the shape and cleans the text. No message here quotes comment text.
 
-import { MAX_OUTPUT_FILE_BYTES, FindingsTooLargeError, MalformedFindingsError, parseReviewerOutput } from './review-types.ts';
-import type { ReviewerOutput } from './review-types.ts';
+import { MAX_OUTPUT_FILE_BYTES, FindingsTooLargeError, MalformedFindingsError, parseFixerOutput, parseReviewerOutput } from './review-types.ts';
+import type { FixerOutput, ReviewerOutput } from './review-types.ts';
 
 /** What the listing keeps of one PR comment. `body` is empty when the author is not trusted. */
 export interface FindingsCandidate {
@@ -27,9 +27,21 @@ export interface ParsedFindings {
   readonly commentNodeId: string;
 }
 
+/** The replies of a remote fixer (#675), read from its one keyed comment the way the reviewer's findings are. */
+export interface ParsedFixerReplies {
+  readonly output: FixerOutput;
+  readonly commentId: number;
+  readonly commentNodeId: string;
+}
+
 /** The key the reviewer's comment starts with. It names the PR, the exact head and the round, so an old comment never matches a new head. */
 export function findingsMarker(pr: number, headSha: string, round: number): string {
   return `<!-- orchestrator-findings pr=${pr} head=${headSha} round=${round} -->`;
+}
+
+/** The key the fixer's replies comment starts with. It names the PR, the head the round started from and the round. */
+export function fixerRepliesMarker(pr: number, headSha: string, round: number): string {
+  return `<!-- orchestrator-fixer-replies pr=${pr} head=${headSha} round=${round} -->`;
 }
 
 /** A body longer than this cannot hold a findings file within its own byte bound, so it is refused before any scan. */
@@ -57,30 +69,42 @@ export function isFindingsMarker(value: string): boolean {
   return /^<!-- orchestrator-findings pr=[1-9]\d{0,9} head=[0-9a-f]{40} round=[1-9]\d{0,5} -->$/.test(value);
 }
 
-/**
- * The findings of the one trusted comment that carries `marker`. Throws `MalformedFindingsError` for no such comment,
- * more than one, no or several JSON blocks, or JSON that is not in the asked shape, and `FindingsTooLargeError` for a
- * comment or a file over its bound. A comment by an author who is not trusted is never looked at, even with the marker.
- */
-export function parseFindingsComment(candidates: readonly FindingsCandidate[], marker: string): ParsedFindings {
+/** The JSON text of the one trusted comment that carries `marker`, with the ids of that comment. Refusals are as `parseFindingsComment`'s. */
+function keyedJson(candidates: readonly FindingsCandidate[], marker: string, what: string): { readonly json: string; readonly id: number; readonly nodeId: string } {
   const ours = keyedComments(candidates, marker);
   const [only, ...rest] = ours;
   if (only === undefined) {
-    throw new MalformedFindingsError(`no comment by a trusted author carries the findings marker (${candidates.length} comments read)`);
+    throw new MalformedFindingsError(`no comment by a trusted author carries the ${what} marker (${candidates.length} comments read)`);
   }
   if (rest.length > 0) {
-    throw new MalformedFindingsError(`${ours.length} comments by trusted authors carry the findings marker, and exactly one is expected`);
+    throw new MalformedFindingsError(`${ours.length} comments by trusted authors carry the ${what} marker, and exactly one is expected`);
   }
   if (only.body.length > MAX_COMMENT_CHARS) {
-    throw new FindingsTooLargeError(`the findings comment is longer than ${MAX_COMMENT_CHARS} characters`);
+    throw new FindingsTooLargeError(`the ${what} comment is longer than ${MAX_COMMENT_CHARS} characters`);
   }
   const blocks = [...only.body.matchAll(JSON_FENCE)];
   const [block, ...more] = blocks;
   if (block?.[1] === undefined) {
-    throw new MalformedFindingsError('the findings comment holds no fenced json block');
+    throw new MalformedFindingsError(`the ${what} comment holds no fenced json block`);
   }
   if (more.length > 0) {
-    throw new MalformedFindingsError(`the findings comment holds ${blocks.length} fenced json blocks, and exactly one is expected`);
+    throw new MalformedFindingsError(`the ${what} comment holds ${blocks.length} fenced json blocks, and exactly one is expected`);
   }
-  return { output: parseReviewerOutput(block[1]), commentId: only.id, commentNodeId: only.nodeId };
+  return { json: block[1], id: only.id, nodeId: only.nodeId };
+}
+
+/**
+ * The findings of the one trusted comment that carries `marker`. Throws `MalformedFindingsError` for no such comment,
+ * more than one, no or several JSON blocks, or JSON that is not in the asked shape, and `FindingsTooLargeError` for a
+ * comment or a file over a bound. A comment by an author who is not trusted is never looked at, even with the marker.
+ */
+export function parseFindingsComment(candidates: readonly FindingsCandidate[], marker: string): ParsedFindings {
+  const found = keyedJson(candidates, marker, 'findings');
+  return { output: parseReviewerOutput(found.json), commentId: found.id, commentNodeId: found.nodeId };
+}
+
+/** The replies of the one trusted comment that carries `marker`, through `parseFixerOutput`, with the same refusals as the findings. */
+export function parseFixerRepliesComment(candidates: readonly FindingsCandidate[], marker: string): ParsedFixerReplies {
+  const found = keyedJson(candidates, marker, 'fixer replies');
+  return { output: parseFixerOutput(found.json), commentId: found.id, commentNodeId: found.nodeId };
 }
