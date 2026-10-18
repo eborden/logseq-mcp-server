@@ -60,6 +60,11 @@ async function main(): Promise<void> {
           taskQueue: hostConfig.taskQueue,
           activities: createHostIntegrationActivities({ repoDir: hostConfig.repoDir ?? process.cwd() }),
           maxConcurrentActivityTaskExecutions: 1,
+        }).catch(async (error: unknown) => {
+          // The default worker exists but is not running yet: do not leave it, or the connection, behind.
+          worker.shutdown();
+          await connection.close();
+          throw error;
         });
 
   const shutdown = (): void => {
