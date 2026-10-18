@@ -27,6 +27,7 @@ import type { GhConfig } from '../gh-config.ts';
 import {
   parseBlocker,
   parseBoardItems,
+  parseCombinedStatus,
   parseComment,
   parseCreatedCommentId,
   parseCreatedPr,
@@ -45,8 +46,19 @@ import {
   parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
+import {
+  HOST_INTEGRATION_CONTEXT,
+  HOST_STATUS_STATES,
+  InvalidHostStatusError,
+  buildHostDescription,
+  parseHostDescription,
+  parseHostSha,
+  parseHostStatusInput,
+} from '../integration-policy.ts';
+import type { HostIntegrationState } from '../integration-policy.ts';
 import { UNCLASSIFIED_CHANGES, classifyChangedPaths } from '../approval-types.ts';
 import type { SensitiveChanges } from '../approval-types.ts';
+import type { HostIntegrationResult, PostCommitStatusInput, PostCommitStatusResult } from '../github-policy.ts';
 import type {
   AddToBoardResult,
   BoardItemRef,
@@ -209,6 +221,18 @@ const COUNTED_REVIEW_STATES: ReadonlySet<string> = new Set(['COMMENTED', 'APPROV
 const BASE = /^[A-Za-z0-9._/-]{1,100}$/;
 const SHA = /^[0-9a-f]{40}$/;
 const KEY = /^[A-Za-z0-9._-]{1,100}$/;
+
+/** Runs a policy parser (src/integration-policy.ts) and turns its refusal into a non-retryable `InvalidInput`. */
+function parsedHostInput<T>(parse: () => T): T {
+  try {
+    return parse();
+  } catch (error) {
+    if (error instanceof InvalidHostStatusError) {
+      return refuse(error.message);
+    }
+    throw error;
+  }
+}
 
 function parseOpenPrInput(raw: unknown): OpenPrInput {
   const input = inputObject(raw, 'openPr input');
@@ -656,6 +680,48 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
   }
 
   /**
+   * The latest `host/integration` status of a commit (#646): its state, and its counts when the description has the
+   * counts shape. The combined status lists the latest status of each context, so older ones are never read, and any
+   * other context is ignored. The description is parsed into integers and never returned as text.
+   * A status is written by an account with write access to the repository, so it is not a stranger's text.
+   */
+  async function readHostIntegration(sha: string): Promise<HostIntegrationResult> {
+    const entry = parseCombinedStatus(await gh.api(`${repoRoute}/commits/${sha}/status?per_page=${PAGE_SIZE}`), sha, HOST_INTEGRATION_CONTEXT);
+    const state: HostIntegrationState | undefined = HOST_STATUS_STATES.find((candidate) => candidate === entry?.state);
+    if (entry === undefined || state === undefined) {
+      // No status, or a state this code does not know (GitHub has no others today): not a pass.
+      return { state: 'none' };
+    }
+    const counts = parseHostDescription(entry.description);
+    return counts === undefined ? { state } : { state, counts };
+  }
+
+  async function getHostIntegration(raw: unknown): Promise<HostIntegrationResult> {
+    const input = inputObject(raw, 'getHostIntegration input');
+    return readHostIntegration(parsedHostInput(() => parseHostSha(input.get('sha'))));
+  }
+
+  /**
+   * Records the host integration result on a commit (#646): one POST of the fixed context, a state and a description
+   * of integers. It reads the latest status of the context first and posts nothing when it already shows this state and
+   * these counts, so a repeat leaves one result (foundations 4.5). It writes no other context, and it never says
+   * anything but the four states of GitHub's status API.
+   */
+  async function postCommitStatus(raw: unknown): Promise<PostCommitStatusResult> {
+    const input: PostCommitStatusInput = parsedHostInput(() => parseHostStatusInput(raw));
+    const description = parsedHostInput(() => buildHostDescription(input.counts));
+    const current = parseCombinedStatus(await gh.api(`${repoRoute}/commits/${input.sha}/status?per_page=${PAGE_SIZE}`), input.sha, HOST_INTEGRATION_CONTEXT);
+    if (current !== undefined && current.state === input.state && current.description === description) {
+      return { posted: false };
+    }
+    await gh.api(`${repoRoute}/statuses/${input.sha}`, {
+      method: 'POST',
+      body: { state: input.state, context: HOST_INTEGRATION_CONTEXT, description },
+    });
+    return { posted: true };
+  }
+
+  /**
    * Whether a PR is open, closed or merged (#631): flags and the head SHA. The workflow reads it to observe the merge,
    * which is the maintainer's: nothing here merges.
    */
@@ -751,6 +817,8 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     closeIssue,
     listReviewThreads,
     replyToThread,
+    getHostIntegration,
+    postCommitStatus,
   };
 }
 
@@ -787,6 +855,8 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     closeIssue: activity((ops, issue: number) => ops.closeIssue(issue)),
     listReviewThreads: activity((ops, pr: number) => ops.listReviewThreads(pr)),
     replyToThread: activity((ops, input: ReplyToThreadInput) => ops.replyToThread(input)),
+    getHostIntegration: activity((ops, input: { sha: string }) => ops.getHostIntegration(input)),
+    postCommitStatus: activity((ops, input: PostCommitStatusInput) => ops.postCommitStatus(input)),
   };
 }
 

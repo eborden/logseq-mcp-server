@@ -488,3 +488,35 @@ export function parseIssueClosed(raw: unknown, expectedNumber: number): boolean 
   const head = parseIssueHead(raw, expectedNumber);
   return head.trusted ? head.issue.state === 'closed' : undefined;
 }
+
+/** What one context shows on a commit: its state and the description it was posted with. */
+export interface CommitStatusEntry {
+  readonly state: string;
+  readonly description: string;
+}
+
+/**
+ * The combined status of a commit (`GET /repos/{repo}/commits/{sha}/status`), reduced to the entry of one context:
+ * GitHub lists the latest status of each context there. `undefined` when the context has none. Only the context, state
+ * and description of each entry are read. A list longer than one page is `output_too_large`, never a silent cut.
+ */
+export function parseCombinedStatus(raw: unknown, sha: string, context: string): CommitStatusEntry | undefined {
+  const what = 'combined commit status';
+  const combined = obj(raw, what, '$');
+  if (str(combined, 'sha', what, '$') !== sha) {
+    return mismatch(what, '$.sha');
+  }
+  const entries = list(combined.get('statuses'), what, '$.statuses');
+  if (int(combined, 'total_count', what, '$') > entries.length) {
+    throw new GhError(`${what}: more statuses than one call reads`, 'output_too_large');
+  }
+  let found: CommitStatusEntry | undefined;
+  entries.forEach((element, index) => {
+    const path = `$.statuses[${index}]`;
+    const entry = obj(element, what, path);
+    if (str(entry, 'context', what, path) === context) {
+      found = { state: str(entry, 'state', what, path), description: strOrEmpty(entry, 'description', what, path) };
+    }
+  });
+  return found;
+}

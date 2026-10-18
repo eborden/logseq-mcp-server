@@ -54,6 +54,9 @@ export interface FakeState {
   prStates?: Record<string, unknown>;
   prFiles?: Record<string, (string | { filename: string; previous_filename?: string })[]>;
   patchIgnored?: number[];
+  /** Commit statuses by sha, oldest first, and a total the combined status claims (#646). */
+  statuses?: Record<string, { context: string; state: string; description?: string }[]>;
+  statusTotal?: number;
   faults: Fault[];
 }
 
