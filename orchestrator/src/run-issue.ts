@@ -1,4 +1,4 @@
-// Starts one IssueWorkflow run. `npm run run-issue -- --issue 123 [--base main] [--repo-dir <abs>] [--worktree-dir <abs>] [--wait]`.
+// Starts one IssueWorkflow run. `npm run run-issue -- --issue 123 [--base main] [--repo-dir <abs>] [--worktree-dir <abs>] [--wait] [--host-integration]`.
 // An issue that already has a run (open or closed) is reported, not an error: see src/issue-client.ts. The workflow
 // never merges and never moves an item to Ready or Backlog; the README says what it does.
 
@@ -19,6 +19,8 @@ async function main(): Promise<void> {
       'repo-dir': { type: 'string', default: resolve(process.cwd(), '..') },
       'worktree-dir': { type: 'string' },
       wait: { type: 'boolean', default: false },
+      // Runs the host integration check at the gate and holds the gate until it passes (#648). Needs the `host` worker.
+      'host-integration': { type: 'boolean', default: false },
     },
     strict: true,
   });
@@ -29,6 +31,7 @@ async function main(): Promise<void> {
     repoDir,
     worktreeDir: resolve(values['worktree-dir'] ?? `${repoDir}/.claude/worktrees/issue-${issueNumber}`),
     base: values.base,
+    ...(values['host-integration'] ? { hostIntegration: 'auto' } : {}),
   });
 
   const connection = await Connection.connect({ address: config.address, connectTimeout: '10 seconds' });

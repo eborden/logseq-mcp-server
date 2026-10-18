@@ -61,7 +61,14 @@ export interface IssueWorkflowInput {
   readonly decisionTimeoutMs?: number;
   /** How often the run reads GitHub while it waits, in milliseconds. Absent means DEFAULT_DECISION_POLL_MS. */
   readonly decisionPollMs?: number;
+  /**
+   * `auto` runs the host integration check at the gate when the change needs it (#648, plan #643) and holds the gate until
+   * the head shows `success`. `off` (the default when absent) leaves the run exactly as it was before this field existed.
+   */
+  readonly hostIntegration?: HostIntegrationMode;
 }
+
+export type HostIntegrationMode = 'auto' | 'off';
 
 export class InvalidIssueInputError extends Error {
   constructor(message: string) {
@@ -103,6 +110,10 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
   if (awaitDecision !== undefined && typeof awaitDecision !== 'boolean') {
     throw new InvalidIssueInputError('awaitDecision must be true or false');
   }
+  const hostIntegration: unknown = 'hostIntegration' in raw ? raw.hostIntegration : undefined;
+  if (hostIntegration !== undefined && hostIntegration !== 'auto' && hostIntegration !== 'off') {
+    throw new InvalidIssueInputError('hostIntegration must be auto or off');
+  }
   return {
     issueNumber,
     repoDir: absolutePath('repoDir', repoDir),
@@ -113,6 +124,7 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
     ...(awaitDecision === undefined ? {} : { awaitDecision }),
     ...(decisionTimeoutMs === undefined ? {} : { decisionTimeoutMs }),
     ...(decisionPollMs === undefined ? {} : { decisionPollMs }),
+    ...(hostIntegration === undefined ? {} : { hostIntegration }),
   };
 }
 
@@ -208,6 +220,7 @@ export type IssueStep =
   | 'fix_guard'
   | 'fix_push'
   | 'fix_reply'
+  | 'host_integration'
   | 'review_loop'
   | 'decision_gate'
   | 'decision_comment'
@@ -232,10 +245,11 @@ export const NO_COMMENT_FAILURES: readonly string[] = ['UntrustedAuthor', 'NotFo
 export type StopReason = string;
 
 /** The text of the comment a stopped run leaves. Fixed words and identifiers only. */
-export function stopComment(workflowId: string, step: IssueStep, reason: StopReason, pr: number | undefined): string {
+export function stopComment(workflowId: string, step: IssueStep, reason: StopReason, pr: number | undefined, detail?: string): string {
   return [
     `The orchestrator stopped this run (workflow \`${workflowId}\`) at the step \`${step}\` with the reason \`${reason}\`.`,
     pr === undefined ? '' : `A pull request is open for it: #${pr}.`,
+    detail ?? '',
     'A person needs to look. The run has stopped and will not try this step again by itself.',
     'The README of the orchestrator says how to recover from each reason.',
   ]
