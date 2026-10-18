@@ -64,9 +64,9 @@ export function hasFindingsComment(candidates: readonly FindingsCandidate[], mar
   return keyedComments(candidates, marker).length > 0;
 }
 
-/** True when `value` is a marker `findingsMarker` could have made. */
+/** True when `value` is a marker `findingsMarker` could have made. Round 0 is the first review, before any fixer round (#687). */
 export function isFindingsMarker(value: string): boolean {
-  return /^<!-- orchestrator-findings pr=[1-9]\d{0,9} head=[0-9a-f]{40} round=[1-9]\d{0,5} -->$/.test(value);
+  return /^<!-- orchestrator-findings pr=[1-9]\d{0,9} head=[0-9a-f]{40} round=(?:0|[1-9]\d{0,5}) -->$/.test(value);
 }
 
 /** The JSON text of the one trusted comment that carries `marker`, with the ids of that comment. Refusals are as `parseFindingsComment`'s. */
