@@ -520,3 +520,59 @@ export function parseCombinedStatus(raw: unknown, sha: string, context: string):
   });
   return found;
 }
+
+// ---- reads of a remote session's progress (#672) --------------------------------------------------------------
+
+/** The branch name and tip of one entry of `git/matching-refs/heads/...`. */
+export function parseRefTip(raw: unknown, path: string): { readonly name: string; readonly sha: string } {
+  const what = 'branches';
+  const entry = obj(raw, what, path);
+  const ref = str(entry, 'ref', what, path);
+  const prefix = 'refs/heads/';
+  if (!ref.startsWith(prefix)) {
+    return mismatch(what, `${path}.ref`);
+  }
+  const sha = str(obj(entry.get('object'), what, `${path}.object`), 'sha', what, `${path}.object`);
+  return /^[0-9a-f]{40}$/.test(sha) ? { name: ref.slice(prefix.length), sha } : mismatch(what, `${path}.object.sha`);
+}
+
+/**
+ * Whether a commit has a check run that has not completed, or a pending commit status. Only statuses and counts are
+ * read. A list longer than one page is `output_too_large`, never a silent cut.
+ */
+export function parseChecksPending(checkRuns: unknown, combined: unknown, sha: string): boolean {
+  const runsWhat = 'check runs';
+  const runs = obj(checkRuns, runsWhat, '$');
+  const runList = list(runs.get('check_runs'), runsWhat, '$.check_runs');
+  if (int(runs, 'total_count', runsWhat, '$') > runList.length) {
+    throw new GhError(`${runsWhat}: more runs than one call reads`, 'output_too_large');
+  }
+  const anyRunPending = runList.some((element, index) => str(obj(element, runsWhat, `$.check_runs[${index}]`), 'status', runsWhat, `$.check_runs[${index}]`) !== 'completed');
+  const statusWhat = 'combined commit status';
+  const status = obj(combined, statusWhat, '$');
+  if (str(status, 'sha', statusWhat, '$') !== sha) {
+    return mismatch(statusWhat, '$.sha');
+  }
+  // GitHub answers `pending` for a commit with no statuses at all, so the count decides.
+  const statusPending = int(status, 'total_count', statusWhat, '$') > 0 && str(status, 'state', statusWhat, '$') === 'pending';
+  return anyRunPending || statusPending;
+}
+
+/**
+ * The commit a review of a listing is on, when the review counts for the merge gate's purposes: a trusted author, a
+ * state that is a verdict (not PENDING or DISMISSED) and a body. `undefined` for any other.
+ */
+export function parseReviewCommit(raw: unknown, path: string): string | undefined {
+  const review = obj(raw, 'reviews', path);
+  if (!isTrustedAssociation(review.get('author_association'))) {
+    return undefined;
+  }
+  const state = str(review, 'state', 'reviews', path);
+  if (state !== 'COMMENTED' && state !== 'APPROVED' && state !== 'CHANGES_REQUESTED') {
+    return undefined;
+  }
+  if (strOrEmpty(review, 'body', 'reviews', path).trim() === '') {
+    return undefined;
+  }
+  return optStr(review, 'commit_id', 'reviews', path);
+}
