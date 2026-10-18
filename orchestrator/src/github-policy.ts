@@ -66,3 +66,8 @@ export interface HostIntegrationResult {
   readonly state: 'none' | 'pending' | 'success' | 'failure' | 'error';
   readonly counts?: { readonly passed: number; readonly failed: number };
 }
+
+/** What `getHostIntegrationNeed` answers: whether the PR's change needs the host integration check. No path travels in it. */
+export interface HostIntegrationNeed {
+  readonly needed: boolean;
+}
