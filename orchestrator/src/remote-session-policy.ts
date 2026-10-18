@@ -123,7 +123,10 @@ export interface RemoteLimits {
   /** After a restart with a `firing` marker and no id: how long GitHub is watched for the earlier session's work before firing again. */
   readonly orphanPollMs: number;
   readonly heartbeatIntervalMs: number;
-  /** Most fire calls in one attempt (the first and its retries). */
+  /**
+   * Most fire calls in one activity attempt (the first and its retries). The worst case for one key is this times the
+   * activity's `maximumAttempts` (2), so 6 calls, and it needs a crash or a 5xx that came after a session was made.
+   */
   readonly fireAttempts: number;
   /** The first wait before retrying a 5xx. It doubles. */
   readonly fireBackoffMs: number;
@@ -160,14 +163,14 @@ export const NON_RETRYABLE_REMOTE_FAILURES: string[] = [
 ];
 
 /**
- * Three attempts, and every retry is safe: a repeat finds the marker and re-attaches (id recorded) or watches GitHub
+ * Two attempts (a retry multiplies the fire budget: 2 x `fireAttempts` calls at most), and every retry is safe: a repeat finds the marker and re-attaches (id recorded) or watches GitHub
  * before it fires again (`firing`), so a retry never fires a second session on its own.
  */
 export const REMOTE_SESSION_ACTIVITY_OPTIONS: ActivityOptions = {
   startToCloseTimeout: REMOTE_START_TO_CLOSE_MS,
   heartbeatTimeout: REMOTE_HEARTBEAT_TIMEOUT_MS,
   retry: {
-    maximumAttempts: 3,
+    maximumAttempts: 2,
     initialInterval: '5 seconds',
     backoffCoefficient: 2,
     maximumInterval: '60 seconds',
