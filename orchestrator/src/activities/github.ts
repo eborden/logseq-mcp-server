@@ -27,6 +27,7 @@ import type { GhConfig } from '../gh-config.ts';
 import {
   parseBlocker,
   parseBoardItems,
+  parseChecksPending,
   parseCombinedStatus,
   parseComment,
   parseCreatedCommentId,
@@ -42,10 +43,13 @@ import {
   parsePrFilePaths,
   parsePrState,
   parseRefName,
+  parseRefTip,
   parseReview,
+  parseReviewCommit,
   parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
+import type { RemoteGithub } from './remote-session.ts';
 import {
   HOST_INTEGRATION_CONTEXT,
   HOST_STATUS_STATES,
@@ -402,6 +406,23 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     const { items } = await listAll(`${repoRoute}/git/matching-refs/heads/claude/${issue}`, 'branches', parseRefName);
     const branch = new RegExp(`^claude/${issue}(?:-|$)`);
     return items.filter((candidate) => branch.test(candidate));
+  }
+
+  /** The tip of one branch on the remote, or undefined when it does not exist. The name is validated by the caller. */
+  async function branchTip(branch: string): Promise<string | undefined> {
+    const { items } = await listAll(`${repoRoute}/git/matching-refs/heads/${branch}`, 'branches', parseRefTip);
+    return items.find((entry) => entry.name === branch)?.sha;
+  }
+
+  async function checksPending(sha: string): Promise<boolean> {
+    const checkRuns = await gh.api(`${repoRoute}/commits/${sha}/check-runs?per_page=${PAGE_SIZE}`);
+    const combined = await gh.api(`${repoRoute}/commits/${sha}/status?per_page=${PAGE_SIZE}`);
+    return parseChecksPending(checkRuns, combined, sha);
+  }
+
+  async function reviewedOnHead(pr: number, sha: string): Promise<boolean> {
+    const { items } = await listAll(`${repoRoute}/pulls/${pr}/reviews`, 'reviews', parseReviewCommit);
+    return items.includes(sha);
   }
 
   async function listReadyIssues(): Promise<ReadyIssues> {
@@ -839,6 +860,11 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     replyToThread,
     getHostIntegration,
     postCommitStatus,
+    openPrsFor,
+    claudeBranchesFor,
+    branchTip,
+    checksPending,
+    reviewedOnHead,
   };
 }
 
@@ -878,6 +904,30 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     replyToThread: activity((ops, input: ReplyToThreadInput) => ops.replyToThread(input)),
     getHostIntegration: activity((ops, input: { sha: string }) => ops.getHostIntegration(input)),
     postCommitStatus: activity((ops, input: PostCommitStatusInput) => ops.postCommitStatus(input)),
+  };
+}
+
+/**
+ * The reads `runRemoteSession` makes (#672), bound to one repository. They are plain functions, not activities: the
+ * remote session activity polls with them from inside itself. Each call gets a fresh `gh` wrapper, and every failure
+ * is mapped to a Temporal failure.
+ */
+export function createRemoteGithubReads(config: GhConfig, deps: GhDeps = activityDeps): RemoteGithub {
+  const read =
+    <Args extends unknown[], Result>(run: (ops: ReturnType<typeof operations>, ...args: Args) => Promise<Result>) =>
+    async (...args: Args): Promise<Result> => {
+      try {
+        return await run(operations(config, new GhCli(config, deps), deps.sleep), ...args);
+      } catch (error) {
+        throw toFailure(error);
+      }
+    };
+  return {
+    openPrs: read(async (ops, issue: number) => (await ops.openPrsFor(issue)).map((pr) => pr.number)),
+    claudeBranches: read((ops, issue: number) => ops.claudeBranchesFor(issue)),
+    branchTip: read((ops, branch: string) => ops.branchTip(branch)),
+    checksPending: read((ops, sha: string) => ops.checksPending(sha)),
+    reviewedOnHead: read((ops, pr: number, sha: string) => ops.reviewedOnHead(pr, sha)),
   };
 }
 
