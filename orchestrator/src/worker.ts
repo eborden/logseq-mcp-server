@@ -61,9 +61,13 @@ async function main(): Promise<void> {
           activities: createHostIntegrationActivities({ repoDir: hostConfig.repoDir ?? process.cwd() }),
           maxConcurrentActivityTaskExecutions: 1,
         }).catch(async (error: unknown) => {
-          // The default worker exists but is not running yet: do not leave it, or the connection, behind.
-          worker.shutdown();
-          await connection.close();
+          // The default worker was created but never started, so it holds no poller and needs no shutdown (shutdown() only
+          // works on a running worker). Close the connection, and let this error be the one reported, not a failed close.
+          try {
+            await connection.close();
+          } catch {
+            // The Worker.create error below is the one to report.
+          }
           throw error;
         });
 

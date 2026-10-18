@@ -90,7 +90,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-function activities(extra: { limits?: { runDeadlineMs?: number; now?: () => number } } = {}) {
+function activities(extra: { limits?: { runDeadlineMs?: number; now?: () => number; heartbeatIntervalMs?: number } } = {}) {
   return createHostIntegrationActivities({
     repoDir: join(root, 'repo'),
     workRoot: join(root, 'work'),
@@ -173,6 +173,16 @@ test('a registered but missing worktree is pruned before the new one is added, w
   const prune = indexOfStep('worktree_prune');
   assert.ok(prune >= 0 && prune < indexOfStep('worktree_add'), 'pruned before worktree add');
   assert.ok(prune < indexOfStep('fetch'));
+});
+
+test('a heartbeat is sent at the start, before the first interval tick', async () => {
+  let beats = 0;
+  const environment = new MockActivityEnvironment({ attempt: 1 });
+  environment.on('heartbeat', () => {
+    beats += 1;
+  });
+  await environment.run(activities({ limits: { heartbeatIntervalMs: 60_000 } }).runHostIntegration, INPUT);
+  assert.equal(beats, 1, 'the one start beat, with the interval far longer than the run');
 });
 
 test('the heartbeat is sent at the start and on the interval, and stops when the run ends', async () => {
