@@ -16,15 +16,19 @@
 //
 // Nothing here resolves a thread, approves, requests changes, merges or labels.
 
-import { appendFile, lstat, readFile, rm } from 'node:fs/promises';
+import { appendFile, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { ApplicationFailure, CancelledFailure, Context } from '@temporalio/activity';
-import { BriefTooLargeError, buildFixerBrief, buildReviewerBrief, reviewerBriefCommands } from '../brief.ts';
+import { BriefTooLargeError, buildFixerBrief, buildRemoteReviewerBrief, buildReviewerBrief, reviewerBriefCommands } from '../brief.ts';
 import { HEARTBEAT_INTERVAL_MS } from '../claude-session-policy.ts';
 import type { ClaudeConfig } from '../config.ts';
 import { DEFAULT_LIMITS, claudeArgs, git, gitOk, readConfig, runChild } from './claude-session.ts';
 import type { SessionLimits } from './claude-session.ts';
-import { issueBranch, issueWorkflowId } from '../issue-types.ts';
+import { findingsMarker, parseFindingsComment } from '../findings-comment.ts';
+import type { FindingsCandidate } from '../findings-comment.ts';
+import { REMOTE_EXECUTOR_UNAVAILABLE, issueBranch, issueWorkflowId } from '../issue-types.ts';
+import { REMOTE_TEXT_MAX_CHARS } from '../remote-session-policy.ts';
+import type { RemoteSessionResult } from '../remote-session-policy.ts';
 import {
   FIXER_OUTPUT_FILE,
   FindingsTooLargeError,
@@ -46,6 +50,7 @@ import type {
   OpenThreads,
   PostedRepliesResult,
   PostedReviewResult,
+  RemoteReviewerSessionResult,
   ReviewStepInput,
   ReviewerOutput,
   ReviewerSessionResult,
@@ -53,6 +58,14 @@ import type {
 import type { ChangedLines } from '../review-types.ts';
 import { MalformedSessionOutputError, parseClaudeOutput } from '../types.ts';
 import type { IssueView, PostReviewInput, PostReviewResult, ReplyToThreadInput, ReplyToThreadResult, ReviewThread } from '../types.ts';
+
+/** What the remote reviewer path needs (#674). The worker builds it from `runRemoteSession` and the GitHub activities. */
+export interface RemoteReviewDeps {
+  readonly runRemoteSession: (input: unknown) => Promise<RemoteSessionResult>;
+  /** The PR's comments; the body of an untrusted author is empty. */
+  readonly listFindingsCandidates: (pr: number) => Promise<FindingsCandidate[]>;
+  readonly minimizeComment: (input: { nodeId: string }) => Promise<{ readonly minimized: true }>;
+}
 
 export interface ReviewDeps {
   /** The trusted-only read: an untrusted issue is refused and an untrusted comment is dropped. */
@@ -65,6 +78,8 @@ export interface ReviewDeps {
   readonly repo: string;
   readonly claude: ClaudeConfig;
   readonly limits?: SessionLimits;
+  /** Absent: the remote reviewer activities stop with `RemoteExecutorUnavailable`. */
+  readonly remote?: RemoteReviewDeps;
 }
 
 type Kind = 'reviewer' | 'fixer';
@@ -106,6 +121,28 @@ function asFailure(error: unknown): unknown {
     return failure(error.message, 'BriefTooLarge');
   }
   return error;
+}
+
+interface StagedReview {
+  readonly commentId: number;
+  readonly commentNodeId: string;
+  readonly review: ReviewerOutput;
+}
+
+/** One marker per remote round and head, as the local reviewer's: `success` once the findings are parsed and staged. */
+function remoteMarkerKey(input: ReviewStepInput): string {
+  return `orchestrator.remote-reviewer-${input.pr}-r${input.round}-${input.headSha.slice(0, SHORT)}`;
+}
+
+const NODE_ID = /^[A-Za-z0-9_=-]{1,100}$/;
+
+/** The node id of the comment to hide, parsed at the boundary (the same shape the GitHub activity checks again). */
+function minimizeInput(raw: unknown): { nodeId: string } {
+  const nodeId = typeof raw === 'object' && raw !== null && 'nodeId' in raw ? (raw as { nodeId: unknown }).nodeId : undefined;
+  if (typeof nodeId !== 'string' || !NODE_ID.test(nodeId)) {
+    throw failure('nodeId must be a comment node id', 'InvalidInput');
+  }
+  return { nodeId };
 }
 
 export function reviewerDir(input: ReviewStepInput): string {
@@ -306,7 +343,11 @@ export function createReviewActivities(deps: ReviewDeps) {
     if ((await readConfig(input.repoDir, markerKey('reviewer', input))) !== 'success') {
       throw failure('there is no finished reviewer session to post', 'SessionError');
     }
-    const output = await readReviewerOutput(input);
+    return await postFindings(input, await readReviewerOutput(input));
+  }
+
+  /** The one place a reviewer's findings, local or remote, are placed, cleaned and posted as a review. */
+  async function postFindings(input: ReviewStepInput, output: ReviewerOutput): Promise<PostedReviewResult> {
     const changed = await changedOnHead(input);
     if (changed === undefined && output.findings.length > 0) {
       // Posting every finding as advisory would open no thread, and the gate would clear on a review that raised problems.
@@ -330,6 +371,141 @@ export function createReviewActivities(deps: ReviewDeps) {
       comments: inline.map((finding) => ({ path: finding.path, line: finding.line, side: 'RIGHT', body: finding.body })),
     });
     return { reviewId: posted.reviewId, posted: posted.posted, comments: inline.length, advisory: section.listed, omitted: section.omitted };
+  }
+
+  // ---- the remote reviewer (#674) --------------------------------------------------------------------------------
+
+  function remoteDeps(): RemoteReviewDeps {
+    if (deps.remote === undefined) {
+      throw failure('no remote session activity is configured on this worker', REMOTE_EXECUTOR_UNAVAILABLE);
+    }
+    return deps.remote;
+  }
+
+  /**
+   * Starts one remote reviewer for the head, waits for it (`runRemoteSession`, as it is), reads its keyed findings
+   * comment, and stages what survives the parser. The raw comment is never posted or logged. Retry-safe: a finished
+   * round returns its staged result, and `runRemoteSession` itself never fires a second session for the same key.
+   *
+   * The wait of `runRemoteSession` for a reviewer ends on a review on the head, which this reviewer never posts (it
+   * posts a comment), so the wait normally runs to its cap and returns `timed_out`. The comment is what counts: it is
+   * read after any outcome but a launch that failed.
+   */
+  async function runRemoteReviewerSession(raw: unknown): Promise<RemoteReviewerSessionResult> {
+    const input = parseInput(raw);
+    const remote = remoteDeps();
+    return await withHeartbeat(async () => {
+      const key = remoteMarkerKey(input);
+      if ((await readConfig(input.repoDir, key)) === 'success') {
+        return await readStaged(input);
+      }
+      const { issue, threads } = await readForBrief(input);
+      const marker = findingsMarker(input.pr, input.headSha, input.round);
+      let brief: string;
+      try {
+        brief = buildRemoteReviewerBrief({
+          issue,
+          repo: deps.repo,
+          pr: input.pr,
+          base: input.base,
+          headSha: input.headSha,
+          round: input.round,
+          workflowId: issueWorkflowId(input.issue),
+          threads,
+          marker,
+        });
+      } catch (error) {
+        throw asFailure(error);
+      }
+      if (brief.length > REMOTE_TEXT_MAX_CHARS) {
+        throw failure(`the remote brief is ${brief.length} characters, more than the ${REMOTE_TEXT_MAX_CHARS} a routine takes`, 'BriefTooLarge');
+      }
+      const session = await remote.runRemoteSession({ role: 'reviewer', issue: input.issue, pr: input.pr, branch: issueBranch(input.issue), base: input.base, headSha: input.headSha, brief });
+      if (session.outcome === 'failed' && session.claim !== 'already_reviewed') {
+        // A fixed word only: the claim or the launch failure the session activity reported.
+        throw failure(`the remote reviewer did not run (${session.claim ?? session.failure ?? 'failed'})`, 'RemoteSessionFailed');
+      }
+      const parsed = await parseRemoteFindings(input, marker, remote);
+      // Only a thread that is open and the reviewer could read is accepted; an id the session invented is dropped.
+      const acceptable = new Set(threads.filter((thread) => thread.trusted).map((thread) => thread.id));
+      const output = { ...parsed.output, acceptedThreadIds: parsed.output.acceptedThreadIds.filter((id) => acceptable.has(id)) };
+      await stage(input, { commentId: parsed.commentId, commentNodeId: parsed.commentNodeId, review: output });
+      await gitOk(input.repoDir, ['config', '--local', key, 'success']);
+      return { findings: output.findings.length, acceptedThreadIds: output.acceptedThreadIds, commentNodeId: parsed.commentNodeId };
+    });
+  }
+
+  async function parseRemoteFindings(input: ReviewStepInput, marker: string, remote: RemoteReviewDeps): Promise<ReturnType<typeof parseFindingsComment>> {
+    const candidates = await remote.listFindingsCandidates(input.pr);
+    try {
+      return parseFindingsComment(candidates, marker);
+    } catch (error) {
+      throw asFailure(error);
+    }
+  }
+
+  /** The review of the staged findings, through the same code the local path posts with. */
+  async function postRemoteSessionReview(raw: unknown): Promise<PostedReviewResult> {
+    const input = parseInput(raw);
+    if ((await readConfig(input.repoDir, remoteMarkerKey(input))) !== 'success') {
+      throw failure('there is no finished remote reviewer session to post', 'SessionError');
+    }
+    await ensureHeadCommit(input);
+    const staged = await readStagedFile(input);
+    return await postFindings(input, staged.review);
+  }
+
+  /**
+   * Hides the raw findings comment. Called by the workflow after the review is posted, and allowed to fail without
+   * stopping the run. The node id is checked here and again by the GitHub activity. Hiding twice is a no-op.
+   */
+  async function minimizeFindingsComment(raw: unknown): Promise<{ readonly minimized: true }> {
+    const remote = remoteDeps();
+    return await withHeartbeat(async () => await remote.minimizeComment(minimizeInput(raw)));
+  }
+
+  /** The head commit has to be in the working copy for the diff that places the findings. A fetch of the one branch, fixed argv, is the only try. */
+  async function ensureHeadCommit(input: ReviewStepInput): Promise<void> {
+    if ((await git(input.repoDir, ['cat-file', '-e', `${input.headSha}^{commit}`])).code === 0) {
+      return;
+    }
+    await git(input.repoDir, ['fetch', '--no-tags', 'origin', `+refs/heads/${issueBranch(input.issue)}:refs/remotes/origin/${issueBranch(input.issue)}`]);
+  }
+
+  async function stagedPath(input: ReviewStepInput): Promise<string> {
+    const relative = (await gitOk(input.repoDir, ['rev-parse', '--git-path', `orchestrator-remote-review-${input.pr}-r${input.round}-${input.headSha.slice(0, SHORT)}.json`])).trim();
+    return resolve(input.repoDir, relative);
+  }
+
+  async function stage(input: ReviewStepInput, staged: StagedReview): Promise<void> {
+    const path = await stagedPath(input);
+    await writeFile(`${path}.tmp`, JSON.stringify(staged), 'utf8');
+    await rename(`${path}.tmp`, path);
+  }
+
+  /** The staged file, parsed again at this boundary: nothing read back from disk is trusted for its shape. */
+  async function readStagedFile(input: ReviewStepInput): Promise<StagedReview> {
+    let top: unknown;
+    try {
+      top = JSON.parse(await readFile(await stagedPath(input), 'utf8'));
+    } catch {
+      throw failure('the staged findings of the remote reviewer are missing or unreadable', 'MalformedFindings');
+    }
+    const record = typeof top === 'object' && top !== null && !Array.isArray(top) ? (top as Record<string, unknown>) : {};
+    const { commentId, commentNodeId } = record;
+    if (typeof commentId !== 'number' || typeof commentNodeId !== 'string') {
+      throw failure('the staged findings of the remote reviewer are not in the shape this code wrote', 'MalformedFindings');
+    }
+    try {
+      return { commentId, commentNodeId, review: parseReviewerOutput(JSON.stringify(record['review'])) };
+    } catch (error) {
+      throw asFailure(error);
+    }
+  }
+
+  async function readStaged(input: ReviewStepInput): Promise<RemoteReviewerSessionResult> {
+    const staged = await readStagedFile(input);
+    return { findings: staged.review.findings.length, acceptedThreadIds: staged.review.acceptedThreadIds, commentNodeId: staged.commentNodeId };
   }
 
   async function runFixerSession(raw: unknown): Promise<FixerSessionResult> {
@@ -413,7 +589,7 @@ export function createReviewActivities(deps: ReviewDeps) {
     return openThreadRefs(await deps.listReviewThreads(pr));
   }
 
-  return { runReviewerSession, postSessionReview, runFixerSession, postFixerReplies, listOpenThreads };
+  return { runReviewerSession, postSessionReview, runRemoteReviewerSession, postRemoteSessionReview, minimizeFindingsComment, runFixerSession, postFixerReplies, listOpenThreads };
 }
 
 export type ReviewActivities = ReturnType<typeof createReviewActivities>;

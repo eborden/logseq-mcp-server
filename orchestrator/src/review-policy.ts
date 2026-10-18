@@ -4,6 +4,7 @@
 import type { ActivityOptions } from '@temporalio/workflow';
 import { CLAUDE_SESSION_ACTIVITY_OPTIONS, IMPLEMENTER_START_TO_CLOSE_MS, NON_RETRYABLE_SESSION_FAILURES } from './claude-session-policy.ts';
 import { GITHUB_ACTIVITY_OPTIONS, NON_RETRYABLE_GITHUB_FAILURES } from './github-policy.ts';
+import { NON_RETRYABLE_REMOTE_FAILURES, REMOTE_SESSION_ACTIVITY_OPTIONS, REMOTE_START_TO_CLOSE_MS } from './remote-session-policy.ts';
 
 /**
  * ASSUMPTION for the maintainer to confirm (#630 "Open questions"): the most fixer rounds before the workflow stops
@@ -40,6 +41,10 @@ export const NON_RETRYABLE_REVIEW_FAILURES: string[] = [
   'BriefTooLarge',
   'BranchMoved',
   'DiffUnreadable',
+  // The remote reviewer (#674): a session that did not run, and a worker with no remote activity, are not fixed by a retry.
+  'RemoteSessionFailed',
+  'RemoteExecutorUnavailable',
+  ...NON_RETRYABLE_REMOTE_FAILURES,
 ];
 
 /** The reviewer and the fixer each read from GitHub before the session, so they get the implementer's budget. */
@@ -53,4 +58,15 @@ export const REVIEW_SESSION_ACTIVITY_OPTIONS: ActivityOptions = {
 export const REVIEW_GITHUB_ACTIVITY_OPTIONS: ActivityOptions = {
   ...GITHUB_ACTIVITY_OPTIONS,
   retry: { ...GITHUB_ACTIVITY_OPTIONS.retry, nonRetryableErrorTypes: NON_RETRYABLE_REVIEW_FAILURES },
+};
+
+/**
+ * The remote reviewer activity (#674): `runRemoteSession` inside it, so its start-to-close covers the whole remote wait,
+ * plus a margin for the brief reads and the comment read. Two attempts, and a retry is safe: the remote session activity
+ * finds its marker and re-attaches, and a round already staged returns at once.
+ */
+export const REMOTE_REVIEW_SESSION_ACTIVITY_OPTIONS: ActivityOptions = {
+  ...REMOTE_SESSION_ACTIVITY_OPTIONS,
+  startToCloseTimeout: REMOTE_START_TO_CLOSE_MS + 10 * 60_000,
+  retry: { ...REMOTE_SESSION_ACTIVITY_OPTIONS.retry, nonRetryableErrorTypes: NON_RETRYABLE_REVIEW_FAILURES },
 };

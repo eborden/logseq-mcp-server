@@ -90,6 +90,11 @@ export interface ReviewerSessionResult {
   readonly acceptedThreadIds: readonly string[];
 }
 
+/** What the workflow sees of a remote reviewer round (#674): counts, thread ids and the node id of the raw comment to hide. */
+export interface RemoteReviewerSessionResult extends ReviewerSessionResult {
+  readonly commentNodeId: string;
+}
+
 export interface PostedReviewResult {
   readonly reviewId: number;
   readonly posted: boolean;
