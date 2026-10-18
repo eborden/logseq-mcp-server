@@ -638,6 +638,7 @@ export function createReviewActivities(deps: ReviewDeps) {
           branch: issueBranch(input.issue),
           threads: actionable,
           marker,
+          ...(input.hostFailure === undefined ? {} : { hostFailure: input.hostFailure }),
         });
       } catch (error) {
         throw asFailure(error);
