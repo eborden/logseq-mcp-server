@@ -287,3 +287,61 @@ export function loadServerConfig(env: Env): ServerConfig {
     cliPath: blankAsAbsent(env['TEMPORAL_CLI_PATH']),
   };
 }
+
+// ---- the remote session launcher (#672) --------------------------------------------------------------------------
+
+export interface RemoteConfig {
+  /** The routine id of each role. */
+  readonly routines: Readonly<Record<'implementer' | 'reviewer' | 'fixer', string>>;
+  /** The bearer token of each routine, by routine id. A Map, so a stray `JSON.stringify` of the config shows none. */
+  readonly tokens: ReadonlyMap<string, string>;
+  /** The working copy whose git config holds the markers. Absent means the directory the worker started in. */
+  readonly repoDir: string | undefined;
+}
+
+const ROUTINE_ID = /^trig_[A-Za-z0-9]{1,100}$/;
+const ROUTINE_TOKEN = /^[A-Za-z0-9._~+/=-]{20,1024}$/;
+const REMOTE_ROLE_VARIABLES = [
+  ['implementer', 'REMOTE_ROUTINE_IMPLEMENTER'],
+  ['reviewer', 'REMOTE_ROUTINE_REVIEWER'],
+  ['fixer', 'REMOTE_ROUTINE_FIXER'],
+] as const;
+
+/**
+ * The remote session activity is off unless one of the six variables is set (an id and a token for each of the three
+ * roles: `REMOTE_ROUTINE_<ROLE>` and `REMOTE_ROUTINE_<ROLE>_TOKEN`). Once one is set all six are required, so a
+ * half-configured worker stops before it polls instead of failing a run later. An error names the variable and never
+ * a value. `REMOTE_REPO_DIR` is optional (an absolute path).
+ */
+export function loadRemoteConfig(env: Env): RemoteConfig | undefined {
+  const names = REMOTE_ROLE_VARIABLES.flatMap(([, name]) => [name, `${name}_TOKEN`]);
+  if (names.every((name) => blankAsAbsent(env[name]) === undefined)) {
+    return undefined;
+  }
+  const ids = new Map<string, string>();
+  const tokens = new Map<string, string>();
+  for (const [role, name] of REMOTE_ROLE_VARIABLES) {
+    const id = blankAsAbsent(env[name]);
+    const token = blankAsAbsent(env[`${name}_TOKEN`]);
+    if (id === undefined || !ROUTINE_ID.test(id)) {
+      throw new ConfigError(`${name} must be a routine id (trig_...)`);
+    }
+    if (token === undefined || !ROUTINE_TOKEN.test(token)) {
+      throw new ConfigError(`${name}_TOKEN must be set to that routine's token`);
+    }
+    if ([...ids.values()].includes(id)) {
+      throw new ConfigError(`${name} repeats another role's routine: each role has its own routine and token`);
+    }
+    ids.set(role, id);
+    tokens.set(id, token);
+  }
+  const repoDir = blankAsAbsent(env['REMOTE_REPO_DIR']);
+  if (repoDir !== undefined && (!repoDir.startsWith('/') || repoDir.length > 1024 || repoDir.includes('\0'))) {
+    throw new ConfigError('REMOTE_REPO_DIR must be an absolute path');
+  }
+  return {
+    routines: { implementer: ids.get('implementer') ?? '', reviewer: ids.get('reviewer') ?? '', fixer: ids.get('fixer') ?? '' },
+    tokens,
+    repoDir,
+  };
+}
