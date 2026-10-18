@@ -46,6 +46,7 @@ import {
   REVIEW_GITHUB_ACTIVITY_OPTIONS,
   REVIEW_SESSION_ACTIVITY_OPTIONS,
 } from '../review-policy.ts';
+import type { HostFailureSummary } from '../host-integration-policy.ts';
 import type { ReviewStepInput } from '../review-types.ts';
 import type { GateStatus } from '../types.ts';
 
@@ -80,6 +81,14 @@ export interface ReviewLoopContext {
   readonly step: <T>(name: IssueStep, call: () => Promise<T>) => Promise<T>;
   /** Ends the run with one comment on the issue and a Failed workflow (issue.ts). */
   readonly stop: (step: IssueStep, reason: StopReason, detail?: string) => Promise<never>;
+  /** Fixer rounds already used before this call (#676): the host failure round counts against the same `maxFixRounds`. Default 0. */
+  readonly startRound?: number;
+  /**
+   * A failed host integration run on the fixture graph (#676), remote executor only. The loop starts with ONE remote fixer
+   * round that carries it in its brief (a round of the same kind and the same bound as a review round), then reviews the new
+   * head as it does after any fix. A round that pushes nothing stops for a person: the head would only fail again.
+   */
+  readonly hostFailure?: HostFailureSummary;
 }
 
 export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunResult> {
@@ -87,7 +96,9 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
   const maxRounds = input.maxFixRounds ?? DEFAULT_MAX_FIX_ROUNDS;
   let head = context.headSha;
   /** Fixer rounds finished. */
-  let round = 0;
+  let round = context.startRound ?? 0;
+  /** The host failure the next fixer round carries (#676); cleared once that round ran. */
+  let pendingHostFailure = context.hostFailure;
   /** Threads the reviewer accepted a reply on, in the order it said so. Ids only. */
   const accepted = new Set<string>();
 
@@ -100,6 +111,7 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
     headSha: head,
     round,
     acceptedThreadIds: [...accepted],
+    ...(pendingHostFailure === undefined ? {} : { hostFailure: pendingHostFailure }),
   });
 
   /**
@@ -174,6 +186,19 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
     }
     await step('fix_reply', () => reviewGithub.postRemoteFixerReplies(stepInput()));
     await hideRawComment(fixed.commentNodeId);
+  }
+
+  if (pendingHostFailure !== undefined) {
+    if (round >= maxRounds) {
+      return await stop('review_loop', 'MaxRoundsReached');
+    }
+    const before = head;
+    await remoteFixRound();
+    pendingHostFailure = undefined;
+    round += 1;
+    if (head === before) {
+      return await stop('host_integration', 'IntegrationFailed', 'The remote fixer pushed no commit for the failed host integration check.');
+    }
   }
 
   for (;;) {

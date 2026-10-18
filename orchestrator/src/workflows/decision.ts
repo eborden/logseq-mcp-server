@@ -50,7 +50,10 @@ import { gateClear } from '../gate.ts';
 import type { GateCounts } from '../gate.ts';
 import { GITHUB_ACTIVITY_OPTIONS } from '../github-policy.ts';
 import { createHostIntegrationGate } from './host-integration.ts';
-import { BOARD_CONFIRM_READS, BOARD_CONFIRM_WAIT, ISSUE_STEP_TIMEOUT, issueWorkflowId } from '../issue-types.ts';
+import { reviewLoop } from './review-loop.ts';
+import type { HostFailureSummary } from '../host-integration-policy.ts';
+import { DEFAULT_MAX_FIX_ROUNDS } from '../review-policy.ts';
+import { BOARD_CONFIRM_READS, BOARD_CONFIRM_WAIT, ISSUE_STEP_TIMEOUT, issueBranch, issueWorkflowId } from '../issue-types.ts';
 import type { IssueRunResult, IssueStep, IssueWorkflowInput, StopReason } from '../issue-types.ts';
 import type { BoardItemRef, SettableStatus } from '../types.ts';
 
@@ -97,6 +100,8 @@ export interface DecisionContext {
   readonly input: IssueWorkflowInput;
   readonly pr: number;
   readonly inbox: DecisionInbox;
+  /** Fixer rounds the review loop used (#676): the host failure round counts against the same `maxFixRounds`. Default 0. */
+  readonly fixRounds?: number;
   /** Runs one activity call; a failure of it ends the run at `name` (issue.ts). */
   readonly step: <T>(name: IssueStep, call: () => Promise<T>) => Promise<T>;
   /** Ends the run with one comment on the issue and a Failed workflow (issue.ts). */
@@ -127,7 +132,24 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
   }
 
   // The host integration check (#648): only with `hostIntegration: 'auto'`. Absent or `off`, nothing below calls it.
-  const hostGate = input.hostIntegration === 'auto' ? createHostIntegrationGate({ pr, base: input.base, step, stop }) : undefined;
+  // A failure on a fixture run goes to one remote fixer round of the review loop, which counts against `maxFixRounds` with the rounds
+  // the review loop already used. Local executor: no fixer, every failure stops for a person as before.
+  let fixRoundsUsed = context.fixRounds ?? 0;
+  const maxFixRounds = input.maxFixRounds ?? DEFAULT_MAX_FIX_ROUNDS;
+  const fixHostFailure =
+    input.executor === 'remote'
+      ? async (failedHead: string, summary: HostFailureSummary): Promise<boolean> => {
+          if (fixRoundsUsed >= maxFixRounds) {
+            return false;
+          }
+          const looped = await reviewLoop({ input, pr, branch: issueBranch(issue), headSha: failedHead, step, stop, startRound: fixRoundsUsed, hostFailure: summary });
+          if ('fixRounds' in looped) {
+            fixRoundsUsed = looped.fixRounds;
+          }
+          return true;
+        }
+      : undefined;
+  const hostGate = input.hostIntegration === 'auto' ? createHostIntegrationGate({ pr, base: input.base, step, stop, ...(fixHostFailure === undefined ? {} : { fix: fixHostFailure }) }) : undefined;
 
   // ---- hold and wait: until the gate is clear and a decision is in hand, or the PR is merged without one -----------
   const decideBy = Date.now() + timeoutMs;

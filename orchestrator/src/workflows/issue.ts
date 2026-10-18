@@ -241,5 +241,5 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   if (input.awaitDecision === false) {
     return looped;
   }
-  return await decisionStage({ input, pr: opened.number, inbox, step, stop });
+  return await decisionStage({ input, pr: opened.number, inbox, step, stop, ...('fixRounds' in looped ? { fixRounds: looped.fixRounds } : {}) });
 }
