@@ -283,6 +283,8 @@ class World {
   readonly calls: Record<string, number> = {};
   readonly comments = new Map<string, string>();
   readonly attempts: number[] = [];
+  /** Makes the session push again right after the PR opens: a late push between the guard and the PR. */
+  moveOnOpen: (() => Promise<void>) | undefined;
   issueStatus: string | undefined = 'Ready';
   prStatus: string | undefined;
   constructor(
@@ -350,8 +352,14 @@ function fakeActivities() {
     },
     openPr: async (input: { head: string }) => {
       const issue = Number(/^claude\/(\d+)$/.exec(input.head)?.[1]);
-      worldOf(issue).hit('openPr');
+      const w = worldOf(issue);
+      w.hit('openPr');
+      await w.moveOnOpen?.();
       return { number: issue + PR_OFFSET, url: `https://github.com/eborden/logseq-mcp-server/pull/${issue + PR_OFFSET}`, created: true };
+    },
+    getPrState: async (pr: number) => {
+      const w = worldOf(pr - PR_OFFSET);
+      return { state: 'open' as const, merged: false, headSha: await remoteTip(w.repos, `claude/${pr - PR_OFFSET}`) };
     },
     addToBoard: async (t: { kind: 'issue' | 'pr'; number: number }) => {
       const { w } = target(t);
@@ -486,6 +494,27 @@ test('a branch that moves between the report and the guard opens no PR on an ung
   assert.equal(world.called('deleteRemoteBranch'), 0, 'a moved branch is left for a person');
   assert.ok(await remoteTip(world.repos, `claude/${issue}`));
   await finish(world);
+});
+
+test('a branch that moves after the guard and before the PR is caught when the PR head is read back, and is not deleted', { timeout: 120_000 }, async () => {
+  const { issue, world, started } = await start((n) => async (r) => reported(await sessionPush(r, `claude/${n}`, { 'src/a.ts': 'a\n' })));
+  world.moveOnOpen = async () => {
+    await sessionPush(world.repos, `claude/${issue}`, { 'src/a.ts': 'a\n', 'src/late.ts': 'late\n' });
+  };
+  const cause = await failure(issue, started);
+  assert.deepEqual(cause.details?.slice(0, 2), ['guard', 'BranchMoved']);
+  assert.equal(world.called('guardRemoteBranch'), 1);
+  assert.equal(world.called('openPr'), 1);
+  assert.equal(world.called('deleteRemoteBranch'), 0);
+  assert.equal(world.called('runReviewerSession'), 0, 'the run does not go on to review an unchecked head');
+  const body = [...world.comments.values()][0] ?? '';
+  assert.match(body, /pull request #\d+ is on a commit that was not checked/);
+  await finish(world);
+});
+
+test('unreadable git output (MalformedGitOutput) is a fault in the reading, so the branch is not deleted', async () => {
+  const { GUARD_REFUSALS } = await import('../src/workflows/remote-implementer.ts');
+  assert.deepEqual([...GUARD_REFUSALS].sort(), ['DiffTooLarge', 'EmptyDiff', 'ProtectedPath', 'SpecialFile']);
 });
 
 test('a session that ended with no push gets a second attempt, which is attempt 2; a second miss stops', { timeout: 120_000 }, async () => {

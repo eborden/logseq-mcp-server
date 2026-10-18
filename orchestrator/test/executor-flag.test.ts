@@ -126,6 +126,7 @@ function fakeActivities() {
       worldOf(Number(/^claude\/(\d+)$/.exec(raw.branch)?.[1])).hit('guardRemoteBranch');
       return { branch: raw.branch, headSha: raw.headSha, files: 1 };
     },
+    getPrState: async () => ({ state: 'open' as const, merged: false, headSha: HEAD }),
     guardBranch: async (raw: { branch: string; headSha: string }) => ({ branch: raw.branch, headSha: raw.headSha, files: 1 }),
     pushBranch: async (raw: { branch: string; headSha: string }) => ({ branch: raw.branch, headSha: raw.headSha }),
     openPr: async (input: { head: string }) => {
