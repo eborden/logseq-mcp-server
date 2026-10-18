@@ -8,7 +8,7 @@
 
 import { ApplicationFailure, Context } from '@temporalio/activity';
 import { HEARTBEAT_INTERVAL_MS } from '../claude-session-policy.ts';
-import { BriefTooLargeError, buildBrief } from '../brief.ts';
+import { BriefTooLargeError, buildBrief, buildRemoteImplementerBrief } from '../brief.ts';
 import { InvalidIssueInputError, issueBranch, issueWorkflowId, parseIssueWorkflowInput } from '../issue-types.ts';
 import type { RemoteSessionInput, RemoteSessionResult } from '../remote-session-policy.ts';
 import type { IssueView, SessionInput, SessionResult } from '../types.ts';
@@ -100,7 +100,7 @@ export function createRemoteImplementerActivities(deps: RemoteImplementerDeps) {
     const branch = issueBranch(input.issueNumber);
     let brief: string;
     try {
-      brief = buildBrief({ issue, repo: deps.repo, branch, base: input.base, workflowId: issueWorkflowId(input.issueNumber) });
+      brief = buildRemoteImplementerBrief({ issue, repo: deps.repo, branch, base: input.base, workflowId: issueWorkflowId(input.issueNumber) });
     } catch (error) {
       if (error instanceof BriefTooLargeError) {
         throw ApplicationFailure.nonRetryable(error.message, 'BriefTooLarge');
