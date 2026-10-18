@@ -48,7 +48,7 @@ const LIMITS: RemoteLimits = {
 
 // ---- fakes -----------------------------------------------------------------------------------------------------
 
-const MAX_SLEEPS = 10_000;
+const MAX_SLEEPS = 1_000;
 
 class Clock {
   t = 1_000_000;
