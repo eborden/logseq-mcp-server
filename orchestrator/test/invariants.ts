@@ -25,7 +25,9 @@ const QUOTE = `['"\`]`;
 
 const RULES: readonly Rule[] = [
   { label: 'resolve a thread', pattern: /resolveReviewThread|unresolveReviewThread|resolveThread|\/resolve['"`\s]/i },
-  { label: 'merge', pattern: new RegExp(`mergePullRequest|enablePullRequestAutoMerge|\\/merge\\b|${QUOTE}merge${QUOTE}|--merge\\b|--squash|--rebase\\b|--auto\\b|\\bmerge(?:Pr|PullRequest|Pull)?\\s*\\(`, 'i') },
+  { label: 'merge', pattern: new RegExp(`mergePullRequest|enablePullRequestAutoMerge|\\/merge\\b|--merge\\b|--squash|--rebase\\b|--auto\\b|\\bmerge(?:Pr|PullRequest|Pull)?\\s*\\(`, 'i') },
+  // The bare word as an argument is `git merge` of a PR head into a throwaway worktree (#647); only that activity may have it.
+  { label: 'merge', pattern: new RegExp(`${QUOTE}merge${QUOTE}`, 'i'), allowedIn: ['activities/host-integration.ts'] },
   { label: 'approve or request changes', pattern: new RegExp(`event:\\s*${QUOTE}(?:APPROVE|REQUEST_CHANGES)|${QUOTE}(?:APPROVE|REQUEST_CHANGES)${QUOTE}|--approve|--request-changes|addPullRequestReview|submitPullRequestReview|\\bapprove\\w*\\s*[(:=]`, 'i') },
   { label: 'label', pattern: new RegExp(`addLabelsToLabelable|removeLabelsFromLabelable|createLabel|--add-label|--remove-label|--label\\b|\\/labels\\b|${QUOTE}label${QUOTE}|\\b(?:add|set|apply|remove)Labels?\\b`, 'i') },
   { label: 'a board write by mutation', pattern: /updateProjectV2Item|addProjectV2Item|archiveProjectV2Item|deleteProjectV2Item/ },
