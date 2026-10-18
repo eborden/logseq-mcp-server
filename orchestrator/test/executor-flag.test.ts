@@ -22,6 +22,7 @@ import {
   stopCommentKey,
 } from '../src/issue-types.ts';
 import type { IssueRunResult, IssueWorkflowInput } from '../src/issue-types.ts';
+import { buildRunInput } from '../src/run-issue-input.ts';
 import { onExecutor } from '../src/workflows/executor.ts';
 import { freePort } from './support.ts';
 
@@ -69,6 +70,15 @@ test('the choice point calls the local activity for local and for no executor, a
   await assert.rejects(onExecutor('remote', 'fix_session', stop, local), /stopped/);
   assert.equal(calls, 2, 'a remote run starts no local session');
   assert.deepEqual(stops, [`review_session:${REMOTE_EXECUTOR_UNAVAILABLE}`, `fix_session:${REMOTE_EXECUTOR_UNAVAILABLE}`]);
+});
+
+test('run-issue builds the input from its flags: --executor reaches it, no flag leaves it absent, a bad value throws', () => {
+  const flags = { issue: '5', base: 'main', repoDir: '/work/repo', worktreeDir: undefined, hostIntegration: false, executor: undefined };
+  assert.equal('executor' in buildRunInput(flags), false);
+  assert.equal(buildRunInput({ ...flags, executor: 'remote' }).executor, 'remote');
+  assert.equal(buildRunInput({ ...flags, executor: 'local' }).executor, 'local');
+  assert.throws(() => buildRunInput({ ...flags, executor: 'cloud' }), /--executor must be local or remote/);
+  assert.equal(buildRunInput({ ...flags, hostIntegration: true }).hostIntegration, 'auto');
 });
 
 // ---- the workflow ------------------------------------------------------------------------------------------------
