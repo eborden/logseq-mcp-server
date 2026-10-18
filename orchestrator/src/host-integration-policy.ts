@@ -29,11 +29,133 @@ export type HostIntegrationOutcome = 'pass' | 'fail' | 'conflict' | 'fixture_dir
 
 export const HOST_INTEGRATION_OUTCOMES: readonly HostIntegrationOutcome[] = ['pass', 'fail', 'conflict', 'fixture_dirty', 'setup_error'];
 
-/** Integers and one fixed word. `passed` and `failed` are 0 when the suite did not run to a report. */
+/**
+ * Integers and one fixed word. `passed` and `failed` are 0 when the suite did not run to a report. `failureSummary` is
+ * present only for a `fail` of a run the activity proved to be on the fixture instance (#676, BR-0001 as narrowed by #669).
+ */
 export interface HostIntegrationResult {
   readonly outcome: HostIntegrationOutcome;
   readonly passed: number;
   readonly failed: number;
+  readonly failureSummary?: HostFailureSummary;
+}
+
+// ---- the failure summary (#676) -------------------------------------------------------------------------------
+// A bounded list of failing test names, each with one short assertion line, for the remote fixer's brief. It exists only
+// for a run on the committed fixture graph, whose every value is fictional. It is data in the brief, never an
+// instruction, and it is never written to a comment or a commit status (those keep counts: `buildHostDescription`).
+
+export const MAX_FAILURE_TESTS = 10;
+export const MAX_FAILURE_NAME_CHARS = 200;
+export const MAX_FAILURE_MESSAGE_CHARS = 300;
+
+export interface HostFailureTest {
+  readonly name: string;
+  readonly message: string;
+}
+
+export interface HostFailureSummary {
+  readonly tests: readonly HostFailureTest[];
+  /** Failing tests left out because of `MAX_FAILURE_TESTS` (BR-0006: a cap says so). */
+  readonly droppedTests: number;
+  /** Names and messages cut to their character bound. */
+  readonly cutFields: number;
+}
+
+/** One printable line: no colour codes, no control characters, one run of spaces, at most `max` characters. */
+function oneLine(text: string, max: number): { readonly text: string; readonly cut: boolean } {
+  const first = text
+    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
+    .split(/\r?\n/)
+    .map((part) => part.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim())
+    .find((part) => part !== '');
+  const line = first ?? '';
+  return line.length > max ? { text: line.slice(0, max), cut: true } : { text: line, cut: false };
+}
+
+/**
+ * The failing tests of the JSON reporter's report, capped. `undefined` when the report has no failing assertion to name
+ * (a suite that failed to load, a bad shape): the caller then gives counts only.
+ */
+export function summariseHostFailures(reportText: string): HostFailureSummary | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(reportText);
+  } catch {
+    return undefined;
+  }
+  const files: unknown = typeof parsed === 'object' && parsed !== null && 'testResults' in parsed ? parsed.testResults : undefined;
+  if (!Array.isArray(files)) {
+    return undefined;
+  }
+  const tests: HostFailureTest[] = [];
+  let failing = 0;
+  let cutFields = 0;
+  for (const file of files as unknown[]) {
+    const results: unknown = typeof file === 'object' && file !== null && 'assertionResults' in file ? file.assertionResults : undefined;
+    if (!Array.isArray(results)) {
+      continue;
+    }
+    for (const result of results as unknown[]) {
+      if (typeof result !== 'object' || result === null || !('status' in result) || result.status !== 'failed') {
+        continue;
+      }
+      failing += 1;
+      if (tests.length >= MAX_FAILURE_TESTS) {
+        continue;
+      }
+      const title: unknown = 'fullName' in result ? result.fullName : 'title' in result ? result.title : undefined;
+      const messages: unknown = 'failureMessages' in result ? result.failureMessages : undefined;
+      const name = oneLine(typeof title === 'string' ? title : '', MAX_FAILURE_NAME_CHARS);
+      const message = oneLine(Array.isArray(messages) && typeof messages[0] === 'string' ? messages[0] : '', MAX_FAILURE_MESSAGE_CHARS);
+      cutFields += (name.cut ? 1 : 0) + (message.cut ? 1 : 0);
+      tests.push({ name: name.text, message: message.text });
+    }
+  }
+  return failing === 0 ? undefined : { tests, droppedTests: failing - tests.length, cutFields };
+}
+
+/** Parses a summary at the boundary (it crosses from the host activity into another activity's input). `undefined` when absent. */
+export function parseHostFailureSummary(raw: unknown): HostFailureSummary | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new InvalidHostIntegrationInputError('failureSummary must be an object');
+  }
+  const tests: unknown = 'tests' in raw ? raw.tests : undefined;
+  const dropped: unknown = 'droppedTests' in raw ? raw.droppedTests : undefined;
+  const cut: unknown = 'cutFields' in raw ? raw.cutFields : undefined;
+  if (!Array.isArray(tests) || tests.length > MAX_FAILURE_TESTS || typeof dropped !== 'number' || !Number.isSafeInteger(dropped) || dropped < 0 || typeof cut !== 'number' || !Number.isSafeInteger(cut) || cut < 0) {
+    throw new InvalidHostIntegrationInputError('failureSummary has the wrong shape');
+  }
+  const kept = (tests as unknown[]).map((entry) => {
+    const name: unknown = typeof entry === 'object' && entry !== null && 'name' in entry ? entry.name : undefined;
+    const message: unknown = typeof entry === 'object' && entry !== null && 'message' in entry ? entry.message : undefined;
+    if (typeof name !== 'string' || name.length > MAX_FAILURE_NAME_CHARS || typeof message !== 'string' || message.length > MAX_FAILURE_MESSAGE_CHARS) {
+      throw new InvalidHostIntegrationInputError('failureSummary has the wrong shape');
+    }
+    return { name: oneLine(name, MAX_FAILURE_NAME_CHARS).text, message: oneLine(message, MAX_FAILURE_MESSAGE_CHARS).text };
+  });
+  return { tests: kept, droppedTests: dropped, cutFields: cut };
+}
+
+/** The ports the fixture instance script picks from (`scripts/logseq-instance.ts`); LogSeq's own is 12315. */
+export const FIXTURE_PORT_MIN = 12320;
+export const FIXTURE_PORT_MAX = 12399;
+
+/** Whether an instance config's API address is a fixture instance: loopback, in the fixture's port range. */
+export function isFixtureApiUrl(apiUrl: unknown): boolean {
+  if (typeof apiUrl !== 'string') {
+    return false;
+  }
+  try {
+    const url = new URL(apiUrl);
+    const port = Number(url.port);
+    return url.protocol === 'http:' && url.hostname === '127.0.0.1' && Number.isInteger(port) && port >= FIXTURE_PORT_MIN && port <= FIXTURE_PORT_MAX;
+  } catch {
+    return false;
+  }
 }
 
 export class InvalidHostIntegrationInputError extends Error {
