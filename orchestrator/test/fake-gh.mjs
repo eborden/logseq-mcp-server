@@ -158,6 +158,15 @@ if (argv[0] === 'api') {
   if (path === 'graphql') {
     const query = fields.get('query') ?? '';
     const number = Number(fields.get('number'));
+    if (query.includes('minimizeComment')) {
+      // Hiding a comment (#674): the node ids are recorded, and hiding twice is a no-op, as on GitHub.
+      state.minimized ??= [];
+      if (!state.minimized.includes(fields.get('id'))) {
+        state.minimized.push(fields.get('id'));
+      }
+      save();
+      send(200, { data: { minimizeComment: { minimizedComment: { isMinimized: true } } } });
+    }
     if (query.includes('projectItems')) {
       // The query names `issue(number...)` or `pullRequest(number...)`; the answer carries the same key.
       const isPr = query.includes('pullRequest(number');
