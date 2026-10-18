@@ -22,16 +22,23 @@
 // the invariant test in test/review-loop.test.ts keeps it so. History carries identifiers and counts: a PR number, a
 // SHA, thread ids, counts. The text of reviews, threads, findings and replies stays inside the activities.
 
-import { proxyActivities, sleep } from '@temporalio/workflow';
+import { isCancellation, proxyActivities, sleep } from '@temporalio/workflow';
 import type { GithubActivities } from '../activities/github.ts';
 import type { BranchActivities } from '../activities/branch.ts';
 import type { ReviewActivities } from '../activities/review.ts';
 import { BRANCH_ACTIVITY_OPTIONS } from '../branch-types.ts';
 import { onExecutor } from './executor.ts';
 import { gateClear } from '../gate.ts';
-import { ISSUE_STEP_TIMEOUT, issueWorkflowId, waitingForThreadsComment } from '../issue-types.ts';
+import { ISSUE_STEP_TIMEOUT, findingsCommentNotHiddenComment, issueWorkflowId, waitingForThreadsComment } from '../issue-types.ts';
 import type { IssueRunResult, IssueStep, IssueWorkflowInput, StopReason } from '../issue-types.ts';
-import { DEFAULT_MAX_FIX_ROUNDS, GATE_READS, GATE_READ_WAIT, REVIEW_GITHUB_ACTIVITY_OPTIONS, REVIEW_SESSION_ACTIVITY_OPTIONS } from '../review-policy.ts';
+import {
+  DEFAULT_MAX_FIX_ROUNDS,
+  GATE_READS,
+  GATE_READ_WAIT,
+  REMOTE_REVIEW_SESSION_ACTIVITY_OPTIONS,
+  REVIEW_GITHUB_ACTIVITY_OPTIONS,
+  REVIEW_SESSION_ACTIVITY_OPTIONS,
+} from '../review-policy.ts';
 import type { ReviewStepInput } from '../review-types.ts';
 import type { GateStatus } from '../types.ts';
 
@@ -39,8 +46,14 @@ const sessions = proxyActivities<Pick<ReviewActivities, 'runReviewerSession' | '
   ...REVIEW_SESSION_ACTIVITY_OPTIONS,
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
 });
+// The remote reviewer (#674): one activity runs the session and reads its keyed findings comment, one posts the review
+// from what survived the parser, one hides the raw comment. The first has its own, longer, timeouts.
+const remoteSessions = proxyActivities<Pick<ReviewActivities, 'runRemoteReviewerSession'>>({
+  ...REMOTE_REVIEW_SESSION_ACTIVITY_OPTIONS,
+  scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
+});
 const reviewGithub = proxyActivities<
-  Pick<ReviewActivities, 'postSessionReview' | 'postFixerReplies' | 'listOpenThreads'> & Pick<GithubActivities, 'getGateStatus' | 'commentIssue'>
+  Pick<ReviewActivities, 'postSessionReview' | 'postRemoteSessionReview' | 'minimizeFindingsComment' | 'postFixerReplies' | 'listOpenThreads'> & Pick<GithubActivities, 'getGateStatus' | 'commentIssue'>
 >({
   ...REVIEW_GITHUB_ACTIVITY_OPTIONS,
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
@@ -101,17 +114,50 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
     return status?.headSha === head ? status : await stop('gate', 'HeadMismatch');
   }
 
+  /** Rounds whose raw findings comment stayed visible. Counts only. */
+  let notHidden = 0;
+  const hiddenField = (): { rawCommentsNotHidden?: number } => (input.executor === 'remote' ? { rawCommentsNotHidden: notHidden } : {});
+
+  /**
+   * Hides the remote reviewer's raw comment once the review is posted. A failure here never stops the run (the review is
+   * what matters): it is counted and said once on the issue. Cancellation still passes through.
+   */
+  async function hideRawComment(nodeId: string): Promise<void> {
+    try {
+      await reviewGithub.minimizeFindingsComment({ nodeId });
+    } catch (error) {
+      if (isCancellation(error)) {
+        throw error;
+      }
+      notHidden += 1;
+      try {
+        await reviewGithub.commentIssue({ issue: input.issueNumber, key: `findings-not-hidden-${pr}-r${round}`, body: findingsCommentNotHiddenComment(issueWorkflowId(input.issueNumber), pr, round) });
+      } catch (commentError) {
+        if (isCancellation(commentError)) {
+          throw commentError;
+        }
+        // The count in the result still says it.
+      }
+    }
+  }
+
   for (;;) {
     // A fresh session and a new review on the head as it is now: after a push this is the closing review of the round.
-    const reviewed = await onExecutor(input.executor, 'review_session', stop, () => step('review_session', () => sessions.runReviewerSession(stepInput())));
+    const remoteReviewer = input.executor === 'remote';
+    const remoteRound = remoteReviewer ? await step('review_session', () => remoteSessions.runRemoteReviewerSession(stepInput())) : undefined;
+    const reviewed = remoteRound ?? (await onExecutor(input.executor, 'review_session', stop, () => step('review_session', () => sessions.runReviewerSession(stepInput()))));
     for (const id of reviewed.acceptedThreadIds) {
       accepted.add(id);
     }
-    const posted = await step('review_post', () => reviewGithub.postSessionReview(stepInput()));
+    // The same posting code for both: the remote findings were parsed and cleaned by the activity, the review is the worker's own.
+    const posted = await step('review_post', () => (remoteReviewer ? reviewGithub.postRemoteSessionReview(stepInput()) : reviewGithub.postSessionReview(stepInput())));
+    if (remoteRound !== undefined) {
+      await hideRawComment(remoteRound.commentNodeId);
+    }
 
     const gate = await readGate();
     if (gateClear(gate)) {
-      return { outcome: 'gate_clear', issueNumber: input.issueNumber, branch, headSha: head, pr, fixRounds: round, reviewsOnHead: gate.reviewsOnHead, advisory: posted.advisory, advisoryOmitted: posted.omitted };
+      return { outcome: 'gate_clear', issueNumber: input.issueNumber, branch, headSha: head, pr, fixRounds: round, reviewsOnHead: gate.reviewsOnHead, advisory: posted.advisory, advisoryOmitted: posted.omitted, ...hiddenField() };
     }
     if (gate.unresolvedThreads === 0) {
       // No thread is open, yet no review counts on the head: the review just posted is not being counted. Looping
@@ -130,7 +176,7 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
           body: waitingForThreadsComment(issueWorkflowId(input.issueNumber), pr, open.length, acceptedOpen, posted.advisory, posted.omitted),
         }),
       );
-      return { outcome: 'waiting_for_threads', issueNumber: input.issueNumber, branch, headSha: head, pr, fixRounds: round, acceptedThreadIds: acceptedOpen, openThreads: open.length, advisory: posted.advisory, advisoryOmitted: posted.omitted };
+      return { outcome: 'waiting_for_threads', issueNumber: input.issueNumber, branch, headSha: head, pr, fixRounds: round, acceptedThreadIds: acceptedOpen, openThreads: open.length, advisory: posted.advisory, advisoryOmitted: posted.omitted, ...hiddenField() };
     }
     if (round >= maxRounds) {
       return await stop('review_loop', 'MaxRoundsReached');
