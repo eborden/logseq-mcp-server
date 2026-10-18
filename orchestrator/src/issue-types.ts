@@ -66,9 +66,30 @@ export interface IssueWorkflowInput {
    * the head shows `success`. `off` (the default when absent) leaves the run exactly as it was before this field existed.
    */
   readonly hostIntegration?: HostIntegrationMode;
+  /**
+   * Where the model sessions (implementer, reviewer, fixer) run (#671, plan #643). `local` (the default when absent) is v1,
+   * unchanged. `remote` has nothing behind it yet: the run stops for a person with `RemoteExecutorUnavailable` before any session.
+   */
+  readonly executor?: Executor;
 }
 
 export type HostIntegrationMode = 'auto' | 'off';
+
+export type Executor = 'local' | 'remote';
+
+/** The stop reason of a run that asked for `executor: 'remote'` while no remote session activity is wired. */
+export const REMOTE_EXECUTOR_UNAVAILABLE = 'RemoteExecutorUnavailable';
+
+/** What `run-issue --executor <value>` adds to the run input: no field without the flag (the default is local). Any value but `local` and `remote` is refused. */
+export function executorForFlag(flag: string | undefined): { readonly executor?: Executor } {
+  if (flag === undefined) {
+    return {};
+  }
+  if (flag !== 'local' && flag !== 'remote') {
+    throw new InvalidIssueInputError('--executor must be local or remote');
+  }
+  return { executor: flag };
+}
 
 /** What `run-issue --host-integration` adds to the run input: `auto` with the flag, no field without it (the default is off). */
 export function hostIntegrationForFlag(flag: boolean): { readonly hostIntegration?: 'auto' } {
@@ -119,6 +140,10 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
   if (hostIntegration !== undefined && hostIntegration !== 'auto' && hostIntegration !== 'off') {
     throw new InvalidIssueInputError('hostIntegration must be auto or off');
   }
+  const executor: unknown = 'executor' in raw ? raw.executor : undefined;
+  if (executor !== undefined && executor !== 'local' && executor !== 'remote') {
+    throw new InvalidIssueInputError('executor must be local or remote');
+  }
   return {
     issueNumber,
     repoDir: absolutePath('repoDir', repoDir),
@@ -130,6 +155,7 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
     ...(decisionTimeoutMs === undefined ? {} : { decisionTimeoutMs }),
     ...(decisionPollMs === undefined ? {} : { decisionPollMs }),
     ...(hostIntegration === undefined ? {} : { hostIntegration }),
+    ...(executor === undefined ? {} : { executor }),
   };
 }
 

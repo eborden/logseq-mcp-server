@@ -1,4 +1,4 @@
-// Starts one IssueWorkflow run. `npm run run-issue -- --issue 123 [--base main] [--repo-dir <abs>] [--worktree-dir <abs>] [--wait] [--host-integration]`.
+// Starts one IssueWorkflow run. `npm run run-issue -- --issue 123 [--base main] [--repo-dir <abs>] [--worktree-dir <abs>] [--wait] [--host-integration] [--executor local|remote]`.
 // An issue that already has a run (open or closed) is reported, not an error: see src/issue-client.ts. The workflow
 // never merges and never moves an item to Ready or Backlog; the README says what it does.
 
@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { Client, Connection } from '@temporalio/client';
 import { loadConfig } from './config.ts';
 import { startIssueRun } from './issue-client.ts';
-import { hostIntegrationForFlag, issueWorkflowId, parseIssueWorkflowInput } from './issue-types.ts';
+import { executorForFlag, hostIntegrationForFlag, issueWorkflowId, parseIssueWorkflowInput } from './issue-types.ts';
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
@@ -21,6 +21,8 @@ async function main(): Promise<void> {
       wait: { type: 'boolean', default: false },
       // Runs the host integration check at the gate and holds the gate until it passes (#648). Needs the `host` worker.
       'host-integration': { type: 'boolean', default: false },
+      // Where the model sessions run (#671): `local` (the default) or `remote`. `remote` is not usable yet: the run stops for a person.
+      executor: { type: 'string' },
     },
     strict: true,
   });
@@ -32,6 +34,7 @@ async function main(): Promise<void> {
     worktreeDir: resolve(values['worktree-dir'] ?? `${repoDir}/.claude/worktrees/issue-${issueNumber}`),
     base: values.base,
     ...hostIntegrationForFlag(values['host-integration']),
+    ...executorForFlag(values.executor),
   });
 
   const connection = await Connection.connect({ address: config.address, connectTimeout: '10 seconds' });

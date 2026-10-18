@@ -47,6 +47,7 @@ import { GITHUB_ACTIVITY_OPTIONS } from '../github-policy.ts';
 import { DEFAULT_REVIEW_LOOP_TIMEOUT_MS } from '../review-policy.ts';
 import { maintainerDecisionSignal } from '../approval-types.ts';
 import { createDecisionInbox, decisionStage } from './decision.ts';
+import { onExecutor } from './executor.ts';
 import { reviewLoop } from './review-loop.ts';
 import {
   BOARD_CONFIRM_READS,
@@ -183,7 +184,7 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   }
   await confirmStatus('confirm_claim', { kind: 'issue', number: issue }, 'In progress');
 
-  const session = await step('session', () => implementer.runImplementerSession(input));
+  const session = await onExecutor(input.executor, 'session', stop, () => step('session', () => implementer.runImplementerSession(input)));
   if (session.exitStatus !== 'success') {
     return await stop('session', SESSION_STOP_REASONS[session.exitStatus]);
   }
