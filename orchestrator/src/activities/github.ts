@@ -33,12 +33,14 @@ import {
   parseCreatedCommentId,
   parseCreatedPr,
   parseCreatedReviewId,
+  parseFindingsCandidate,
   parseGate,
   parseIssueHead,
   parseItemAuthor,
   parseIssueClosed,
   parseItemBoardStatus,
   parseList,
+  parseMinimized,
   parseOpenPr,
   parsePrFilePaths,
   parsePrState,
@@ -49,6 +51,7 @@ import {
   parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
+import type { FindingsCandidate } from '../findings-comment.ts';
 import type { RemoteGithub } from './remote-session.ts';
 import {
   HOST_INTEGRATION_CONTEXT,
@@ -315,6 +318,10 @@ const THREADS_QUERY =
   'comments(first:30){pageInfo{hasNextPage} nodes{databaseId authorAssociation body}}}}}}}';
 
 const THREAD_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+// Hides one comment as outdated (#674). The comment stays readable behind "show", and hiding it twice is a no-op, so a retry is safe.
+const MINIMIZE_MUTATION = 'mutation($id:ID!){minimizeComment(input:{subjectId:$id,classifier:OUTDATED}){minimizedComment{isMinimized}}}';
+const NODE_ID = /^[A-Za-z0-9_=-]{1,100}$/;
 
 function parseReplyInput(raw: unknown): ReplyToThreadInput {
   const input = inputObject(raw, 'replyToThread input');
@@ -820,6 +827,23 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     return threads;
   }
 
+  /** The PR's conversation comments for the findings parser (#674). An untrusted author's body is not read. Bounded by `listAll`. */
+  async function listFindingsCandidates(raw: unknown): Promise<FindingsCandidate[]> {
+    const pr = parseIssueNumber(raw, 'pr');
+    return (await listAll(`${repoRoute}/issues/${pr}/comments`, 'pr comments', parseFindingsCandidate)).items;
+  }
+
+  /** Hides the raw findings comment (#674). Idempotent. Refuses an answer that does not show the comment hidden. */
+  async function minimizeComment(raw: unknown): Promise<{ readonly minimized: true }> {
+    const input = inputObject(raw, 'minimizeComment input');
+    const id = inputText(input, 'nodeId', NODE_ID, 100);
+    const data = await gh.graphql(MINIMIZE_MUTATION, { id });
+    if (!parseMinimized(data)) {
+      throw new GhError('gh api graphql: minimizeComment did not report the comment hidden', 'malformed');
+    }
+    return { minimized: true };
+  }
+
   /**
    * Replies in a review thread once. The body carries a hidden marker with the idempotency key, and a retry looks for
    * it in the thread's comments first. A thread that is no longer open gets no reply (`posted: false`). Nothing here
@@ -858,6 +882,8 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     closeIssue,
     listReviewThreads,
     replyToThread,
+    listFindingsCandidates,
+    minimizeComment,
     getHostIntegration,
     postCommitStatus,
     openPrsFor,
@@ -902,6 +928,8 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     closeIssue: activity((ops, issue: number) => ops.closeIssue(issue)),
     listReviewThreads: activity((ops, pr: number) => ops.listReviewThreads(pr)),
     replyToThread: activity((ops, input: ReplyToThreadInput) => ops.replyToThread(input)),
+    listFindingsCandidates: activity((ops, pr: number) => ops.listFindingsCandidates(pr)),
+    minimizeComment: activity((ops, input: { nodeId: string }) => ops.minimizeComment(input)),
     getHostIntegration: activity((ops, input: { sha: string }) => ops.getHostIntegration(input)),
     postCommitStatus: activity((ops, input: PostCommitStatusInput) => ops.postCommitStatus(input)),
   };

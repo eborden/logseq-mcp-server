@@ -6,6 +6,7 @@
 // `author_association` first, and the text of an item from any author other than OWNER, MEMBER or COLLABORATOR is
 // never read, copied or returned. The filter lives here, inside the listing parse, so no caller can forget it.
 
+import type { FindingsCandidate } from './findings-comment.ts';
 import { GhError } from './gh.ts';
 import type { BoardStatus, IssueComment, IssueView, ItemKind, ReviewThread } from './types.ts';
 
@@ -144,6 +145,32 @@ export function parseComment(raw: unknown, path: string): IssueComment | undefin
     createdAt: str(comment, 'created_at', 'issue comments', path),
     body: strOrEmpty(comment, 'body', 'issue comments', path),
   };
+}
+
+/**
+ * One PR comment for the findings parser (#674). The body of an author who is not trusted is never read: the candidate
+ * keeps its ids and `trusted: false` with an empty body, as a thread comment does.
+ */
+export function parseFindingsCandidate(raw: unknown, path: string): FindingsCandidate {
+  const comment = obj(raw, 'pr comments', path);
+  const trusted = isTrustedAssociation(comment.get('author_association'));
+  return {
+    id: int(comment, 'id', 'pr comments', path),
+    nodeId: str(comment, 'node_id', 'pr comments', path),
+    trusted,
+    body: trusted ? strOrEmpty(comment, 'body', 'pr comments', path) : '',
+  };
+}
+
+/** True when a `minimizeComment` answer shows the comment hidden. */
+export function parseMinimized(raw: unknown): boolean {
+  const data = obj(raw, 'minimizeComment', 'data');
+  const result = data.get('minimizeComment');
+  if (typeof result !== 'object' || result === null) {
+    return false;
+  }
+  const minimized = (result as Record<string, unknown>)['minimizedComment'];
+  return typeof minimized === 'object' && minimized !== null && (minimized as Record<string, unknown>)['isMinimized'] === true;
 }
 
 export interface Blocker {
