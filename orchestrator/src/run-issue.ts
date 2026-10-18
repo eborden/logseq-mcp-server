@@ -7,7 +7,8 @@ import { parseArgs } from 'node:util';
 import { Client, Connection } from '@temporalio/client';
 import { loadConfig } from './config.ts';
 import { startIssueRun } from './issue-client.ts';
-import { executorForFlag, hostIntegrationForFlag, issueWorkflowId, parseIssueWorkflowInput } from './issue-types.ts';
+import { issueWorkflowId } from './issue-types.ts';
+import { buildRunInput } from './run-issue-input.ts';
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
@@ -26,15 +27,13 @@ async function main(): Promise<void> {
     },
     strict: true,
   });
-  const issueNumber = Number(values.issue);
-  const repoDir = resolve(values['repo-dir']);
-  const input = parseIssueWorkflowInput({
-    issueNumber,
-    repoDir,
-    worktreeDir: resolve(values['worktree-dir'] ?? `${repoDir}/.claude/worktrees/issue-${issueNumber}`),
+  const input = buildRunInput({
+    issue: values.issue,
     base: values.base,
-    ...hostIntegrationForFlag(values['host-integration']),
-    ...executorForFlag(values.executor),
+    repoDir: values['repo-dir'],
+    worktreeDir: values['worktree-dir'],
+    hostIntegration: values['host-integration'],
+    executor: values.executor,
   });
 
   const connection = await Connection.connect({ address: config.address, connectTimeout: '10 seconds' });
