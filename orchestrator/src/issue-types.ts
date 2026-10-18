@@ -87,6 +87,14 @@ export function findingsCommentNotHiddenComment(workflowId: string, pr: number, 
     'The review is posted and the run goes on. A person can hide that comment by hand: it is the one that starts with the orchestrator-findings marker.',
   ].join('\n\n');
 }
+/** Stop reasons of the remote implementer step (#673). Identifiers only. */
+export const REMOTE_SESSION_CLAIMED = 'RemoteSessionClaimed';
+export const REMOTE_LAUNCH_FAILED = 'RemoteLaunchFailed';
+export const REMOTE_SESSION_TIMED_OUT = 'RemoteSessionTimedOut';
+export const REMOTE_NO_HEAD = 'RemoteSessionNoHead';
+export const REMOTE_BRANCH_MOVED = 'BranchMoved';
+/** The most remote implementer sessions one run starts: the first, and one more after a session that ended with no push. */
+export const REMOTE_IMPLEMENTER_ATTEMPTS = 2;
 
 /** What `run-issue --executor <value>` adds to the run input: no field without the flag (the default is local). Any value but `local` and `remote` is refused. */
 export function executorForFlag(flag: string | undefined): { readonly executor?: Executor } {

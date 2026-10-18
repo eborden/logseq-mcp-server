@@ -118,6 +118,14 @@ function fakeActivities() {
       worldOf(raw.issueNumber).hit('runImplementerSession');
       return { branch: issueBranch(raw.issueNumber), headSha: HEAD, exitStatus: 'success' as const };
     },
+    runRemoteImplementerSession: async (raw: { issueNumber: number }) => {
+      worldOf(raw.issueNumber).hit('runRemoteImplementerSession');
+      return { outcome: 'finished' as const, sessionId: 'session_01AAA', headSha: HEAD };
+    },
+    guardRemoteBranch: async (raw: { branch: string; headSha: string }) => {
+      worldOf(Number(/^claude\/(\d+)$/.exec(raw.branch)?.[1])).hit('guardRemoteBranch');
+      return { branch: raw.branch, headSha: raw.headSha, files: 1 };
+    },
     guardBranch: async (raw: { branch: string; headSha: string }) => ({ branch: raw.branch, headSha: raw.headSha, files: 1 }),
     pushBranch: async (raw: { branch: string; headSha: string }) => ({ branch: raw.branch, headSha: raw.headSha }),
     openPr: async (input: { head: string }) => {
@@ -223,17 +231,19 @@ test('with no executor, and with local, the run is v1: one implementer and one r
   }
 });
 
-test('executor remote stops the run with RemoteExecutorUnavailable, one keyed comment of identifiers, and no session or PR', { timeout: 120_000 }, async () => {
+test('executor remote runs the implementer remotely, guards before the PR, then stops at the reviewer with RemoteExecutorUnavailable and no review session', { timeout: 120_000 }, async () => {
   const { issue, world, started } = start({ executor: 'remote' });
   const cause = await failure(issue, started);
   const [step, reason] = cause.details ?? [];
   assert.equal(cause.type, ISSUE_STOPPED_FAILURE);
   assert.equal(reason, REMOTE_EXECUTOR_UNAVAILABLE);
-  assert.equal(step, 'session');
-  assert.equal(world.called('runImplementerSession'), 0, 'no implementer session is started');
+  assert.equal(step, 'review_session', 'the reviewer is not remote yet (a later task of #643)');
+  assert.equal(world.called('runImplementerSession'), 0, 'no local implementer session is started');
+  assert.equal(world.called('runRemoteImplementerSession'), 1);
+  assert.equal(world.called('guardRemoteBranch'), 1);
   assert.equal(world.called('runReviewerSession'), 0);
-  assert.equal(world.called('openPr'), 0);
-  assert.deepEqual([...world.comments.keys()], [stopCommentKey('session', REMOTE_EXECUTOR_UNAVAILABLE)]);
+  assert.equal(world.called('openPr'), 1);
+  assert.deepEqual([...world.comments.keys()], [stopCommentKey('review_session', REMOTE_EXECUTOR_UNAVAILABLE)]);
   const body = [...world.comments.values()][0] ?? '';
   assert.ok(body.includes(REMOTE_EXECUTOR_UNAVAILABLE) && body.includes(issueWorkflowId(issue)));
 });
