@@ -3,6 +3,7 @@
 // variable and never echoes a secret (there are none in v1).
 
 import { protectedDenyRules } from './diff-guard.ts';
+import { HOST_TASK_QUEUE_NAME } from './host-integration-policy.ts';
 
 export interface Config {
   /** host:port of the Temporal frontend. */
@@ -93,6 +94,33 @@ export function loadConfig(env: Env): Config {
   }
 
   return { address, namespace, taskQueue };
+}
+
+export interface HostConfig {
+  /** The queue the second worker polls. Always the policy's `host`: the workflow routes the activity by that name. */
+  readonly taskQueue: string;
+  /** The working copy the throwaway worktrees are made from. Absent means the directory the worker started in. */
+  readonly repoDir: string | undefined;
+}
+
+/**
+ * The host worker (#647) is off unless `HOST_TASK_QUEUE` is set: to `host` (the queue's name), `1` or `true`. Any other
+ * value is an error, so a typo never starts a worker on a queue the workflow does not use. `HOST_REPO_DIR` names the
+ * working copy (an absolute path); without it the worker uses its own directory.
+ */
+export function loadHostConfig(env: Env): HostConfig | undefined {
+  const raw = blankAsAbsent(env['HOST_TASK_QUEUE']);
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (raw !== HOST_TASK_QUEUE_NAME && raw !== '1' && raw !== 'true') {
+    throw new ConfigError(`HOST_TASK_QUEUE must be ${HOST_TASK_QUEUE_NAME}, 1 or true (or unset to leave the host worker off)`);
+  }
+  const repoDir = blankAsAbsent(env['HOST_REPO_DIR']);
+  if (repoDir !== undefined && (!repoDir.startsWith('/') || repoDir.length > 1024 || repoDir.includes('\0'))) {
+    throw new ConfigError('HOST_REPO_DIR must be an absolute path');
+  }
+  return { taskQueue: HOST_TASK_QUEUE_NAME, repoDir };
 }
 
 const CLAUDE_BIN = /^(\/[^\0]{1,1023}|[A-Za-z0-9._-]{1,100})$/;
