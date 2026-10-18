@@ -225,6 +225,22 @@ export function parseReportCounts(text: string): { passed: number; failed: numbe
   return { passed, failed };
 }
 
+/**
+ * The pure half of the fixture proof: the suite's environment holds no `LOGSEQ_MCP_CONFIG` (so `connectFixture()` can only read the
+ * config `start` wrote) and that config's `apiUrl` is a fixture instance. `configText` is `undefined` when the file is missing.
+ */
+export function provesFixtureRun(env: Readonly<Record<string, string>>, configText: string | undefined): boolean {
+  if ('LOGSEQ_MCP_CONFIG' in env || configText === undefined) {
+    return false;
+  }
+  try {
+    const config: unknown = JSON.parse(configText);
+    return typeof config === 'object' && config !== null && 'apiUrl' in config && isFixtureApiUrl(config.apiUrl);
+  } catch {
+    return false;
+  }
+}
+
 export function createHostIntegrationActivities(options: HostIntegrationOptions) {
   const limits: HostLimits = { ...DEFAULT_LIMITS, ...options.limits };
   const runner = options.runner ?? createProcessRunner();
@@ -420,19 +436,7 @@ export function createHostIntegrationActivities(options: HostIntegrationOptions)
      * config names a loopback API in the fixture's port range, never LogSeq's own port. Anything else is not a fixture run.
      */
     async function provedFixtureRun(treeDir: string): Promise<boolean> {
-      if ('LOGSEQ_MCP_CONFIG' in commandEnv) {
-        return false;
-      }
-      const text = await readSmall(join(treeDir, '.logseq-instance', 'config.json'), 100_000);
-      if (text === undefined) {
-        return false;
-      }
-      try {
-        const config: unknown = JSON.parse(text);
-        return typeof config === 'object' && config !== null && 'apiUrl' in config && isFixtureApiUrl(config.apiUrl);
-      } catch {
-        return false;
-      }
+      return provesFixtureRun(commandEnv, await readSmall(join(treeDir, '.logseq-instance', 'config.json'), 100_000));
     }
   }
 

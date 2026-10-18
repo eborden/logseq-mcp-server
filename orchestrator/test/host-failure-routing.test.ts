@@ -20,7 +20,7 @@ import type { Client } from '@temporalio/client';
 import { MockActivityEnvironment } from '@temporalio/testing';
 import type { TestWorkflowEnvironment } from '@temporalio/testing';
 import { bundleWorkflowCode, Worker } from '@temporalio/worker';
-import { createHostIntegrationActivities } from '../src/activities/host-integration.ts';
+import { createHostIntegrationActivities, provesFixtureRun } from '../src/activities/host-integration.ts';
 import type { CommandResult, CommandRunner, CommandSpec } from '../src/activities/host-integration.ts';
 import { buildRemoteFixerBrief } from '../src/brief.ts';
 import { loadServerConfig } from '../src/config.ts';
@@ -153,11 +153,24 @@ test('a run that cannot prove it was on the fixture gives counts only', async ()
   assert.equal(isFixtureApiUrl('http://127.0.0.1:12319'), false);
 });
 
+test('the proof refuses an environment that holds LOGSEQ_MCP_CONFIG, even with a fixture config', () => {
+  const config = JSON.stringify(FIXTURE_CONFIG);
+  assert.equal(provesFixtureRun({ PATH: '/usr/bin' }, config), true);
+  assert.equal(provesFixtureRun({ PATH: '/usr/bin', LOGSEQ_MCP_CONFIG: '/home/x/.logseq-mcp/config.json' }, config), false);
+  assert.equal(provesFixtureRun({}, undefined), false);
+  assert.equal(provesFixtureRun({}, 'not json'), false);
+});
+
 test('a fail whose report names no failing test gives counts only, and a pass carries no summary', async () => {
   runner.reportText = JSON.stringify({ numPassedTests: 3, numFailedTests: 1, testResults: [{ assertionResults: [{ status: 'passed' }] }] });
   assert.deepEqual(await runHost(), { outcome: 'fail', passed: 3, failed: 1 });
   assert.equal(summariseHostFailures('not json'), undefined);
   assert.equal(summariseHostFailures('[]'), undefined);
+});
+
+test('the bounds are pinned: 10 tests, 200 characters a name, 300 an assertion line', () => {
+  // A change to a bound is a BR-0006 and privacy decision: it has to be made here on purpose.
+  assert.deepEqual([MAX_FAILURE_TESTS, MAX_FAILURE_NAME_CHARS, MAX_FAILURE_MESSAGE_CHARS], [10, 200, 300]);
 });
 
 test('the summary is capped, one line per field, and says what it cut', () => {
