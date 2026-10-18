@@ -16,6 +16,7 @@
 //   claim        claimIssue: acts on `proceed`, never on `claimed` alone
 //   confirm      the board shows In progress (the claim's own write is not read back by the claim)
 //   session      runImplementerSession: the brief, then one `claude -p` session on the branch `claude/<n>`
+//                (`executor: remote`: remote-implementer.ts, where the guard runs on the fetched branch, a refusal deletes it, no push)
 //   guard        guardBranch: the diff has no protected path, is not empty and is not huge (counts only)
 //   push         pushBranch: the only push, with fixed argv; the session cannot push
 //   open_pr      openPr
@@ -48,6 +49,7 @@ import { DEFAULT_REVIEW_LOOP_TIMEOUT_MS } from '../review-policy.ts';
 import { maintainerDecisionSignal } from '../approval-types.ts';
 import { createDecisionInbox, decisionStage } from './decision.ts';
 import { onExecutor } from './executor.ts';
+import { remoteImplementer } from './remote-implementer.ts';
 import { reviewLoop } from './review-loop.ts';
 import {
   BOARD_CONFIRM_READS,
@@ -108,6 +110,14 @@ function failureReason(error: unknown): StopReason {
     return 'ActivityTimeout';
   }
   return 'ActivityFailed';
+}
+
+/** The counts line of a guard refusal (`the branch changes N file(s), ...`), which is numbers and fixed words, or undefined. */
+function guardCounts(error: unknown): string | undefined {
+  const cause = error instanceof ActivityFailure ? error.cause : error;
+  const message = cause instanceof ApplicationFailure ? cause.message : '';
+  const match = /^the branch changes \d{1,9} file\(s\), \d{1,9} protected path\(s\) and \d{1,9} special file\(s\) in its commits$/.exec(message);
+  return match === null ? undefined : `${match[0]}.`;
 }
 
 export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> {
@@ -184,14 +194,22 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   }
   await confirmStatus('confirm_claim', { kind: 'issue', number: issue }, 'In progress');
 
-  const session = await onExecutor(input.executor, 'session', stop, () => step('session', () => implementer.runImplementerSession(input)));
-  if (session.exitStatus !== 'success') {
-    return await stop('session', SESSION_STOP_REASONS[session.exitStatus]);
-  }
+  // Where the guard sits depends on the executor (#673). Local: the session cannot push, so the guard reads the local branch and
+  // `pushBranch` publishes it. Remote: the session pushed its own branch, so the guard runs on the fetched tip before the PR
+  // opens, a refusal deletes the branch, and there is no push.
+  let checked: { readonly headSha: string };
+  if (input.executor === 'remote') {
+    checked = await remoteImplementer({ input, branch, step, stop, reasonOf: failureReason, isCancellation, countsOf: guardCounts });
+  } else {
+    const session = await onExecutor(input.executor, 'session', stop, () => step('session', () => implementer.runImplementerSession(input)));
+    if (session.exitStatus !== 'success') {
+      return await stop('session', SESSION_STOP_REASONS[session.exitStatus]);
+    }
 
-  // The session cannot push. The diff is checked first (protected paths, size), then the one push, with fixed argv.
-  const checked = await step('guard', () => branches.guardBranch({ repoDir: input.repoDir, branch, headSha: session.headSha, base: input.base }));
-  await step('push', () => branches.pushBranch({ repoDir: input.repoDir, branch, headSha: checked.headSha, base: input.base }));
+    // The session cannot push. The diff is checked first (protected paths, size), then the one push, with fixed argv.
+    checked = await step('guard', () => branches.guardBranch({ repoDir: input.repoDir, branch, headSha: session.headSha, base: input.base }));
+    await step('push', () => branches.pushBranch({ repoDir: input.repoDir, branch, headSha: checked.headSha, base: input.base }));
+  }
 
   const opened = await step('open_pr', () =>
     github.openPr({ head: branch, base: input.base, title: pullRequestTitle(issue), body: pullRequestBody(issue, branch) }),
