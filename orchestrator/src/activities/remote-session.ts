@@ -69,7 +69,7 @@ export interface RemoteSessionDeps {
 
 type Marker = { readonly kind: 'firing' } | { readonly kind: 'fired'; readonly sessionId: string; readonly firedAt: number };
 
-const SESSION_ID = /^session_[A-Za-z0-9]{1,100}$/;
+const SESSION_ID = /^(?:session|cse)_[A-Za-z0-9]{1,100}$/;
 
 function markerKey(input: RemoteSessionInput): string {
   // Attempt 1 (the default) keeps the key of #672; a later attempt adds `-a<n>`, so it fires fresh (#673).

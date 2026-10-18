@@ -345,6 +345,17 @@ test('the outcome is read from GitHub: the session cannot say it finished', asyn
   assert.ok(!('headSha' in result));
 });
 
+test('a cse_ session id is recorded in the marker and read back, so a retry re-attaches and fires nothing', async () => {
+  scenario.fire.script = [{ sessionId: 'cse_ABC123', url: 'https://claude.ai/code/cse_ABC123' }];
+  pushLater(30_000);
+  const first = await run(implementerInput);
+  assert.equal(first.sessionId, 'cse_ABC123');
+  assert.match(await markers(), /^orchestratorremote\.123-implementer-none\.state fired cse_ABC123 \d+$/m);
+  const again = await run(implementerInput);
+  assert.equal(scenario.fire.calls.length, 1, 'the marker was readable, so nothing fired');
+  assert.equal(again.sessionId, 'cse_ABC123');
+});
+
 // ---- idempotency -------------------------------------------------------------------------------------------------
 
 test('a repeated call after a recorded session id launches nothing and returns the same session', async () => {
@@ -600,6 +611,20 @@ test('the client sends exactly the four documented headers, with the beta versio
   assert.equal(headers['anthropic-version'], '2023-06-01');
   assert.equal(headers['anthropic-beta'], 'experimental-cc-routine-2026-04-01');
   assert.equal(headers['content-type'], 'application/json');
+});
+
+test('the client takes the real answer shape (cse_ id and URL) and still refuses a bad prefix or an over-long body', async () => {
+  const answer = (id: string, url: string) => ({ status: 200, json: { claude_code_session_id: id, claude_code_session_url: url } });
+  const fire = (a: ReturnType<typeof answer>) => createRoutineFireClient({ tokens: TOKENS, fetch: fakeFetch(a) }).fire('trig_impl1', BRIEF);
+  assert.deepEqual(await fire(answer('cse_ABC123', 'https://claude.ai/code/cse_ABC123')), { sessionId: 'cse_ABC123', url: 'https://claude.ai/code/cse_ABC123' });
+  const refused = (error: unknown) => error instanceof FireError && error.kind === 'malformed';
+  await assert.rejects(fire(answer('xyz_ABC123', 'https://claude.ai/code/xyz_ABC123')), refused);
+  await assert.rejects(fire(answer('cse_ABC123', 'https://claude.ai/code/session_OTHER/x')), refused);
+  await assert.rejects(fire(answer('cse_AB-C', 'https://claude.ai/code/cse_AB-C')), refused);
+  const long = `cse_${'A'.repeat(101)}`;
+  await assert.rejects(fire(answer(long, `https://claude.ai/code/${long}`)), refused);
+  const edge = `cse_${'A'.repeat(100)}`;
+  assert.equal((await fire(answer(edge, `https://claude.ai/code/${edge}`))).sessionId, edge);
 });
 
 test('the client maps statuses to kinds, reads Retry-After, and no error holds the token, the text or a body', async () => {
