@@ -144,6 +144,7 @@ npm run run-issue -- --issue 123 --base feature/x --wait   # PR against another 
 | `session` `SessionTimeout`, `SessionError`, `MalformedResult` | The session ran past 30 minutes, ended in error or printed something that is not a result. The branch is marked `error` | Read the worktree and the issue comment, then "Recovering a stuck branch" (delete the branch to try again) before deleting the run |
 | `session` `ClaudeUnavailable` | The `claude` executable could not start. The branch and worktree were removed | Fix `CLAUDE_BIN` or PATH, then delete the run and start again |
 | `session` `SessionInterrupted`, `SessionClaimed`, `SessionExistingBranch` | A session started and never finished (a killed worker), or the branch exists and was not made by this workflow | "Recovering a stuck branch": make sure no `claude -p` is still running, then remove the worktree and branch |
+| `session`, `review_session`, `fix_session` `RemoteExecutorUnavailable` | The run asked for `executor: 'remote'` and no remote session activity exists yet. No session was started | Start the run again without `--executor remote` (or with `--executor local`) after deleting the closed run ("Recovering a stuck run") |
 | `session` `BriefTooLarge`, `InvalidState` | The issue and its comments do not fit a prompt, or the issue is closed | Shorten the issue, or leave it closed |
 | `guard` `ProtectedPath`, `SpecialFile`, `DiffTooLarge`, `EmptyDiff` | Some commit of the branch changes a protected path or a symlink, submodule or file mode, or the branch changes more than 300 files, or nothing. Nothing was pushed. The comment has counts only | Look at `git log --raw origin/<base>..claude/<n>` in the worktree. If the change is wanted, make it yourself in a PR you write; to run the issue again, delete the branch ("Recovering a stuck branch"), then the run |
 | `push` `PushRejected`, `BranchMoved` | The remote refused the push (for example `claude/<n>` already exists with other history), or the branch is not at the commit the session ended at | Look at the remote branch and the local one, fix or delete the one that is wrong, then delete the run and start again: the finished session is not run again |
@@ -240,6 +241,15 @@ After the review loop the run waits for the maintainer, with a signal, at no cos
 **What changed for the review loop.** With the decision wait on, a loop that finds only threads it may not act on (`waiting_for_threads`) no longer ends the run: it comments once, then holds at the gate until the maintainer resolves them, so a decision signalled meanwhile is not lost. At the limit it ends `decision_timeout`. `awaitDecision: false` keeps the old endings.
 
 **Not done here.** A webhook, a UI, the merge, and the `golden-change` label.
+
+## The executor flag (#671)
+
+`executor` is a field of the run's input, `'local'` or `'remote'`, and says where the model sessions (implementer, reviewer, fixer) run. Absent means `local`. It is parsed with the rest of the input (`parseIssueWorkflowInput`), so any other value fails the run as `InvalidInput` before an activity, and the review loop gets it with the rest of the input.
+
+- `local` is v1, unchanged: the workflow calls `runImplementerSession`, `runReviewerSession` and `runFixerSession` exactly as before. The default does not change.
+- `remote` is **not usable yet**. No remote session activity exists (the later tasks of plan #643 add it), so a run with `executor: 'remote'` stops at the first session step with the stop reason `RemoteExecutorUnavailable`, one comment on the issue (keyed `stopped-session-RemoteExecutorUnavailable`, identifiers only), and no session started. The claim has already moved the issue to In progress, as for any other stop at that step.
+
+**Turn it on.** `npm run run-issue -- --issue 123 --executor remote`. Any value other than `local` and `remote` is an error before a workflow starts. The one choice point is `onExecutor` in `src/workflows/executor.ts`.
 
 ## Host integration (#647)
 
@@ -401,6 +411,7 @@ Settings (all optional, read once in `src/gh-config.ts`): `ORCHESTRATOR_GH_PATH`
 | `src/activities/branch.ts`, `src/branch-types.ts`, `src/diff-guard.ts` | `guardBranch` and `pushBranch` (the only push), their input parsing and bounds, and the pure diff guard |
 | `src/activities/implementer.ts` | `runImplementerSession`: reads the issue, builds the brief and runs the session in one activity, so issue text stays out of the history |
 | `src/activities/host-integration.ts`, `src/host-integration-policy.ts` | `runHostIntegration` (#647): the integration suite on a PR head, on the host only; its input, result, queue name and bounds (importable from workflow code) |
+| `src/workflows/executor.ts` | `onExecutor` (#671): the one place the workflow chooses `local` or `remote` for a session |
 | `src/workflows/host-integration.ts`, `src/integration-policy.ts` | The host integration check at the gate (#648): once per head, run, record, stop; the rule for when it is needed and the commit status (#646, importable from workflow code) |
 | `src/activities/remote-session.ts`, `src/remote-session-policy.ts`, `src/routine-fire.ts` | `runRemoteSession` (#672): claim, marker, fire and bounded wait for a remote session; its input, result and bounds (importable from workflow code); the routine fire client |
 | `src/start-server.ts`, `src/dev-server.ts` | The dev server launcher |
