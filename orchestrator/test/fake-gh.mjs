@@ -257,6 +257,19 @@ if (argv[0] === 'api') {
     const found = (state.prStates ?? {})[match[1]];
     found === undefined ? respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 }) : send(200, found);
   }
+  if ((match = /^repos\/[^/]+\/[^/]+\/commits\/([0-9a-f]{40})\/status$/.exec(path)) && method === 'GET') {
+    // The combined status of a commit (#646): the latest status of each context from `state.statuses[<sha>]` (oldest first).
+    const latest = new Map();
+    for (const status of (state.statuses ?? {})[match[1]] ?? []) latest.set(status.context, status);
+    const statuses = [...latest.values()];
+    send(200, { sha: match[1], state: 'pending', total_count: state.statusTotal ?? statuses.length, statuses: statuses.slice(0, Number(params.get('per_page') ?? 30)) });
+  }
+  if ((match = /^repos\/[^/]+\/[^/]+\/statuses\/([0-9a-f]{40})$/.exec(path)) && method === 'POST') {
+    const sent = JSON.parse(stdin);
+    ((state.statuses ??= {})[match[1]] ??= []).push({ context: sent.context, state: sent.state, description: sent.description });
+    save();
+    send(201, { state: sent.state, context: sent.context });
+  }
   if ((match = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/files$/.exec(path))) {
     send(200, page(((state.prFiles ?? {})[match[1]] ?? []).map((file) => (typeof file === 'string' ? { filename: file } : file)), params));
   }

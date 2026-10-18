@@ -43,3 +43,26 @@ export const GITHUB_ACTIVITY_OPTIONS: ActivityOptions = {
     nonRetryableErrorTypes: NON_RETRYABLE_GITHUB_FAILURES,
   },
 };
+
+// ---- the host integration status (#646) --------------------------------------------------------------------------
+
+// Spelled out here, not imported from integration-policy.ts: the test of this file allows it no import but Temporal's.
+// The activities assign these to the policy's types, so the compiler keeps the two in step.
+
+/** What `postCommitStatus` takes: the commit, the state and, when the run finished, its counts. The context is fixed. */
+export interface PostCommitStatusInput {
+  readonly sha: string;
+  readonly state: 'pending' | 'success' | 'failure' | 'error';
+  readonly counts?: { readonly passed: number; readonly failed: number };
+}
+
+export interface PostCommitStatusResult {
+  /** True when this call wrote the status. A repeat of the state the head already shows answers false. */
+  readonly posted: boolean;
+}
+
+/** What `getHostIntegration` answers: the latest `host/integration` state of a commit, and its counts when it has them. */
+export interface HostIntegrationResult {
+  readonly state: 'none' | 'pending' | 'success' | 'failure' | 'error';
+  readonly counts?: { readonly passed: number; readonly failed: number };
+}
