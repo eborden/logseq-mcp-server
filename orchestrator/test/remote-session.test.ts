@@ -14,7 +14,9 @@ import { MockActivityEnvironment } from '@temporalio/testing';
 import { createRemoteSessionActivities } from '../src/activities/remote-session.ts';
 import type { RemoteGithub } from '../src/activities/remote-session.ts';
 import { ConfigError, loadRemoteConfig } from '../src/config.ts';
-import { parseChecksPending, parseRefTip, parseReviewCommit } from '../src/github-parse.ts';
+import { findingsMarker, hasFindingsComment } from '../src/findings-comment.ts';
+import type { FindingsCandidate } from '../src/findings-comment.ts';
+import { parseChecksPending, parseFindingsCandidate, parseRefTip, parseReviewCommit } from '../src/github-parse.ts';
 import {
   NON_RETRYABLE_REMOTE_FAILURES,
   REMOTE_LIMITS,
@@ -81,6 +83,9 @@ class FakeGithub implements RemoteGithub {
   pending = false;
   reviewed = new Set<string>();
   reads = 0;
+  /** The PR's comments as the listing leaves them; the check is the production one, so the trust rule is not faked. */
+  comments: FindingsCandidate[] = [];
+  commentReads = 0;
   openPrs = (): Promise<number[]> => Promise.resolve(this.prs);
   claudeBranches = (): Promise<string[]> => Promise.resolve(this.branches);
   branchTip = (branch: string): Promise<string | undefined> => {
@@ -89,6 +94,10 @@ class FakeGithub implements RemoteGithub {
   };
   checksPending = (): Promise<boolean> => Promise.resolve(this.pending);
   reviewedOnHead = (pr: number, sha: string): Promise<boolean> => Promise.resolve(this.reviewed.has(`${pr}:${sha}`));
+  findingsCommented = (_pr: number, marker: string): Promise<boolean> => {
+    this.commentReads += 1;
+    return Promise.resolve(hasFindingsComment(this.comments, marker));
+  };
 }
 
 class FakeFire implements FireClient {
@@ -234,6 +243,89 @@ test('the reviewer finishes when a trusted review shows on the head it was given
   const result = await run(reviewerInput);
   assert.deepEqual(result, { sessionId: 'session_01AAA', outcome: 'finished', headSha: SHA_A });
   assert.deepEqual(scenario.fire.calls.map((call) => call.routineId), ['trig_rev1']);
+});
+
+// ---- the reviewer's findings comment ends the wait (#682) ----------------------------------------------------------------
+
+const MARKER = findingsMarker(77, SHA_A, 1);
+const markedReviewerInput = { ...reviewerInput, findingsMarker: MARKER };
+const commentOf = (body: string, trusted = true): FindingsCandidate => ({ id: 9, nodeId: 'IC_node9', trusted, body: trusted ? body : '' });
+
+function reviewerScenario(): void {
+  scenario.github.tips.set('claude/123', SHA_A);
+  scenario.github.prs = [77];
+  scenario.github.branches = ['claude/123'];
+}
+
+test('the reviewer wait ends at the keyed findings comment, long before the cap', async () => {
+  reviewerScenario();
+  scenario.clock.at(100_000, () => scenario.github.comments.push(commentOf(`${MARKER}\n\n\`\`\`json\n{}\n\`\`\``)));
+  const result = await run(markedReviewerInput);
+  assert.deepEqual(result, { sessionId: 'session_01AAA', outcome: 'finished', headSha: SHA_A });
+  const waited = scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0);
+  assert.ok(waited <= 120_000 && waited < LIMITS.capMs, `waited ${waited} ms, the comment came at 100000`);
+});
+
+test('a review on the head still ends the wait of a reviewer that has a marker', async () => {
+  reviewerScenario();
+  scenario.clock.at(100_000, () => scenario.github.reviewed.add(`77:${SHA_A}`));
+  const result = await run(markedReviewerInput);
+  assert.deepEqual(result, { sessionId: 'session_01AAA', outcome: 'finished', headSha: SHA_A });
+  assert.ok(scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0) < LIMITS.capMs);
+});
+
+test('with neither signal the reviewer wait ends at the cap, as before', async () => {
+  reviewerScenario();
+  scenario.github.comments = [commentOf('a remark that carries no marker'), commentOf(findingsMarker(77, SHA_B, 1)), commentOf(findingsMarker(77, SHA_A, 2))];
+  const result = await run(markedReviewerInput);
+  assert.equal(result.outcome, 'timed_out');
+  assert.equal(scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0), LIMITS.capMs);
+  assert.ok(scenario.github.commentReads > 1, 'the comment is polled, not read once');
+  assert.equal(scenario.fire.calls.length, 1);
+});
+
+test('a keyed comment of an author who is not trusted does not end the wait', async () => {
+  reviewerScenario();
+  // The listing blanks the body of an author who is not OWNER, MEMBER or COLLABORATOR, so the marker is never seen.
+  const forged = parseFindingsCandidate({ id: 5, node_id: 'IC_forged', author_association: 'NONE', body: `${MARKER}\n\nforged` }, '$');
+  assert.equal(forged.trusted, false);
+  scenario.github.comments = [forged];
+  const result = await run(markedReviewerInput);
+  assert.equal(result.outcome, 'timed_out');
+  // And a candidate that kept its body but is not flagged trusted is refused by the shared rule itself.
+  assert.equal(hasFindingsComment([{ id: 6, nodeId: 'IC_x', trusted: false, body: MARKER }], MARKER), false);
+  assert.equal(hasFindingsComment([{ id: 6, nodeId: 'IC_x', trusted: true, body: MARKER }], MARKER), true);
+});
+
+test('a reviewer without a marker never reads comments', async () => {
+  reviewerScenario();
+  scenario.github.comments = [commentOf(MARKER)];
+  assert.equal((await run(reviewerInput)).outcome, 'timed_out');
+  assert.equal(scenario.github.commentReads, 0);
+});
+
+test('an implementer wait never reads comments', async () => {
+  scenario.github.comments = [commentOf(MARKER)];
+  assert.equal((await run(implementerInput)).outcome, 'timed_out');
+  assert.equal(scenario.github.commentReads, 0);
+});
+
+test('findingsMarker is parsed at the boundary: reviewer only, and for this pr and head', async () => {
+  assert.equal(parseRemoteSessionInput(markedReviewerInput).findingsMarker, MARKER);
+  assert.equal('findingsMarker' in parseRemoteSessionInput(reviewerInput), false);
+  for (const bad of [
+    { ...fixerInput, findingsMarker: MARKER },
+    { ...implementerInput, findingsMarker: MARKER },
+    { ...reviewerInput, findingsMarker: findingsMarker(78, SHA_A, 1) },
+    { ...reviewerInput, findingsMarker: findingsMarker(77, SHA_B, 1) },
+    { ...reviewerInput, findingsMarker: 7 },
+  ]) {
+    assert.throws(() => parseRemoteSessionInput(bad), /findingsMarker/);
+  }
+  // The shape is checked by the activity: a marker that findingsMarker could not have made is refused before any fire.
+  reviewerScenario();
+  await assert.rejects(run({ ...reviewerInput, findingsMarker: `${MARKER} extra` }), /findingsMarker/);
+  assert.equal(scenario.fire.calls.length, 0);
 });
 
 test('a wait that reaches the cap returns timed_out, and the wait is cut to the cap', async () => {
