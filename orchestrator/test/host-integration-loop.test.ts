@@ -23,7 +23,7 @@ import { startDevServer } from '../src/dev-server.ts';
 import { HOST_TASK_QUEUE_NAME } from '../src/host-integration-policy.ts';
 import type { HostIntegrationInput, HostIntegrationResult } from '../src/host-integration-policy.ts';
 import { buildHostDescription, parseHostStatusInput } from '../src/integration-policy.ts';
-import { ISSUE_STOPPED_FAILURE, issueWorkflowId, parseIssueWorkflowInput } from '../src/issue-types.ts';
+import { ISSUE_STOPPED_FAILURE, hostIntegrationForFlag, issueWorkflowId, parseIssueWorkflowInput } from '../src/issue-types.ts';
 import type { IssueRunResult, IssueWorkflowInput } from '../src/issue-types.ts';
 import { startIssueRun } from '../src/issue-client.ts';
 import type { BoardItemRef } from '../src/types.ts';
@@ -47,6 +47,14 @@ test('the workflow input takes hostIntegration auto or off, and refuses anything
   for (const bad of ['on', 'AUTO', true, 1, null, {}]) {
     assert.throws(() => parseIssueWorkflowInput({ ...base, hostIntegration: bad }), /hostIntegration must be auto or off/, JSON.stringify(bad));
   }
+});
+
+test('the --host-integration flag adds hostIntegration auto, and no field without it', () => {
+  const base = { issueNumber: 5, repoDir: '/work/repo', worktreeDir: '/work/wt', base: 'main' };
+  assert.deepEqual(hostIntegrationForFlag(true), { hostIntegration: 'auto' });
+  assert.deepEqual(hostIntegrationForFlag(false), {});
+  assert.equal(parseIssueWorkflowInput({ ...base, ...hostIntegrationForFlag(true) }).hostIntegration, 'auto');
+  assert.equal('hostIntegration' in parseIssueWorkflowInput({ ...base, ...hostIntegrationForFlag(false) }), false);
 });
 
 // ---- a model of one PR --------------------------------------------------------------------------------------------
@@ -98,6 +106,11 @@ type HostStep = HostIntegrationResult | 'throw_setup' | 'hang' | 'die_once';
 class World {
   merged = false;
   issueOpen = true;
+  /** Gate reads (1-based) before this one show the head as not settled. Read 1 is the review loop's and is always settled. 0 means always settled. */
+  settleAtRead = 0;
+  gateReads = 0;
+  /** What the gate shows on an unsettled read. */
+  unsettled = { reviewsOnHead: 0, unresolvedThreads: 1 };
   prHead = '';
   head1 = '';
   head2 = '';
@@ -224,7 +237,10 @@ function fakeActivities() {
       if (w.prHead === w.head2) {
         w.gateSwitchedAt ??= w.readShas.length;
       }
-      return { headSha: w.prHead, reviewsOnHead: 1, unresolvedThreads: 0, clear: true };
+      w.gateReads += 1;
+      const settled = w.gateReads === 1 || w.gateReads >= w.settleAtRead;
+      const counts = settled ? { reviewsOnHead: 1, unresolvedThreads: 0 } : w.unsettled;
+      return { headSha: w.prHead, ...counts, clear: counts.reviewsOnHead >= 1 && counts.unresolvedThreads === 0 };
     },
     commentIssue: async (input: { issue: number; key: string; body: string }) => {
       const w = worldOfIssue(input.issue >= PR_OFFSET ? input.issue - PR_OFFSET : input.issue);
@@ -430,7 +446,8 @@ test('a head with a success is not run again, and a pass on an earlier head does
   let release: () => void = () => undefined;
   world.blockRun.set(world.head2, new Promise<void>((resolve) => { release = resolve; }));
   const handle = await startRun(issue, { hostIntegration: 'auto' });
-  await until('the gate to be read on the head with a pass', () => world.counters.read >= 1);
+  // Read 1 is the check's own look at the head, read 2 the gate's, after the check has been judged: only then is "not run" settled.
+  await until('the gate to be read on the head with a pass', () => world.counters.read >= 2);
   assert.deepEqual(world.runs, [], 'a success already on the head is not run again');
   assert.deepEqual(world.statusWrites, []);
 
@@ -502,4 +519,34 @@ test('a check that never finishes ends at the activity bound with a stop for a p
   assert.deepEqual(world.statusWrites, ['a:pending:no counts', 'a:error:no counts']);
   assert.ok(world.runAttempts <= 2, 'no more attempts than the policy allows');
   releaseHang();
+});
+
+test('only a settled head is checked: a head with no review, or an open thread, spends nothing on the host until the gate settles', { timeout: 120_000 }, async () => {
+  for (const unsettled of [{ reviewsOnHead: 0, unresolvedThreads: 0 }, { reviewsOnHead: 1, unresolvedThreads: 1 }]) {
+    const { issue, world } = newWorld((w) => {
+      w.changedFiles = ['src/atlas.rs'];
+      w.settleAtRead = 6;
+      w.unsettled = unsettled;
+    });
+    await startRun(issue, { hostIntegration: 'auto' });
+    await until('several unsettled gate reads', () => world.gateReads >= 5);
+    assert.deepEqual(world.counters, { need: 0, read: 0, post: 0 }, JSON.stringify(unsettled));
+    assert.deepEqual(world.runs, []);
+    assert.deepEqual(world.statusWrites, []);
+
+    await until('the run after the gate settles', () => world.statusWrites.length === 2);
+    assert.deepEqual(world.runs, [world.head1], 'checked once, when settled');
+    assert.equal((await approveAndMerge(issue, world)).outcome, 'merged');
+    assert.deepEqual(world.runs, [world.head1]);
+  }
+});
+
+test('with awaitDecision false and hostIntegration auto the run ends at the review loop and the check is not run (documented)', { timeout: 120_000 }, async () => {
+  const { issue, world } = newWorld((w) => {
+    w.changedFiles = ['src/atlas.rs'];
+  });
+  await startRun(issue, { hostIntegration: 'auto', awaitDecision: false });
+
+  assert.equal((await resultOf(issue)).outcome, 'gate_clear');
+  noHostCalls(world);
 });
