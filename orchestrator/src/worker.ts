@@ -17,6 +17,7 @@ import * as hello from './activities/hello.ts';
 import { createImplementerActivities } from './activities/implementer.ts';
 import { createReviewActivities } from './activities/review.ts';
 import { createRemoteSessionActivities } from './activities/remote-session.ts';
+import type { RemoteSessionActivities } from './activities/remote-session.ts';
 import { createHostIntegrationActivities } from './activities/host-integration.ts';
 import { loadClaudeConfig, loadConfig, loadHostConfig, loadRemoteConfig } from './config.ts';
 import { loadGhConfig } from './gh-config.ts';
@@ -37,16 +38,7 @@ async function main(): Promise<void> {
     runClaudeSession: claude.runClaudeSession,
     repo: ghConfig.repo,
   });
-  const review = createReviewActivities({
-    readIssue: github.readIssue,
-    listReviewThreads: github.listReviewThreads,
-    replyToThread: github.replyToThread,
-    postReview: github.postReview,
-    repo: ghConfig.repo,
-    claude: claudeConfig,
-  });
-
-  const remote =
+  const remote: Partial<RemoteSessionActivities> =
     remoteConfig === undefined
       ? {}
       : createRemoteSessionActivities({
@@ -55,6 +47,18 @@ async function main(): Promise<void> {
           fire: createRoutineFireClient({ tokens: remoteConfig.tokens }),
           github: createRemoteGithubReads(ghConfig),
         });
+  const review = createReviewActivities({
+    readIssue: github.readIssue,
+    listReviewThreads: github.listReviewThreads,
+    replyToThread: github.replyToThread,
+    postReview: github.postReview,
+    repo: ghConfig.repo,
+    claude: claudeConfig,
+    // The remote reviewer (#674) runs only when the remote session activity does.
+    ...(remote.runRemoteSession === undefined
+      ? {}
+      : { remote: { runRemoteSession: remote.runRemoteSession, listFindingsCandidates: github.listFindingsCandidates, minimizeComment: github.minimizeComment } }),
+  });
 
   const connection = await NativeConnection.connect({ address: config.address });
   const worker = await Worker.create({

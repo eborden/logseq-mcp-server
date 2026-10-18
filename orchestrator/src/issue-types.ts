@@ -80,6 +80,14 @@ export type Executor = 'local' | 'remote';
 /** The stop reason of a run that asked for `executor: 'remote'` while no remote session activity is wired. */
 export const REMOTE_EXECUTOR_UNAVAILABLE = 'RemoteExecutorUnavailable';
 
+/** The note a run leaves when it could not hide a remote reviewer's raw findings comment (#674). Identifiers and counts only. */
+export function findingsCommentNotHiddenComment(workflowId: string, pr: number, round: number): string {
+  return [
+    `The orchestrator (workflow \`${workflowId}\`) posted its review of PR #${pr} (round ${round}), but could not hide the remote reviewer's raw findings comment on that PR.`,
+    'The review is posted and the run goes on. A person can hide that comment by hand: it is the one that starts with the orchestrator-findings marker.',
+  ].join('\n\n');
+}
+
 /** What `run-issue --executor <value>` adds to the run input: no field without the flag (the default is local). Any value but `local` and `remote` is refused. */
 export function executorForFlag(flag: string | undefined): { readonly executor?: Executor } {
   if (flag === undefined) {
@@ -193,6 +201,8 @@ export type IssueRunResult =
       readonly advisory: number;
       /** Advisory findings that did not fit the review body's bound. */
       readonly advisoryOmitted: number;
+      /** Remote reviewer rounds whose raw findings comment could not be hidden (#674). Present only for `executor: 'remote'`. The review was posted. */
+      readonly rawCommentsNotHidden?: number;
     }
   | {
       readonly outcome: 'waiting_for_threads';
@@ -205,6 +215,8 @@ export type IssueRunResult =
       readonly openThreads: number;
       readonly advisory: number;
       readonly advisoryOmitted: number;
+      /** Remote reviewer rounds whose raw findings comment could not be hidden (#674). Present only for `executor: 'remote'`. The review was posted. */
+      readonly rawCommentsNotHidden?: number;
     }
   | { readonly outcome: 'skipped'; readonly issueNumber: number; readonly reason: SkipReason }
   /** The maintainer asked for changes (#631). The run commented and stopped; nothing else moved. */
