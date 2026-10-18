@@ -68,7 +68,8 @@ export interface IssueWorkflowInput {
   readonly hostIntegration?: HostIntegrationMode;
   /**
    * Where the model sessions (implementer, reviewer, fixer) run (#671, plan #643). `local` (the default when absent) is v1,
-   * unchanged. `remote` has nothing behind it yet: the run stops for a person with `RemoteExecutorUnavailable` before any session.
+   * unchanged. `remote` runs the implementer (#673) and the reviewer (#674) remotely; the fixer is not remote yet, so a run that needs one
+   * stops for a person with `RemoteExecutorUnavailable` at the fixer step.
    */
   readonly executor?: Executor;
   /**
