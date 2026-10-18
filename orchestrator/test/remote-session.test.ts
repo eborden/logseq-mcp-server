@@ -14,7 +14,7 @@ import { MockActivityEnvironment } from '@temporalio/testing';
 import { createRemoteSessionActivities } from '../src/activities/remote-session.ts';
 import type { RemoteGithub } from '../src/activities/remote-session.ts';
 import { ConfigError, loadRemoteConfig } from '../src/config.ts';
-import { findingsMarker, hasFindingsComment } from '../src/findings-comment.ts';
+import { findingsMarker, hasFindingsComment, isFindingsMarker } from '../src/findings-comment.ts';
 import type { FindingsCandidate } from '../src/findings-comment.ts';
 import { parseChecksPending, parseFindingsCandidate, parseRefTip, parseReviewCommit } from '../src/github-parse.ts';
 import {
@@ -308,6 +308,13 @@ test('an implementer wait never reads comments', async () => {
   scenario.github.comments = [commentOf(MARKER)];
   assert.equal((await run(implementerInput)).outcome, 'timed_out');
   assert.equal(scenario.github.commentReads, 0);
+});
+
+test('the marker of the first review, round 0, is a findings marker (#687)', () => {
+  assert.equal(isFindingsMarker(findingsMarker(77, SHA_A, 0)), true);
+  assert.equal(isFindingsMarker(findingsMarker(77, SHA_A, 12)), true);
+  assert.equal(isFindingsMarker(findingsMarker(77, SHA_A, 1_000_000)), false);
+  assert.equal(isFindingsMarker(findingsMarker(77, SHA_A, 0).replace('round=0', 'round=00')), false);
 });
 
 test('findingsMarker is parsed at the boundary: reviewer only, and for this pr and head', async () => {
