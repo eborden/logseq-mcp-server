@@ -49,6 +49,12 @@ test('needsHostIntegration: a rename counts by both names', () => {
   assert.equal(needsHostIntegration([{ path: 'docs/b.md' }], true), false);
 });
 
+test('needsHostIntegration: an entry that is not a path at run time needs the check and never throws', () => {
+  for (const entry of [null, undefined, 5, {}, { path: 5 }, { path: 'docs/a.md', previousPath: 5 }]) {
+    assert.equal(needsHostIntegration([entry as never], true), true, JSON.stringify(entry));
+  }
+});
+
 test('needsHostIntegration: an incomplete read of the changed files needs the check, whatever was read', () => {
   assert.equal(needsHostIntegration([], false), true);
   assert.equal(needsHostIntegration(['docs/a.md'], false), true);

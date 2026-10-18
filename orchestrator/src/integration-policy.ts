@@ -26,8 +26,9 @@ export interface ChangedPath {
   readonly previousPath?: string;
 }
 
-function touchesHostCode(path: string): boolean {
-  const normal = normalizePath(path);
+function touchesHostCode(path: unknown): boolean {
+  // A value that is not a string cannot be shown to be outside the tree: over-report, never throw (activities hand over parsed JSON).
+  const normal = typeof path === 'string' ? normalizePath(path) : undefined;
   if (normal === undefined || normal === '') {
     // Not a path inside the work tree: never expected from git, and never waved through.
     return true;
@@ -47,11 +48,12 @@ export function needsHostIntegration(paths: readonly (string | ChangedPath)[], c
   if (!complete) {
     return true;
   }
-  return paths.some((entry) => {
-    if (typeof entry === 'string') {
+  return paths.some((entry: unknown) => {
+    if (typeof entry !== 'object' || entry === null) {
       return touchesHostCode(entry);
     }
-    return touchesHostCode(entry.path) || (entry.previousPath !== undefined && touchesHostCode(entry.previousPath));
+    const changed = entry as Partial<ChangedPath>;
+    return touchesHostCode(changed.path) || (changed.previousPath !== undefined && touchesHostCode(changed.previousPath));
   });
 }
 
