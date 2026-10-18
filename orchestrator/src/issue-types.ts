@@ -70,6 +70,11 @@ export interface IssueWorkflowInput {
 
 export type HostIntegrationMode = 'auto' | 'off';
 
+/** What `run-issue --host-integration` adds to the run input: `auto` with the flag, no field without it (the default is off). */
+export function hostIntegrationForFlag(flag: boolean): { readonly hostIntegration?: 'auto' } {
+  return flag ? { hostIntegration: 'auto' } : {};
+}
+
 export class InvalidIssueInputError extends Error {
   constructor(message: string) {
     super(message);
