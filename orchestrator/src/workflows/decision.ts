@@ -143,9 +143,8 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
             return false;
           }
           const looped = await reviewLoop({ input, pr, branch: issueBranch(issue), headSha: failedHead, step, stop, startRound: fixRoundsUsed, hostFailure: summary });
-          if ('fixRounds' in looped) {
-            fixRoundsUsed = looped.fixRounds;
-          }
+          // The loop reports the rounds it used; a round ran either way, so it is counted at least once.
+          fixRoundsUsed = 'fixRounds' in looped ? looped.fixRounds : fixRoundsUsed + 1;
           return true;
         }
       : undefined;
