@@ -1,6 +1,6 @@
 // The executor flag (#671, plan #643): `executor: 'local' | 'remote'`, parsed at the boundary, with `local` (the default)
-// leaving v1 as it was. `remote` runs the implementer (#673) and the reviewer (#674) remotely and stops the run for a person
-// at the first fixer step, the one session that is not remote yet.
+// leaving v1 as it was. `remote` runs the implementer (#673), the reviewer (#674) and the fixer (#675) remotely; here the
+// fake fixer does not run, so the run stops for a person at the first fixer step.
 // Real Temporal dev server and fake activities with counters; nothing calls GitHub, `claude` or LogSeq. Names are made up.
 
 import assert from 'node:assert/strict';
