@@ -27,6 +27,7 @@ import type { GithubActivities } from '../activities/github.ts';
 import type { BranchActivities } from '../activities/branch.ts';
 import type { ReviewActivities } from '../activities/review.ts';
 import { BRANCH_ACTIVITY_OPTIONS } from '../branch-types.ts';
+import { onExecutor } from './executor.ts';
 import { gateClear } from '../gate.ts';
 import { ISSUE_STEP_TIMEOUT, issueWorkflowId, waitingForThreadsComment } from '../issue-types.ts';
 import type { IssueRunResult, IssueStep, IssueWorkflowInput, StopReason } from '../issue-types.ts';
@@ -102,7 +103,7 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
 
   for (;;) {
     // A fresh session and a new review on the head as it is now: after a push this is the closing review of the round.
-    const reviewed = await step('review_session', () => sessions.runReviewerSession(stepInput()));
+    const reviewed = await onExecutor(input.executor, 'review_session', stop, () => step('review_session', () => sessions.runReviewerSession(stepInput())));
     for (const id of reviewed.acceptedThreadIds) {
       accepted.add(id);
     }
@@ -135,7 +136,7 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
       return await stop('review_loop', 'MaxRoundsReached');
     }
 
-    const fixed = await step('fix_session', () => sessions.runFixerSession(stepInput()));
+    const fixed = await onExecutor(input.executor, 'fix_session', stop, () => step('fix_session', () => sessions.runFixerSession(stepInput())));
     if (fixed.moved) {
       // The session cannot push: the diff is checked first (protected paths, size), then the one push, with fixed argv.
       const checked = await step('fix_guard', () => branches.guardBranch({ repoDir: input.repoDir, branch, headSha: fixed.headSha, base: input.base }));
