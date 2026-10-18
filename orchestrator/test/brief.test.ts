@@ -178,7 +178,8 @@ test('the remote brief tells the session to push its own branch and not to open 
   const brief = buildRemoteImplementerBrief(input());
   assert.ok(brief.includes('git push -u origin claude/123'));
   assert.ok(brief.includes('push that branch yourself with a normal push'));
-  assert.ok(brief.includes('never a force push'));
+  assert.ok(brief.includes('(`git push -u origin claude/123`, never a force push)'), 'the intro says never force');
+  assert.ok(brief.includes('with a normal push and never a force push, and never delete, reset or rewrite a branch'), 'the git limits say never force');
   assert.ok(brief.includes('You do NOT open a pull request'));
   assert.ok(brief.includes('Do not open a PR.'));
   assert.ok(!brief.includes('cannot push'), 'the local brief\'s claim is false in a cloud session');

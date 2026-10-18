@@ -147,7 +147,6 @@ function implementerBrief(input: BriefInput, remote: boolean): string {
   return brief;
 }
 
-
 export function buildBrief(input: BriefInput): string {
   return implementerBrief(input, false);
 }
