@@ -77,9 +77,12 @@ Read once at startup in `src/config.ts`. A bad value fails fast, naming the vari
 | `CLAUDE_ALLOWED_TOOLS` | the list in `DEFAULT_ALLOWED_TOOLS` (`src/config.ts`) | `runClaudeSession`; comma-separated tool rules such as `Edit,Bash(git status *)`, replaces the default list |
 | `CLAUDE_DISALLOWED_TOOLS` | the list in `DEFAULT_DISALLOWED_TOOLS` | `runClaudeSession`; comma-separated tool rules that are denied whatever an allow rule says. What you set is added to the default list and never replaces it |
 | `CLAUDE_SETTING_SOURCES` | `project` | `runClaudeSession`; comma-separated, from `user`, `project`, `local` (`--setting-sources`). The default leaves the host user's settings and hooks out |
+| `REMOTE_ROUTINE_IMPLEMENTER`, `REMOTE_ROUTINE_REVIEWER`, `REMOTE_ROUTINE_FIXER` | unset | `runRemoteSession` (#672): the id (`trig_...`) of each role's routine. Setting any of the six remote variables turns the activity on, and then all six are required |
+| `REMOTE_ROUTINE_IMPLEMENTER_TOKEN`, `REMOTE_ROUTINE_REVIEWER_TOKEN`, `REMOTE_ROUTINE_FIXER_TOKEN` | unset | **Secrets.** The bearer token of each routine (see "Remote sessions") |
+| `REMOTE_REPO_DIR` | the worker's directory | `runRemoteSession`: the working copy whose git config holds the session markers (an absolute path) |
 | `ORCHESTRATOR_ALLOW_BYPASS_PERMISSIONS` | unset | `runClaudeSession`; must be `yes-skip-all-permission-checks` for `bypassPermissions` to be accepted. Never set it for the workflow |
 
-There are no secrets. Workflow history is stored, so a run carries identifiers only, never graph data (BR-0001).
+The only secrets are the three routine tokens of the remote sessions: they are read once at startup, handed to the fire client and nowhere else, and never logged or put in a result, an error message or the workflow history. Workflow history is stored, so a run carries identifiers only, never graph data (BR-0001).
 
 ## How the crash guarantee works
 
@@ -298,6 +301,32 @@ To start again after a stop, delete the closed run and start it ("Recovering a s
 
 **What it does not do.** Run the suite anywhere but the host, send a failure to a fixer (open question 4 of #643), post or log any output beyond the counts, or change the default to `auto` (a later change, after one real run). **UNVERIFIED:** a real run needs LogSeq and the host worker, and the tests use fakes for both.
 
+## Remote sessions (#672)
+
+`runRemoteSession` (`src/activities/remote-session.ts`) runs one implementer, reviewer or fixer as a **remote Claude Code session**, started by firing a routine (`POST /v1/claude_code/routines/{id}/fire`, a bearer token per routine, one routine per role, `src/routine-fire.ts`). The brief built by `brief.ts` goes in the per-run `text` (at most 65,536 characters; a longer brief is refused, never cut) and is data to the session. **No workflow calls it yet** (later tasks of plan #643 do). It is registered only when the six `REMOTE_ROUTINE_*` variables are set, so a worker without them is exactly as before.
+
+A remote session cannot be stopped or messaged from the workflow, and the fire call is not idempotent (each success makes a session). So the activity, in order:
+
+1. **Parses** `{ role, issue, pr?, branch, base, headSha?, brief }` (`src/remote-session-policy.ts`). The reviewer and the fixer need `pr` and `headSha`.
+2. **Reads its marker** in the repo's git config, `orchestratorremote.<issue>-<role>-<head>.state` (`<head>` is `none` for the implementer). `fired <id> <ms>` means the session exists: nothing is launched, the call waits for it again and returns the same `sessionId`. `firing` means an earlier attempt may have made a session whose id was lost: GitHub is watched for up to 10 minutes for its work before another is fired.
+3. **Claims.** The implementer launches only when the issue has no open PR and no `claude/<n>` branch. The fixer and reviewer launch only when the one open PR is theirs, the one branch is theirs and its tip is `headSha` (the reviewer also only when that head has no review yet). Otherwise the result is `failed` with `claim` set (`open_pr`, `branch_exists`, `branch_moved`, `already_reviewed`) and nothing is launched.
+4. **Writes `firing`, fires, records `fired <id> <ms>`** before the wait begins.
+5. **Waits** by reading GitHub every 30 seconds, with a heartbeat and a one hour cap counted from the recorded start (a restart does not extend it). The implementer and fixer are done when the branch tip differs from where they started, has not moved for 3 minutes and has no check pending. The reviewer is done when a trusted review with a body exists on `headSha`. Nothing the session says is read. A cap returns `timed_out`.
+
+**Result:** `{ outcome: 'finished' | 'timed_out' | 'failed', sessionId?, headSha?, claim?, failure? }`. `sessionId` is absent when none is known (a claim, a failed launch, work found after a lost id).
+
+**Fire errors.** 400 and 404 stop for a person (`RoutineRejected`, not retried, marker cleared). 401 and 403 are a token problem (`RoutineAuth`, same). 429 waits for `Retry-After` when it is at most 2 minutes and the budget of 3 calls allows, else returns `failed` with `failure: 'rate_limited'` (no session was made, marker cleared). 5xx retries with a 1 s then 2 s backoff within the budget, then `failed` with `server_error`. A timeout or an unreadable answer is not retried (a session may exist), returns `failed` with `network`, and leaves `firing` behind, so the next call watches GitHub first.
+
+**Setup (maintainer, once).** Create three routines (implementer, reviewer, fixer) at claude.ai/code/routines whose saved prompt says to read the routine-fire payload and do exactly the task it describes, following the repo skills. Add an API trigger to each, generate a token, and put the three ids and three tokens in the worker's environment. Tokens are shown once. Generating a new one revokes the old one. The fire endpoint is experimental. Limits: 30 fires per hour per routine and 100 per hour per account.
+
+**Recovering from a stopped or stuck remote session.** A session cannot be stopped from here: open it at claude.ai/code (the id is in the worker's log line `remote session <id> fired ...`) and stop or delete it by hand.
+- *The session ended with no push.* The wait returns `timed_out` after the cap. Delete the marker so the next call fires a new session: `git config --local --unset orchestratorremote.<issue>-<role>-<head>.state`, then run again.
+- *A `firing` marker and no session exists* (the call failed after the marker). The next call watches GitHub for 10 minutes and then fires again; or unset the marker to fire at once.
+- *A session you do not want to continue.* Stop it at claude.ai/code first. A push it makes later moves the head, which the head checks of the workflow already handle.
+- *`MalformedMarker`.* Something other than this code wrote the key. Look at it with `git config --local --get-regexp '^orchestratorremote\.'` and unset it.
+
+**Not verified.** No real fire has been made: the first acceptance item of #672 is a live no-op fire by the maintainer once the tokens exist, and the result is recorded on the issue. Until then the activity is tested against a fake fire client and fake GitHub reads only.
+
 ## GitHub activities (#628)
 
 `src/activities/github.ts` holds the activities the workflow calls, built by `createGithubActivities(config)`: `listReadyIssues`, `readIssue`, `checkIssue`, `commentIssue`, `claimIssue`, `addToBoard`, `getBoardStatus`, `setStatus`, `openPr`, `postReview`, `getGateStatus` and, for the maintainer's decision (#631), `getPrState` (open, closed, merged: flags and the head SHA), `getPrChanges` (counts of golden, ceiling, ADR and business-rule files a PR changes, no paths) and `closeIssue` (closes an open issue of a trusted author as completed and reads it back). `checkIssue` is `readIssue` answered as numbers and flags (`{ number, open, trustedComments, droppedUntrustedComments }`), so the workflow can gate on an issue without the issue's text entering the stored history. `commentIssue({ issue, key, body })` posts one comment and a retry finds it by a hidden `<!-- orchestrator-comment:<key> -->` marker, looking only at comments of trusted authors (the same rule as `postReview`; it assumes this account's own comments count as trusted). Each is a thin wrapper over `gh` (`src/gh.ts`): one process per call, an argv array and never a shell string, a timeout (30 s) and an output cap, and an answer parsed at the boundary (`src/github-parse.ts`). A malformed answer fails with the path of the first mismatch, never a value and never a partial result.
@@ -370,6 +399,7 @@ Settings (all optional, read once in `src/gh-config.ts`): `ORCHESTRATOR_GH_PATH`
 | `src/activities/implementer.ts` | `runImplementerSession`: reads the issue, builds the brief and runs the session in one activity, so issue text stays out of the history |
 | `src/activities/host-integration.ts`, `src/host-integration-policy.ts` | `runHostIntegration` (#647): the integration suite on a PR head, on the host only; its input, result, queue name and bounds (importable from workflow code) |
 | `src/workflows/host-integration.ts`, `src/integration-policy.ts` | The host integration check at the gate (#648): once per head, run, record, stop; the rule for when it is needed and the commit status (#646, importable from workflow code) |
+| `src/activities/remote-session.ts`, `src/remote-session-policy.ts`, `src/routine-fire.ts` | `runRemoteSession` (#672): claim, marker, fire and bounded wait for a remote session; its input, result and bounds (importable from workflow code); the routine fire client |
 | `src/start-server.ts`, `src/dev-server.ts` | The dev server launcher |
 | `src/activities/claude-session.ts` | `runClaudeSession`: one worktree, one branch, one `claude -p` session |
 | `src/claude-session-policy.ts` | Its timeouts, heartbeat and retry bounds (importable from workflow code) |
