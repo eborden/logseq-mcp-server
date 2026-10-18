@@ -3,7 +3,7 @@
 // idempotent: a repeat creates another session. So, in this order:
 //
 // 1. The input is parsed (foundations 4.2). The brief is sent untouched as the per-run text and is data to the session.
-// 2. A marker in the repo's git config, keyed on issue, role and head, says where an earlier attempt got to:
+// 2. A marker in the repo's git config, keyed on issue, role, head and attempt, says where an earlier attempt got to:
 //    - `fired <session id> <ms>`: the id is recorded, so nothing is launched. The call re-attaches and waits, and
 //      returns the same session. The cap counts from the recorded time, so a restart does not extend it.
 //    - `firing`: the call was about to be made, or was made and its answer was lost. GitHub is watched for a bounded
@@ -66,7 +66,9 @@ type Marker = { readonly kind: 'firing' } | { readonly kind: 'fired'; readonly s
 const SESSION_ID = /^session_[A-Za-z0-9]{1,100}$/;
 
 function markerKey(input: RemoteSessionInput): string {
-  return `orchestratorremote.${input.issue}-${input.role}-${input.headSha ?? 'none'}.state`;
+  // Attempt 1 (the default) keeps the key of #672; a later attempt adds `-a<n>`, so it fires fresh (#673).
+  const attempt = input.attempt === undefined || input.attempt === 1 ? '' : `-a${input.attempt}`;
+  return `orchestratorremote.${input.issue}-${input.role}-${input.headSha ?? 'none'}${attempt}.state`;
 }
 
 function formatMarker(marker: Marker): string {

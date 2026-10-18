@@ -27,6 +27,12 @@ export interface RemoteSessionInput {
   readonly headSha?: string;
   /** Built by `brief.ts` and sent untouched as the per-run text. It is data to the session. */
   readonly brief: string;
+  /**
+   * Which launch of this (issue, role, head) this is, a positive whole number, 1 when absent. It is part of the marker key
+   * (#673): the same attempt re-attaches to the session it fired, a higher one fires a new session. The workflow owns the
+   * counter. Attempt 1 has the key it had before the field existed.
+   */
+  readonly attempt?: number;
 }
 
 /** Why nothing was launched: something already holds the work. */
@@ -108,7 +114,18 @@ export function parseRemoteSessionInput(raw: unknown): RemoteSessionInput {
   if (brief.length > REMOTE_TEXT_MAX_CHARS) {
     throw new InvalidRemoteSessionInputError(`brief must be at most ${REMOTE_TEXT_MAX_CHARS} characters`);
   }
-  return { role, issue, ...(pr === undefined ? {} : { pr }), branch, base, ...(headSha === undefined ? {} : { headSha }), brief };
+  const rawAttempt = field('attempt');
+  const attempt = rawAttempt === undefined ? undefined : wholeNumber(rawAttempt, 'attempt');
+  return {
+    role,
+    issue,
+    ...(pr === undefined ? {} : { pr }),
+    branch,
+    base,
+    ...(headSha === undefined ? {} : { headSha }),
+    brief,
+    ...(attempt === undefined ? {} : { attempt }),
+  };
 }
 
 // ---- bounds ----------------------------------------------------------------------------------------------------

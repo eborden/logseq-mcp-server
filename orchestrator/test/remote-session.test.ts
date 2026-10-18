@@ -292,6 +292,43 @@ test('the marker is keyed on issue, role and head: a new head is a new session',
   assert.equal(scenario.fire.calls.length, 2);
 });
 
+test('the attempt is part of the marker key: the same attempt re-attaches, a new one fires, the default is the old key (#673)', async () => {
+  pushLater(30_000);
+  const first = await run(implementerInput);
+  assert.equal(scenario.fire.calls.length, 1);
+  assert.match(await markers(), /^orchestratorremote\.123-implementer-none\.state fired session_01AAA \d+$/m, 'no attempt gives the key of #672');
+
+  // The same key, attempt 1 spelled out, re-attaches: no second fire, the same session.
+  scenario.github.branches = [];
+  const same = await run({ ...implementerInput, attempt: 1 });
+  assert.equal(scenario.fire.calls.length, 1, 'attempt 1 is the default key');
+  assert.equal(same.sessionId, first.sessionId);
+
+  // A new attempt is a new key: it fires a fresh session and records it beside the first.
+  scenario.fire.script = [{ sessionId: 'session_01BBB', url: 'https://claude.ai/code/session_01BBB' }];
+  scenario.clock.at(10_000, () => scenario.github.tips.set('claude/123', SHA_C));
+  const next = await run({ ...implementerInput, attempt: 2 });
+  assert.equal(scenario.fire.calls.length, 2);
+  assert.equal(next.sessionId, 'session_01BBB');
+  const recorded = await markers();
+  assert.match(recorded, /^orchestratorremote\.123-implementer-none\.state fired session_01AAA /m);
+  assert.match(recorded, /^orchestratorremote\.123-implementer-none-a2\.state fired session_01BBB /m);
+
+  // A retry of attempt 2 dedupes through its own marker.
+  const again = await run({ ...implementerInput, attempt: 2 });
+  assert.equal(scenario.fire.calls.length, 2, 'a retry of the same attempt does not fire');
+  assert.equal(again.sessionId, 'session_01BBB');
+});
+
+test('the attempt is a positive whole number, or the input is refused (#673)', async () => {
+  assert.equal(parseRemoteSessionInput({ ...implementerInput, attempt: 3 }).attempt, 3);
+  assert.equal('attempt' in parseRemoteSessionInput(implementerInput), false);
+  for (const attempt of [0, -1, 1.5, '2', null, Number.NaN]) {
+    await assert.rejects(run({ ...implementerInput, attempt }), (error: unknown) => error instanceof Error && 'type' in error && error.type === 'InvalidInput', String(attempt));
+  }
+  assert.equal(scenario.fire.calls.length, 0);
+});
+
 test('a firing marker with no id watches GitHub first: work that showed means no second fire', async () => {
   scenario.fire.script = [new FireError('network')];
   const lost = await run(implementerInput);
