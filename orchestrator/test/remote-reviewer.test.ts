@@ -13,13 +13,14 @@ import { ApplicationFailure } from '@temporalio/activity';
 import { MockActivityEnvironment } from '@temporalio/testing';
 import { createGithubActivities } from '../src/activities/github.ts';
 import { createReviewActivities } from '../src/activities/review.ts';
+import { createRemoteSessionActivities } from '../src/activities/remote-session.ts';
 import { buildRemoteReviewerBrief, buildReviewerBrief } from '../src/brief.ts';
 import { loadClaudeConfig } from '../src/config.ts';
-import type { RemoteSessionResult } from '../src/remote-session-policy.ts';
+import type { RemoteLimits, RemoteSessionResult } from '../src/remote-session-policy.ts';
 import type { IssueView } from '../src/types.ts';
 import { createFake, emptyState, rawIssue, rawOpenPr, recordedSleep } from './github-support.ts';
 import type { FakeState } from './github-support.ts';
-import { findingsMarker, parseFindingsComment } from '../src/findings-comment.ts';
+import { findingsMarker, hasFindingsComment, parseFindingsComment } from '../src/findings-comment.ts';
 import type { FindingsCandidate } from '../src/findings-comment.ts';
 import { FindingsTooLargeError, MAX_FINDINGS, MAX_OUTPUT_FILE_BYTES, MalformedFindingsError } from '../src/review-types.ts';
 
@@ -158,7 +159,13 @@ interface Remote {
   run<T>(fn: (raw: unknown) => Promise<T>, overrides?: Record<string, unknown>): Promise<T>;
 }
 
-async function remoteScenario(comments: (head: string) => unknown[], configure: (state: FakeState) => void = () => undefined, withRemote = true): Promise<Remote> {
+async function remoteScenario(
+  comments: (head: string) => unknown[],
+  configure: (state: FakeState) => void = () => undefined,
+  withRemote = true,
+  /** Stands in for the fake session when a test runs the real `runRemoteSession` behind the reviewer step. */
+  session?: (raw: unknown, repoDir: string) => Promise<RemoteSessionResult>,
+): Promise<Remote> {
   counter += 1;
   const bare = join(dir, `origin-${counter}.git`);
   const repo = join(dir, `repo-${counter}`);
@@ -206,7 +213,7 @@ async function remoteScenario(comments: (head: string) => unknown[], configure: 
           remote: {
             runRemoteSession: async (raw: unknown) => {
               sessions.push(raw as Record<string, unknown>);
-              return remote.outcome;
+              return session === undefined ? remote.outcome : await session(raw, repo);
             },
             listFindingsCandidates: async (pr: number) => {
               lists += 1;
@@ -246,6 +253,7 @@ test('the remote reviewer: one session, the findings comment parsed, ONE sanitis
   assert.equal(r.sessions[0]?.['pr'], 77);
   assert.equal(r.sessions[0]?.['branch'], 'claude/123');
   assert.ok(String(r.sessions[0]?.['brief']).includes(findingsMarker(77, r.head, 0)), 'the brief carries the key');
+  assert.equal(r.sessions[0]?.['findingsMarker'], findingsMarker(77, r.head, 0), 'the wait is told the same key (#687)');
 
   const posted = await r.run(r.activities.postRemoteSessionReview);
   assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 1, advisory: 0, omitted: 0 });
@@ -355,4 +363,100 @@ test('the remote brief tells the session to post one keyed comment and no review
   const local = buildReviewerBrief(base);
   assert.ok(local.includes('You cannot call `gh` or push'), 'the local brief still says the session cannot post');
   assert.ok(!local.includes(MARKER) && !local.includes('orchestrator-findings'));
+});
+
+// ---- the wait ends on the findings comment (#687) ------------------------------------------------------------------------
+
+const WAIT_LIMITS: RemoteLimits = { capMs: 10 * 60_000, pollIntervalMs: 60_000, settleMs: 120_000, orphanPollMs: 5 * 60_000, heartbeatIntervalMs: 50, fireAttempts: 3, fireBackoffMs: 1_000, retryAfterMaxMs: 60_000 };
+
+interface Waited {
+  readonly r: Remote;
+  readonly sleeps: number[];
+  readonly markersAsked: string[];
+  fired(): number;
+}
+
+/**
+ * The reviewer step on top of the REAL `runRemoteSession`, with a virtual clock, a fire client that counts and a GitHub
+ * read whose comment list fills `appearsAfter` ms into the wait (never when undefined). The findings the step parses
+ * afterwards come from the fake `gh`, so the round succeeds whatever the wait did; the wait is what is measured.
+ */
+async function waitScenario(appearsAfter: number | undefined): Promise<Waited> {
+  let t = 1_000_000;
+  let fired = 0;
+  let head = '';
+  const sleeps: number[] = [];
+  const markersAsked: string[] = [];
+  const start = t;
+  const r = await remoteScenario(
+    (h) => [rawFindings(h, GOOD)],
+    () => undefined,
+    true,
+    async (raw, repoDir) => {
+      const { runRemoteSession } = createRemoteSessionActivities({
+        repoDir,
+        routines: { implementer: 'trig_impl1', reviewer: 'trig_rev1', fixer: 'trig_fix1' },
+        fire: {
+          fire: async () => {
+            fired += 1;
+            return { sessionId: 'session_01AAA', url: 'https://claude.ai/code/session_01AAA' };
+          },
+        },
+        github: {
+          openPrs: async () => [77],
+          claudeBranches: async () => ['claude/123'],
+          branchTip: async () => head,
+          checksPending: async () => false,
+          reviewedOnHead: async () => false,
+          findingsCommented: async (_pr, marker) => {
+            markersAsked.push(marker);
+            const body = `${findingsMarker(77, head, 0)}\n\n\`\`\`json\n{}\n\`\`\``;
+            return appearsAfter !== undefined && t >= start + appearsAfter && hasFindingsComment([{ id: 801, nodeId: 'IC_801', trusted: true, body }], marker);
+          },
+        },
+        limits: WAIT_LIMITS,
+        now: () => t,
+        sleep: async (ms) => {
+          sleeps.push(ms);
+          t += ms;
+        },
+      });
+      return await runRemoteSession(raw);
+    },
+  );
+  head = r.head;
+  return { r, sleeps, markersAsked, fired: () => fired };
+}
+
+const total = (sleeps: readonly number[]): number => sleeps.reduce((sum, ms) => sum + ms, 0);
+
+test('the reviewer step hands the wait the marker of this PR, head and round, and a comment already posted ends it with no sleep', async () => {
+  const w = await waitScenario(0);
+  const round = await w.r.run(w.r.activities.runRemoteReviewerSession);
+  assert.equal(round.findings, 1);
+  assert.equal(w.fired(), 1);
+  assert.deepEqual(w.markersAsked, [findingsMarker(77, w.r.head, 0)], 'one read, with the exact key');
+  assert.deepEqual(w.sleeps, [], 'the first poll saw the comment: no wait for the session or the cap');
+});
+
+test('a reviewer round of a later round asks for the marker of that round', async () => {
+  const w = await waitScenario(0);
+  // The comment the fake `gh` holds is for round 2 here; the wait's own list is filled for round 0, so only the key can tell.
+  await w.r.run(w.r.activities.runRemoteReviewerSession, { round: 2 }).catch(() => undefined);
+  assert.equal(w.markersAsked[0], findingsMarker(77, w.r.head, 2));
+  assert.ok(total(w.sleeps) >= WAIT_LIMITS.capMs, 'a comment of another round does not end the wait');
+});
+
+test('a findings comment that appears mid-wait ends it within one poll, long before the cap', async () => {
+  const w = await waitScenario(100_000);
+  await w.r.run(w.r.activities.runRemoteReviewerSession);
+  assert.ok(total(w.sleeps) <= 120_000, `waited ${total(w.sleeps)} ms, the comment came at 100000`);
+  assert.ok(total(w.sleeps) < WAIT_LIMITS.capMs);
+  assert.equal(w.fired(), 1);
+});
+
+test('with no findings comment the wait still runs to its cap (the bound is unchanged)', async () => {
+  const w = await waitScenario(undefined);
+  await w.r.run(w.r.activities.runRemoteReviewerSession).catch(() => undefined);
+  assert.equal(total(w.sleeps), WAIT_LIMITS.capMs);
 });
