@@ -11,7 +11,7 @@
 // 3. With no marker, the claim: no open PR for the issue beyond the one the role works on, no `claude/<n>` branch
 //    beyond the one expected, the tip where the input says it is. A claim found returns without launching.
 // 4. The `firing` marker is written, then the call is made, then the id is recorded.
-// 5. The wait polls GitHub (branch tip, checks, reviews) with a wall-clock cap and a heartbeat. How a session ended
+// 5. The wait polls GitHub (branch tip, checks, reviews, the reviewer's keyed findings comment) with a wall-clock cap and a heartbeat. How a session ended
 //    is read from GitHub state only. Nothing the session says is read, returned or logged.
 //
 // Errors of the fire call (the comment on #672): 400 and 404 are permanent (`RoutineRejected`), 401 and 403 are
@@ -23,6 +23,7 @@
 // Never in a log, a result, the workflow history or an error message: the token, the brief, or a response body.
 
 import { ApplicationFailure, Context } from '@temporalio/activity';
+import { isFindingsMarker } from '../findings-comment.ts';
 import { FireError } from '../routine-fire.ts';
 import type { FireClient } from '../routine-fire.ts';
 import {
@@ -44,6 +45,11 @@ export interface RemoteGithub {
   checksPending(sha: string): Promise<boolean>;
   /** True when a trusted review with a body exists on the commit. */
   reviewedOnHead(pr: number, sha: string): Promise<boolean>;
+  /**
+   * True when a comment of a trusted author on the PR carries `marker` on its first line (#682). Read only. Optional so a
+   * reads object without it keeps the review-only wait; the real one (`createRemoteGithubReads`) has it.
+   */
+  findingsCommented?(pr: number, marker: string): Promise<boolean>;
 }
 
 export interface RemoteSessionDeps {
@@ -141,7 +147,11 @@ interface WaitEnd {
 
 function parseOrFail(raw: unknown): RemoteSessionInput {
   try {
-    return parseRemoteSessionInput(raw);
+    const input = parseRemoteSessionInput(raw);
+    if (input.findingsMarker !== undefined && !isFindingsMarker(input.findingsMarker)) {
+      throw new InvalidRemoteSessionInputError('findingsMarker must be the findings marker of this pr and headSha');
+    }
+    return input;
   } catch (error) {
     if (error instanceof InvalidRemoteSessionInputError) {
       // Retrying cannot fix a bad input.
@@ -160,7 +170,8 @@ export function createRemoteSessionActivities(deps: RemoteSessionDeps) {
    * Reads GitHub every `pollIntervalMs` until the session's work shows or `capMs` have passed since `since`.
    * - implementer and fixer: the branch tip differs from where the session started (none, or `headSha`), has not moved
    *   for `settleMs` and has no check pending. A push in the window restarts the settle time.
-   * - reviewer: a trusted review with a body exists on `headSha`.
+   * - reviewer: a trusted review with a body exists on `headSha`, or (when the input has `findingsMarker`) a trusted
+   *   comment on the PR carries that marker. The first of the two ends the wait. Both are reads on the same schedule.
    */
   async function waitForEnd(input: RemoteSessionInput, since: number, capMs: number): Promise<WaitEnd> {
     const context = Context.current();
@@ -170,6 +181,15 @@ export function createRemoteSessionActivities(deps: RemoteSessionDeps) {
       context.heartbeat();
       if (input.role === 'reviewer') {
         if (input.pr !== undefined && input.headSha !== undefined && (await deps.github.reviewedOnHead(input.pr, input.headSha))) {
+          return { outcome: 'finished', headSha: input.headSha };
+        }
+        if (
+          input.pr !== undefined &&
+          input.headSha !== undefined &&
+          input.findingsMarker !== undefined &&
+          deps.github.findingsCommented !== undefined &&
+          (await deps.github.findingsCommented(input.pr, input.findingsMarker))
+        ) {
           return { outcome: 'finished', headSha: input.headSha };
         }
       } else {

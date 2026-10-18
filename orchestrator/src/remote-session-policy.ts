@@ -33,6 +33,11 @@ export interface RemoteSessionInput {
    * counter. Attempt 1 has the key it had before the field existed.
    */
   readonly attempt?: number;
+  /**
+   * The reviewer's keyed findings marker (`findingsMarker`, findings-comment.ts). When set, a trusted comment carrying it
+   * on the PR ends the reviewer wait, as a review on the head does (#682). Reviewer only; absent keeps the review-only wait.
+   */
+  readonly findingsMarker?: string;
 }
 
 /** Why nothing was launched: something already holds the work. */
@@ -116,6 +121,16 @@ export function parseRemoteSessionInput(raw: unknown): RemoteSessionInput {
   }
   const rawAttempt = field('attempt');
   const attempt = rawAttempt === undefined ? undefined : wholeNumber(rawAttempt, 'attempt');
+  const rawMarker = field('findingsMarker');
+  if (rawMarker !== undefined) {
+    if (role !== 'reviewer') {
+      throw new InvalidRemoteSessionInputError('findingsMarker is for the reviewer only');
+    }
+    // The shape is checked against `findingsMarker` itself by the activity (it may import findings-comment.ts, this file may not).
+    if (typeof rawMarker !== 'string' || rawMarker.length > 200 || !rawMarker.includes(` pr=${pr} head=${headSha} `)) {
+      throw new InvalidRemoteSessionInputError('findingsMarker must be the findings marker of this pr and headSha');
+    }
+  }
   return {
     role,
     issue,
@@ -125,6 +140,7 @@ export function parseRemoteSessionInput(raw: unknown): RemoteSessionInput {
     ...(headSha === undefined ? {} : { headSha }),
     brief,
     ...(attempt === undefined ? {} : { attempt }),
+    ...(rawMarker === undefined ? {} : { findingsMarker: rawMarker as string }),
   };
 }
 
