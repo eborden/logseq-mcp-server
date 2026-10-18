@@ -11,8 +11,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ApplicationFailure } from '@temporalio/activity';
-import { InvalidBranchInputError, parseBranchInput } from '../branch-types.ts';
-import type { BranchInput, GuardResult, PushResult } from '../branch-types.ts';
+import { InvalidBranchInputError, parseBranchInput, parseDeleteBranchInput } from '../branch-types.ts';
+import type { BranchInput, DeleteBranchResult, GuardResult, PushResult } from '../branch-types.ts';
 import { checkBranchChanges, parseRawDiff, RawDiffError } from '../diff-guard.ts';
 import type { ChangedFile } from '../diff-guard.ts';
 
@@ -104,6 +104,11 @@ export function createBranchActivities(options: BranchActivityOptions = {}) {
   async function guardBranch(raw: unknown): Promise<GuardResult> {
     const input = parseOrFail(raw);
     await requireTip(input);
+    return await guardRanges(input);
+  }
+
+  /** The two ranges of the guard on a tip that is already known to be where the input says. */
+  async function guardRanges(input: BranchInput): Promise<GuardResult> {
     // Two ranges, and both are the ones the push is about to publish:
     // - HISTORY, `origin/<base>..<sha>`: every commit reachable from the head and not already on the base. This is
     //   exactly what `git push` of the branch sends, so a protected change in ANY of those commits refuses the branch,
@@ -125,6 +130,89 @@ export function createBranchActivities(options: BranchActivityOptions = {}) {
       );
     }
     return { branch: input.branch, headSha: input.headSha, files: verdict.files };
+  }
+
+  /** The branch's tip on the remote, or undefined when it is not there. A failed read is thrown (the retry policy tries again). */
+  async function remoteTip(input: { readonly repoDir: string; readonly branch: string }): Promise<string | undefined> {
+    const result = await git(input.repoDir, ['ls-remote', '--heads', 'origin', `refs/heads/${input.branch}`], LS_REMOTE_TIMEOUT_MS);
+    if (result.code !== 0) {
+      throw new Error(`git ls-remote failed (exit ${result.code})`);
+    }
+    const sha = result.stdout.split('\t')[0]?.trim();
+    return sha === undefined || sha === '' ? undefined : sha;
+  }
+
+  /**
+   * The guard for a branch a remote session pushed itself (#673). The session's tip is fetched into `refs/remotes/origin/`
+   * first (the worktree has no local branch for it), then the same two ranges run on it as for a local branch. The tip must
+   * be the one the session reported, before and after the guard: a branch that moved is `BranchMoved`, and no PR is opened
+   * on a sha that was not guarded. The fetch has fixed argv, hooks off, and the names are parsed first.
+   */
+  async function guardRemoteBranch(raw: unknown): Promise<GuardResult> {
+    const input = parseOrFail(raw);
+    const fetch = await git(
+      input.repoDir,
+      [
+        '-c',
+        'core.hooksPath=/dev/null',
+        'fetch',
+        '--no-tags',
+        '--no-recurse-submodules',
+        'origin',
+        `+refs/heads/${input.branch}:refs/remotes/origin/${input.branch}`,
+        `+refs/heads/${input.base}:refs/remotes/origin/${input.base}`,
+      ],
+      PUSH_TIMEOUT_MS,
+    );
+    if (fetch.code !== 0) {
+      // A branch that is not there is permanent for this call; anything else (network) is tried again.
+      if (/couldn't find remote ref/i.test(fetch.stderr)) {
+        throw ApplicationFailure.nonRetryable('the remote branch does not exist', 'BranchMissing');
+      }
+      throw new Error(`git fetch failed (exit ${fetch.code})`);
+    }
+    const fetched = await git(input.repoDir, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${input.branch}^{commit}`], DIFF_TIMEOUT_MS);
+    if (fetched.code !== 0 || fetched.stdout.trim() !== input.headSha) {
+      throw ApplicationFailure.nonRetryable('the remote branch is not at the commit the session ended at', 'BranchMoved');
+    }
+    const result = await guardRanges(input);
+    // It can move while the guard runs: read the remote again, and refuse a different tip.
+    if ((await remoteTip(input)) !== input.headSha) {
+      throw ApplicationFailure.nonRetryable('the remote branch moved while it was checked', 'BranchMoved');
+    }
+    return result;
+  }
+
+  /**
+   * Deletes a remote `claude/<number>` branch with fixed argv (#673): `git -c core.hooksPath=/dev/null push origin --delete
+   * claude/<number>`, then reads the remote back. Idempotent: a branch that is already gone is success. Only the worker's own
+   * credential does this; a cloud session cannot.
+   */
+  async function deleteRemoteBranch(raw: unknown): Promise<DeleteBranchResult> {
+    let input;
+    try {
+      input = parseDeleteBranchInput(raw);
+    } catch (error) {
+      if (error instanceof InvalidBranchInputError) {
+        throw ApplicationFailure.nonRetryable(error.message, 'InvalidInput');
+      }
+      throw error;
+    }
+    const before = await remoteTip(input);
+    if (before === undefined) {
+      return { branch: input.branch, deleted: false };
+    }
+    const push = await git(input.repoDir, ['-c', 'core.hooksPath=/dev/null', 'push', 'origin', '--delete', input.branch], PUSH_TIMEOUT_MS);
+    if (push.code !== 0 && !/remote ref does not exist/i.test(push.stderr)) {
+      if (/rejected|denied|permission|protected|not allowed/i.test(push.stderr)) {
+        throw ApplicationFailure.nonRetryable('the remote refused the delete', 'DeleteRejected');
+      }
+      throw new Error(`git push --delete failed (exit ${push.code})`);
+    }
+    if ((await remoteTip(input)) !== undefined) {
+      throw new Error('the remote still shows the branch after the delete');
+    }
+    return { branch: input.branch, deleted: push.code === 0 };
   }
 
   async function pushBranch(raw: unknown): Promise<PushResult> {
@@ -151,7 +239,7 @@ export function createBranchActivities(options: BranchActivityOptions = {}) {
     return { branch: input.branch, headSha: input.headSha };
   }
 
-  return { guardBranch, pushBranch };
+  return { guardBranch, guardRemoteBranch, deleteRemoteBranch, pushBranch };
 }
 
 export type BranchActivities = ReturnType<typeof createBranchActivities>;
