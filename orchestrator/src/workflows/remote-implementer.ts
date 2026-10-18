@@ -9,7 +9,7 @@
 //             comment: counts and the reason class only. A branch that moved, or is gone, is stopped on and not deleted:
 //             no PR is ever opened on a sha that was not guarded.
 //
-// The attempt counter lives here, in workflow state. A session that ended with no push at all (the cap passed) gets one more
+// The attempt counter lives here, in workflow state, and starts at the run's `attempt` (default 1). A session that ended with no push at all (the cap passed) gets one more
 // attempt, which fires a new session because the marker key carries the attempt; a retry of the same attempt re-attaches.
 // Anything else (a claim, a failed launch, a push that never settled, a guard refusal) stops for a person.
 // Deterministic: no clock, I/O or randomness.
@@ -57,13 +57,16 @@ export interface RemoteImplementerContext {
 export async function remoteImplementer(ctx: RemoteImplementerContext): Promise<{ readonly headSha: string }> {
   const { input, branch, step, stop } = ctx;
   let headSha: string | undefined;
-  for (let attempt = 1; attempt <= REMOTE_IMPLEMENTER_ATTEMPTS; attempt += 1) {
+  // The run's first attempt number (default 1), then at most one more after a session that ended with no push.
+  const first = input.attempt ?? 1;
+  const last = first + REMOTE_IMPLEMENTER_ATTEMPTS - 1;
+  for (let attempt = first; attempt <= last; attempt += 1) {
     const result = await step('session', () => remote.runRemoteImplementerSession({ ...input, attempt }));
     if (result.outcome === 'failed') {
       return await stop('session', result.claim === undefined ? REMOTE_LAUNCH_FAILED : REMOTE_SESSION_CLAIMED);
     }
     if (result.outcome === 'timed_out') {
-      if (result.headSha === undefined && attempt < REMOTE_IMPLEMENTER_ATTEMPTS) {
+      if (result.headSha === undefined && attempt < last) {
         continue;
       }
       return await stop('session', REMOTE_SESSION_TIMED_OUT);

@@ -71,6 +71,12 @@ export interface IssueWorkflowInput {
    * unchanged. `remote` has nothing behind it yet: the run stops for a person with `RemoteExecutorUnavailable` before any session.
    */
   readonly executor?: Executor;
+  /**
+   * The first attempt number of the remote implementer step (#673), a positive whole number; absent means 1. It is part of the
+   * marker key of `runRemoteSession`, so a re-run after a guard refusal starts at the next number and fires fresh instead of
+   * re-attaching to the old session. The in-run counter for a dead session goes on from here. Ignored by `local`.
+   */
+  readonly attempt?: number;
 }
 
 export type HostIntegrationMode = 'auto' | 'off';
@@ -93,6 +99,21 @@ export const REMOTE_LAUNCH_FAILED = 'RemoteLaunchFailed';
 export const REMOTE_SESSION_TIMED_OUT = 'RemoteSessionTimedOut';
 export const REMOTE_NO_HEAD = 'RemoteSessionNoHead';
 export const REMOTE_BRANCH_MOVED = 'BranchMoved';
+/** The largest `attempt` a run may start at: a marker key per attempt is a git config entry, so the number stays small. */
+export const MAX_ATTEMPT = 99;
+
+/** What `run-issue --attempt <n>` adds to the run input: no field without the flag. Anything but a positive whole number is refused. */
+export function attemptForFlag(flag: string | undefined): { readonly attempt?: number } {
+  if (flag === undefined) {
+    return {};
+  }
+  const attempt = /^[1-9][0-9]{0,2}$/.test(flag) ? Number(flag) : 0;
+  if (attempt < 1 || attempt > MAX_ATTEMPT) {
+    throw new InvalidIssueInputError(`--attempt must be a whole number from 1 to ${MAX_ATTEMPT}`);
+  }
+  return { attempt };
+}
+
 /** The most remote implementer sessions one run starts: the first, and one more after a session that ended with no push. */
 export const REMOTE_IMPLEMENTER_ATTEMPTS = 2;
 
@@ -160,6 +181,7 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
   if (executor !== undefined && executor !== 'local' && executor !== 'remote') {
     throw new InvalidIssueInputError('executor must be local or remote');
   }
+  const attempt = optionalWholeNumber(raw, 'attempt', 1, MAX_ATTEMPT);
   return {
     issueNumber,
     repoDir: absolutePath('repoDir', repoDir),
@@ -172,6 +194,7 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
     ...(decisionPollMs === undefined ? {} : { decisionPollMs }),
     ...(hostIntegration === undefined ? {} : { hostIntegration }),
     ...(executor === undefined ? {} : { executor }),
+    ...(attempt === undefined ? {} : { attempt }),
   };
 }
 
