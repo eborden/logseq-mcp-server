@@ -38,8 +38,8 @@ const branches = proxyActivities<Pick<BranchActivities, 'guardRemoteBranch' | 'd
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
 });
 
-/** The guard answers that mean "this branch must not be published". Anything else (a failed read, a timeout) says nothing about the diff. */
-export const GUARD_REFUSALS: readonly string[] = ['ProtectedPath', 'DiffTooLarge', 'EmptyDiff', 'SpecialFile', 'MalformedGitOutput'];
+/** The guard answers that mean "this branch must not be published". Anything else (a failed read, a timeout, unreadable git output) is a fault in the reading, says nothing about the diff, and never deletes: the delete cannot be undone. */
+export const GUARD_REFUSALS: readonly string[] = ['ProtectedPath', 'DiffTooLarge', 'EmptyDiff', 'SpecialFile'];
 
 export interface RemoteImplementerContext {
   readonly input: IssueWorkflowInput;
