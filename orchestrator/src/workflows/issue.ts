@@ -129,10 +129,10 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   let pr: number | undefined;
 
   /** Ends the run: one comment on the issue (unless it is not ours to comment on), then a Failed workflow. */
-  async function stop(step: IssueStep, reason: StopReason): Promise<never> {
+  async function stop(step: IssueStep, reason: StopReason, detail?: string): Promise<never> {
     if (!NO_COMMENT_FAILURES.includes(reason)) {
       try {
-        await github.commentIssue({ issue, key: stopCommentKey(step, reason), body: stopComment(workflowId, step, reason, pr) });
+        await github.commentIssue({ issue, key: stopCommentKey(step, reason), body: stopComment(workflowId, step, reason, pr, detail) });
       } catch (commentError) {
         if (isCancellation(commentError)) {
           throw commentError;

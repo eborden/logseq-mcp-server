@@ -47,13 +47,15 @@ import {
 import type { MaintainerDecision } from '../approval-types.ts';
 import { BOARD_ACTIVITY_OPTIONS } from '../board-policy.ts';
 import { gateClear } from '../gate.ts';
+import type { GateCounts } from '../gate.ts';
 import { GITHUB_ACTIVITY_OPTIONS } from '../github-policy.ts';
+import { createHostIntegrationGate } from './host-integration.ts';
 import { BOARD_CONFIRM_READS, BOARD_CONFIRM_WAIT, ISSUE_STEP_TIMEOUT, issueWorkflowId } from '../issue-types.ts';
 import type { IssueRunResult, IssueStep, IssueWorkflowInput, StopReason } from '../issue-types.ts';
 import type { BoardItemRef, SettableStatus } from '../types.ts';
 
 const github = proxyActivities<
-  Pick<GithubActivities, 'getGateStatus' | 'getPrState' | 'getPrChanges' | 'checkIssue' | 'closeIssue' | 'commentIssue'>
+  Pick<GithubActivities, 'getGateStatus' | 'getPrState' | 'getPrChanges' | 'getHostIntegration' | 'checkIssue' | 'closeIssue' | 'commentIssue'>
 >({
   ...GITHUB_ACTIVITY_OPTIONS,
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
@@ -98,7 +100,7 @@ export interface DecisionContext {
   /** Runs one activity call; a failure of it ends the run at `name` (issue.ts). */
   readonly step: <T>(name: IssueStep, call: () => Promise<T>) => Promise<T>;
   /** Ends the run with one comment on the issue and a Failed workflow (issue.ts). */
-  readonly stop: (step: IssueStep, reason: StopReason) => Promise<never>;
+  readonly stop: (step: IssueStep, reason: StopReason, detail?: string) => Promise<never>;
 }
 
 export async function decisionStage(context: DecisionContext): Promise<IssueRunResult> {
@@ -124,6 +126,9 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
     return await stop('board_done', 'BoardDisagrees');
   }
 
+  // The host integration check (#648): only with `hostIntegration: 'auto'`. Absent or `off`, nothing below calls it.
+  const hostGate = input.hostIntegration === 'auto' ? createHostIntegrationGate({ pr, base: input.base, step, stop }) : undefined;
+
   // ---- hold and wait: until the gate is clear and a decision is in hand, or the PR is merged without one -----------
   const decideBy = Date.now() + timeoutMs;
   let decision: MaintainerDecision | undefined;
@@ -146,7 +151,14 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
       return await stop('decision_gate', 'PrClosedUnmerged');
     }
     const left = decideBy - Date.now();
-    if (!gateClear(gate)) {
+    // A head that the review settled (a review on it, no open thread) is the one the host check is for, once per head.
+    // The status is read for the gate's own head, so a pass on an earlier head never clears a later one.
+    let judged: GateCounts = gate;
+    if (hostGate !== undefined && gate.reviewsOnHead >= 1 && gate.unresolvedThreads === 0 && (await hostGate.required(gate.headSha))) {
+      const status = await step('host_integration', () => github.getHostIntegration({ sha: gate.headSha }));
+      judged = { ...gate, hostIntegration: status.state };
+    }
+    if (!gateClear(judged)) {
       if (left <= 0) {
         return await timedOut();
       }
