@@ -442,7 +442,8 @@ test('the reviewer step hands the wait the marker of this PR, head and round, an
 test('a reviewer round of a later round asks for the marker of that round', async () => {
   const w = await waitScenario(0);
   // The comment the fake `gh` holds is for round 2 here; the wait's own list is filled for round 0, so only the key can tell.
-  await w.r.run(w.r.activities.runRemoteReviewerSession, { round: 2 }).catch(() => undefined);
+  const failure = await failureOf(w.r.run(w.r.activities.runRemoteReviewerSession, { round: 2 }));
+  assert.equal(failure.type, 'MalformedFindings', 'the round 0 comment is not the round 2 findings, so the step stops after the wait');
   assert.equal(w.markersAsked[0], findingsMarker(77, w.r.head, 2));
   assert.ok(total(w.sleeps) >= WAIT_LIMITS.capMs, 'a comment of another round does not end the wait');
 });
@@ -457,6 +458,6 @@ test('a findings comment that appears mid-wait ends it within one poll, long bef
 
 test('with no findings comment the wait still runs to its cap (the bound is unchanged)', async () => {
   const w = await waitScenario(undefined);
-  await w.r.run(w.r.activities.runRemoteReviewerSession).catch(() => undefined);
+  await w.r.run(w.r.activities.runRemoteReviewerSession);
   assert.equal(total(w.sleeps), WAIT_LIMITS.capMs);
 });
