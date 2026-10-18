@@ -457,7 +457,11 @@ function fakeActivities() {
       worldOf(input.issue).hit('runReviewerSession');
       return { findings: 0, acceptedThreadIds: [] };
     },
-    // The remote reviewer finds one open thread, so the review loop goes on to the fixer, the one session not remote yet.
+    // The remote reviewer finds one open thread, so the review loop goes on to the fixer, which these tests stop at once.
+    runRemoteFixerSession: async (input: { issue: number }) => {
+      worldOf(input.issue).hit('runRemoteFixerSession');
+      throw ApplicationFailure.nonRetryable('the remote fixer did not run (open_pr)', 'RemoteSessionFailed');
+    },
     runRemoteReviewerSession: async (input: { issue: number }) => {
       worldOf(input.issue).hit('runRemoteReviewerSession');
       return { findings: 1, acceptedThreadIds: [], commentNodeId: 'IC_raw1' };
@@ -536,8 +540,8 @@ async function finish(world: World): Promise<void> {
   await rm(world.repos.dir, { recursive: true, force: true });
 }
 
-// The one expected end of a run that gets past the implementer: the remote reviewer leaves an open thread and the fixer is not
-// remote yet, so the run stops at the first fixer step, after the PR is open and In review.
+// The one expected end of a run that gets past the implementer: the remote reviewer leaves an open thread and the fake fixer
+// does not run, so the run stops at the first fixer step, after the PR is open and In review.
 const STOPS_AT_FIXER = 'fix_session';
 
 test('a clean remote branch is guarded on the fetched tip, then the PR opens; no local session, no push', { timeout: 120_000 }, async () => {

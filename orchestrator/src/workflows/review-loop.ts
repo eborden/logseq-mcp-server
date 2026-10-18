@@ -11,6 +11,11 @@
 //   fix      at most `maxFixRounds` rounds: a fixer session, `guardBranch`, `pushBranch` (the session cannot push), the
 //            replies posted by an activity, then back to `review` on the new head. That review is the closing review
 //            the gate needs: a push moves the head, and a review on an older commit never counts.
+//            With `executor: 'remote'` (#675) the order differs, because the remote fixer pushes to the PR's branch itself
+//            and the push moves the PR's head at once: `runRemoteFixerSession` (replies read from ONE keyed comment),
+//            then `guardRemoteBranch` on the fetched tip, then the replies, then the review. A guard refusal cannot
+//            un-push: the run stops with `FixerPushRejected` and the branch is left for a person. No push, or a push to
+//            another branch, is a round with no progress, handled as a local fixer that made no commit.
 //
 // It ends in one of three ways. `gate_clear`: waiting for the maintainer. `waiting_for_threads`: every open thread is
 // one the reviewer accepted or one the loop may not act on, and only a person resolves a thread, so the gate stays not
@@ -29,7 +34,9 @@ import type { ReviewActivities } from '../activities/review.ts';
 import { BRANCH_ACTIVITY_OPTIONS } from '../branch-types.ts';
 import { onExecutor } from './executor.ts';
 import { gateClear } from '../gate.ts';
-import { ISSUE_STEP_TIMEOUT, findingsCommentNotHiddenComment, issueWorkflowId, waitingForThreadsComment } from '../issue-types.ts';
+import { failureReason, guardCounts } from './failure-reason.ts';
+import { GUARD_REFUSALS } from './remote-implementer.ts';
+import { FIXER_PUSH_REJECTED, ISSUE_STEP_TIMEOUT, findingsCommentNotHiddenComment, fixerPushRejectedDetail, issueWorkflowId, waitingForThreadsComment } from '../issue-types.ts';
 import type { IssueRunResult, IssueStep, IssueWorkflowInput, StopReason } from '../issue-types.ts';
 import {
   DEFAULT_MAX_FIX_ROUNDS,
@@ -48,17 +55,17 @@ const sessions = proxyActivities<Pick<ReviewActivities, 'runReviewerSession' | '
 });
 // The remote reviewer (#674): one activity runs the session and reads its keyed findings comment, one posts the review
 // from what survived the parser, one hides the raw comment. The first has its own, longer, timeouts.
-const remoteSessions = proxyActivities<Pick<ReviewActivities, 'runRemoteReviewerSession'>>({
+const remoteSessions = proxyActivities<Pick<ReviewActivities, 'runRemoteReviewerSession' | 'runRemoteFixerSession'>>({
   ...REMOTE_REVIEW_SESSION_ACTIVITY_OPTIONS,
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
 });
 const reviewGithub = proxyActivities<
-  Pick<ReviewActivities, 'postSessionReview' | 'postRemoteSessionReview' | 'minimizeFindingsComment' | 'postFixerReplies' | 'listOpenThreads'> & Pick<GithubActivities, 'getGateStatus' | 'commentIssue'>
+  Pick<ReviewActivities, 'postSessionReview' | 'postRemoteSessionReview' | 'minimizeFindingsComment' | 'postFixerReplies' | 'postRemoteFixerReplies' | 'listOpenThreads'> & Pick<GithubActivities, 'getGateStatus' | 'commentIssue'>
 >({
   ...REVIEW_GITHUB_ACTIVITY_OPTIONS,
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
 });
-const branches = proxyActivities<Pick<BranchActivities, 'guardBranch' | 'pushBranch'>>({
+const branches = proxyActivities<Pick<BranchActivities, 'guardBranch' | 'guardRemoteBranch' | 'pushBranch'>>({
   ...BRANCH_ACTIVITY_OPTIONS,
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
 });
@@ -72,7 +79,7 @@ export interface ReviewLoopContext {
   /** Runs one activity call; a failure of it ends the run at `name` (issue.ts). */
   readonly step: <T>(name: IssueStep, call: () => Promise<T>) => Promise<T>;
   /** Ends the run with one comment on the issue and a Failed workflow (issue.ts). */
-  readonly stop: (step: IssueStep, reason: StopReason) => Promise<never>;
+  readonly stop: (step: IssueStep, reason: StopReason, detail?: string) => Promise<never>;
 }
 
 export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunResult> {
@@ -141,6 +148,34 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
     }
   }
 
+  /**
+   * One remote fixer round (#675). The session has already pushed when it ends, so the guard runs on what is on GitHub,
+   * fetched. A refusal stops the run (`FixerPushRejected`) before any reply or review is posted for that head; the worker
+   * deletes nothing and resets nothing. Anything else the guard reports (a branch that moved or is gone, a read that
+   * failed) says nothing about the diff, so it stops with its own reason and the branch is left as it is.
+   */
+  async function remoteFixRound(): Promise<void> {
+    const fixed = await step('fix_session', () => remoteSessions.runRemoteFixerSession(stepInput()));
+    if (fixed.moved) {
+      try {
+        const guarded = await branches.guardRemoteBranch({ repoDir: input.repoDir, branch, headSha: fixed.headSha, base: input.base });
+        head = guarded.headSha;
+      } catch (error) {
+        if (isCancellation(error)) {
+          throw error;
+        }
+        const reason = failureReason(error);
+        if (!GUARD_REFUSALS.includes(reason)) {
+          return await stop('fix_guard', reason);
+        }
+        await hideRawComment(fixed.commentNodeId);
+        return await stop('fix_guard', FIXER_PUSH_REJECTED, fixerPushRejectedDetail(branch, pr, round, reason, guardCounts(error)));
+      }
+    }
+    await step('fix_reply', () => reviewGithub.postRemoteFixerReplies(stepInput()));
+    await hideRawComment(fixed.commentNodeId);
+  }
+
   for (;;) {
     // A fresh session and a new review on the head as it is now: after a push this is the closing review of the round.
     const remoteReviewer = input.executor === 'remote';
@@ -182,14 +217,18 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
       return await stop('review_loop', 'MaxRoundsReached');
     }
 
-    const fixed = await onExecutor(input.executor, 'fix_session', stop, () => step('fix_session', () => sessions.runFixerSession(stepInput())));
-    if (fixed.moved) {
-      // The session cannot push: the diff is checked first (protected paths, size), then the one push, with fixed argv.
-      const checked = await step('fix_guard', () => branches.guardBranch({ repoDir: input.repoDir, branch, headSha: fixed.headSha, base: input.base }));
-      await step('fix_push', () => branches.pushBranch({ repoDir: input.repoDir, branch, headSha: checked.headSha, base: input.base }));
-      head = checked.headSha;
+    if (input.executor === 'remote') {
+      await remoteFixRound();
+    } else {
+      const fixed = await step('fix_session', () => sessions.runFixerSession(stepInput()));
+      if (fixed.moved) {
+        // The session cannot push: the diff is checked first (protected paths, size), then the one push, with fixed argv.
+        const checked = await step('fix_guard', () => branches.guardBranch({ repoDir: input.repoDir, branch, headSha: fixed.headSha, base: input.base }));
+        await step('fix_push', () => branches.pushBranch({ repoDir: input.repoDir, branch, headSha: checked.headSha, base: input.base }));
+        head = checked.headSha;
+      }
+      await step('fix_reply', () => reviewGithub.postFixerReplies(stepInput()));
     }
-    await step('fix_reply', () => reviewGithub.postFixerReplies(stepInput()));
     round += 1;
   }
 }

@@ -19,14 +19,14 @@
 import { appendFile, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { ApplicationFailure, CancelledFailure, Context } from '@temporalio/activity';
-import { BriefTooLargeError, buildFixerBrief, buildRemoteReviewerBrief, buildReviewerBrief, reviewerBriefCommands } from '../brief.ts';
+import { BriefTooLargeError, buildFixerBrief, buildRemoteFixerBrief, buildRemoteReviewerBrief, buildReviewerBrief, reviewerBriefCommands } from '../brief.ts';
 import { HEARTBEAT_INTERVAL_MS } from '../claude-session-policy.ts';
 import type { ClaudeConfig } from '../config.ts';
 import { DEFAULT_LIMITS, claudeArgs, git, gitOk, readConfig, runChild } from './claude-session.ts';
 import type { SessionLimits } from './claude-session.ts';
-import { findingsMarker, parseFindingsComment } from '../findings-comment.ts';
+import { findingsMarker, fixerRepliesMarker, parseFindingsComment, parseFixerRepliesComment } from '../findings-comment.ts';
 import type { FindingsCandidate } from '../findings-comment.ts';
-import { REMOTE_EXECUTOR_UNAVAILABLE, issueBranch, issueWorkflowId } from '../issue-types.ts';
+import { REMOTE_EXECUTOR_UNAVAILABLE, REMOTE_SESSION_TIMED_OUT, issueBranch, issueWorkflowId } from '../issue-types.ts';
 import { REMOTE_TEXT_MAX_CHARS } from '../remote-session-policy.ts';
 import type { RemoteSessionResult } from '../remote-session-policy.ts';
 import {
@@ -51,6 +51,7 @@ import type {
   PostedRepliesResult,
   PostedReviewResult,
   RemoteReviewerSessionResult,
+  RemoteFixerSessionResult,
   ReviewStepInput,
   ReviewerOutput,
   ReviewerSessionResult,
@@ -127,6 +128,17 @@ interface StagedReview {
   readonly commentId: number;
   readonly commentNodeId: string;
   readonly review: ReviewerOutput;
+}
+
+interface StagedFixer {
+  readonly commentId: number;
+  readonly commentNodeId: string;
+  readonly replies: FixerOutput;
+}
+
+/** One marker per remote fixer round. Like the local fixer's it has no head: a round starts at one head, and the replies are posted after the push. */
+function remoteFixerMarkerKey(input: ReviewStepInput): string {
+  return `orchestrator.remote-fixer-${input.pr}-r${input.round}`;
 }
 
 /** One marker per remote round and head, as the local reviewer's: `success` once the findings are parsed and staged. */
@@ -559,7 +571,11 @@ export function createReviewActivities(deps: ReviewDeps) {
     if ((await readConfig(input.repoDir, markerKey('fixer', input))) !== 'success') {
       throw failure('there is no finished fixer session whose replies could be posted', 'SessionError');
     }
-    const output = await readFixerOutput(input);
+    return await postReplies(input, await readFixerOutput(input));
+  }
+
+  /** The one place a fixer's replies, local or remote, are filtered to the threads that are open and the fixer's, and posted. */
+  async function postReplies(input: ReviewStepInput, output: FixerOutput): Promise<PostedRepliesResult> {
     const accepted = new Set(input.acceptedThreadIds);
     const open = new Set((await deps.listReviewThreads(input.pr)).filter((thread) => thread.trusted && !accepted.has(thread.id)).map((thread) => thread.id));
     let posted = 0;
@@ -584,12 +600,153 @@ export function createReviewActivities(deps: ReviewDeps) {
     return { posted, skipped };
   }
 
+  // ---- the remote fixer (#675) -----------------------------------------------------------------------------------
+
+  /**
+   * Starts one remote fixer for the head, waits for it (`runRemoteSession`, as it is, with `attempt` = round + 1 so a new
+   * round on a head that did not move fires fresh and a retry of the same round re-attaches), reads its keyed replies
+   * comment, and stages what survives the parser. Nothing is pushed or posted here: the session pushed on its own, and the
+   * workflow guards the fetched tip before the replies are posted. Retry-safe: a finished round returns its staged result.
+   *
+   * The wait ends on a tip that differs from `headSha` and has rested. A session that pushed nothing runs to the cap
+   * (`timed_out`, no tip): that is a round with no progress, like a local fixer that made no commit. A cap with a tip that had
+   * not rested is `RemoteSessionTimedOut`: the session may still push, so the run stops for a person.
+   */
+  async function runRemoteFixerSession(raw: unknown): Promise<RemoteFixerSessionResult> {
+    const input = parseInput(raw);
+    const remote = remoteDeps();
+    return await withHeartbeat(async () => {
+      const key = remoteFixerMarkerKey(input);
+      if ((await readConfig(input.repoDir, key)) === 'success') {
+        return await readStagedFixer(input);
+      }
+      const { issue, threads } = await readForBrief(input);
+      const accepted = new Set(input.acceptedThreadIds);
+      const actionable = threads.filter((thread) => thread.trusted && !accepted.has(thread.id));
+      const marker = fixerRepliesMarker(input.pr, input.headSha, input.round);
+      let brief: string;
+      try {
+        brief = buildRemoteFixerBrief({
+          issue,
+          repo: deps.repo,
+          pr: input.pr,
+          base: input.base,
+          headSha: input.headSha,
+          round: input.round,
+          workflowId: issueWorkflowId(input.issue),
+          branch: issueBranch(input.issue),
+          threads: actionable,
+          marker,
+        });
+      } catch (error) {
+        throw asFailure(error);
+      }
+      if (brief.length > REMOTE_TEXT_MAX_CHARS) {
+        throw failure(`the remote brief is ${brief.length} characters, more than the ${REMOTE_TEXT_MAX_CHARS} a routine takes`, 'BriefTooLarge');
+      }
+      const session = await remote.runRemoteSession({
+        role: 'fixer',
+        issue: input.issue,
+        pr: input.pr,
+        branch: issueBranch(input.issue),
+        base: input.base,
+        headSha: input.headSha,
+        brief,
+        attempt: input.round + 1,
+      });
+      if (session.outcome === 'failed') {
+        // A fixed word only: the claim or the launch failure the session activity reported.
+        throw failure(`the remote fixer did not run (${session.claim ?? session.failure ?? 'failed'})`, 'RemoteSessionFailed');
+      }
+      if (session.outcome === 'timed_out' && session.headSha !== undefined) {
+        throw failure('the remote fixer ran past its cap with a branch tip that had not settled', REMOTE_SESSION_TIMED_OUT);
+      }
+      const tip = session.headSha ?? input.headSha;
+      const parsed = await parseRemoteReplies(input, marker, remote);
+      // Only a reply on a thread that is open and the fixer's is kept; the rest is counted as skipped when posting.
+      await stageFixer(input, { commentId: parsed.commentId, commentNodeId: parsed.commentNodeId, replies: parsed.output }, tip);
+      await gitOk(input.repoDir, ['config', '--local', key, 'success']);
+      return {
+        headSha: tip,
+        moved: tip !== input.headSha,
+        replies: openReplyCount(parsed.output, actionable),
+        commentNodeId: parsed.commentNodeId,
+      };
+    });
+  }
+
+  function openReplyCount(output: FixerOutput, actionable: readonly ReviewThread[]): number {
+    const open = new Set(actionable.map((thread) => thread.id));
+    return output.replies.filter((reply) => open.has(reply.threadId)).length;
+  }
+
+  async function parseRemoteReplies(input: ReviewStepInput, marker: string, remote: RemoteReviewDeps): Promise<ReturnType<typeof parseFixerRepliesComment>> {
+    const candidates = await remote.listFindingsCandidates(input.pr);
+    try {
+      return parseFixerRepliesComment(candidates, marker);
+    } catch (error) {
+      throw asFailure(error);
+    }
+  }
+
+  /** Posts the staged replies of a finished remote fixer round, after the workflow guarded the tip. `input.headSha` is the branch tip after the push. */
+  async function postRemoteFixerReplies(raw: unknown): Promise<PostedRepliesResult> {
+    const input = parseInput(raw);
+    if ((await readConfig(input.repoDir, remoteFixerMarkerKey(input))) !== 'success') {
+      throw failure('there is no finished remote fixer session whose replies could be posted', 'SessionError');
+    }
+    return await postReplies(input, (await readStagedFixerFile(input)).replies);
+  }
+
+  async function stagedFixerPath(input: ReviewStepInput): Promise<string> {
+    const relative = (await gitOk(input.repoDir, ['rev-parse', '--git-path', `orchestrator-remote-fixer-${input.pr}-r${input.round}.json`])).trim();
+    return resolve(input.repoDir, relative);
+  }
+
+  async function stageFixer(input: ReviewStepInput, staged: StagedFixer, tip: string): Promise<void> {
+    const path = await stagedFixerPath(input);
+    await writeFile(`${path}.tmp`, JSON.stringify({ ...staged, tip }), 'utf8');
+    await rename(`${path}.tmp`, path);
+  }
+
+  /** The staged file, parsed again at this boundary: nothing read back from disk is trusted for its shape. */
+  async function readStagedFixerFile(input: ReviewStepInput): Promise<StagedFixer & { readonly tip: string }> {
+    let top: unknown;
+    try {
+      top = JSON.parse(await readFile(await stagedFixerPath(input), 'utf8'));
+    } catch {
+      throw failure('the staged replies of the remote fixer are missing or unreadable', 'MalformedFindings');
+    }
+    const record = typeof top === 'object' && top !== null && !Array.isArray(top) ? (top as Record<string, unknown>) : {};
+    const { commentId, commentNodeId, tip } = record;
+    if (typeof commentId !== 'number' || typeof commentNodeId !== 'string' || typeof tip !== 'string' || !/^[0-9a-f]{40}$/.test(tip)) {
+      throw failure('the staged replies of the remote fixer are not in the shape this code wrote', 'MalformedFindings');
+    }
+    try {
+      return { commentId, commentNodeId, tip, replies: parseFixerOutput(JSON.stringify(record['replies'])) };
+    } catch (error) {
+      throw asFailure(error);
+    }
+  }
+
+  async function readStagedFixer(input: ReviewStepInput): Promise<RemoteFixerSessionResult> {
+    const staged = await readStagedFixerFile(input);
+    const threads = await deps.listReviewThreads(input.pr);
+    const accepted = new Set(input.acceptedThreadIds);
+    return {
+      headSha: staged.tip,
+      moved: staged.tip !== input.headSha,
+      replies: openReplyCount(staged.replies, threads.filter((thread) => thread.trusted && !accepted.has(thread.id))),
+      commentNodeId: staged.commentNodeId,
+    };
+  }
+
   /** The identifiers of the open threads, and whether each is a trusted author's. No text. */
   async function listOpenThreads(pr: number): Promise<OpenThreads> {
     return openThreadRefs(await deps.listReviewThreads(pr));
   }
 
-  return { runReviewerSession, postSessionReview, runRemoteReviewerSession, postRemoteSessionReview, minimizeFindingsComment, runFixerSession, postFixerReplies, listOpenThreads };
+  return { runReviewerSession, postSessionReview, runRemoteReviewerSession, postRemoteSessionReview, minimizeFindingsComment, runFixerSession, postFixerReplies, runRemoteFixerSession, postRemoteFixerReplies, listOpenThreads };
 }
 
 export type ReviewActivities = ReturnType<typeof createReviewActivities>;
