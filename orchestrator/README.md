@@ -240,7 +240,7 @@ After the review loop the run waits for the maintainer, with a signal, at no cos
 
 ## Host integration (#647)
 
-`runHostIntegration` (`src/activities/host-integration.ts`) runs the integration suite on a PR head. The suite needs the LogSeq desktop app, which is macOS only, so this is the one activity that runs on the maintainer's Mac and the only one on the `host` task queue. It uses no model and no GitHub call. **No workflow calls it yet** (a later task of plan #643 does); until then it only exists.
+`runHostIntegration` (`src/activities/host-integration.ts`) runs the integration suite on a PR head. The suite needs the LogSeq desktop app, which is macOS only, so this is the one activity that runs on the maintainer's Mac and the only one on the `host` task queue. It uses no model and no GitHub call. The issue workflow calls it at the gate when a run is started with `--host-integration` (#648, "The host integration check at the gate" below); without that flag nothing calls it.
 
 **What runs.** For `{ pr, headSha, base }`, in a throwaway detached worktree under the OS temp directory (`logseq-mcp-orchestrator-host/pr-<n>/tree`, never inside your working copy):
 
@@ -267,6 +267,36 @@ HOST_TASK_QUEUE=host HOST_REPO_DIR=$HOME/src/logseq-mcp-server npm run worker
 - *A stuck worktree.* The next run of the same PR removes it first. By hand: `git -C <repo> worktree remove --force <tmp>/logseq-mcp-orchestrator-host/pr-<n>/tree`, then `git -C <repo> worktree prune`, then delete `<tmp>/logseq-mcp-orchestrator-host/pr-<n>`.
 - *A LogSeq instance left running* (the worker was killed with SIGKILL, so no `finally` ran). From the worktree, if it still exists: `npx tsx scripts/logseq-instance.ts stop`. The next run of the same PR does this itself. Otherwise `npx tsx scripts/logseq-instance.ts status` in the worktree shows it, and a second LogSeq app on its own profile can be quit by hand. Your own LogSeq is never touched.
 - *`fixture_dirty`.* Something wrote to the committed fixture. Find out what before running again; never commit a change LogSeq made to it (`tests/integration/setup.md`).
+
+## The host integration check at the gate (#648)
+
+With `hostIntegration: 'auto'` the run checks the PR head on the host before it lets the maintainer's decision through. The check is the integration suite of `runHostIntegration` (#647), the rule for when it is needed and the `host/integration` commit status are `src/integration-policy.ts` (#646), and the workflow side is `src/workflows/host-integration.ts`, called from the hold loop of `src/workflows/decision.ts`. **The default is `off`: with the field absent or `off` no new activity is called and the run is what it was.**
+
+**Turn it on.** `npm run run-issue -- --issue 123 --host-integration` sets `hostIntegration: 'auto'` in the run's input. It needs a worker polling the `host` queue (`HOST_TASK_QUEUE=host`, see "Host integration" above) on a machine with the LogSeq desktop app. Without one the check waits in the queue and the step ends at its 2 hour bound as `IntegrationTimeout`. It applies when the run waits for the decision (`awaitDecision` true, the default): with `awaitDecision: false` the run ends at the review loop and the check is not run.
+
+**What it does, in order**, for the head the gate shows, once a review is on it and no thread is open (the head the review loop settled, or a later head a person reviewed):
+
+1. `getHostIntegrationNeed`: the pure rule over the PR's changed files. A change under `src/`, `scripts/`, `tests/fixtures/` or `tests/integration/`, a `Cargo.*` file or the toolchain pin needs it, and so does a PR with more files than one call reads. `orchestrator/src/` is not `src/`. Only a boolean leaves the activity, never a path. If it is not needed the gate is as before and nothing is posted.
+2. `getHostIntegration` for the head. A `success` already on it ends here: the suite is not run again, so a replay or a restarted run does not run it twice.
+3. `postCommitStatus` `pending`, then `runHostIntegration` on the `host` queue (40 minute deadline, 50 minute backstop, two attempts, no retry of a test failure), then the result as the status: `pass` is `success`, `fail` is `failure`, and `conflict`, `fixture_dirty` and `setup_error` are `error`. The description is `<n> passed, <n> failed` or `no counts` (a conflict or a setup error ran no suite, so no counts are given).
+4. Anything but `pass` stops the run for a person (below). No fixer is started.
+5. The gate reads `getHostIntegration` for the gate's own head on every pass and holds unless it shows `success` (`gateClear` with its `hostIntegration` field). A status on another commit counts for nothing: after a push the new head has no status, so once a person has reviewed it the check runs again for that head (once per settled head, not after each fix push), and the old pass does not clear the gate.
+
+A pass does not replace the maintainer: the decision comment, the merge and everything after it are as before. Nothing here merges, applies a label or resolves a thread.
+
+**Stop reasons** (step `host_integration`; one keyed comment on the issue with the commit, the outcome word and the counts, no output of the suite):
+
+| Reason | Status written | What happened | What to do |
+|---|---|---|---|
+| `IntegrationFailed` | `failure` | The suite ran and some tests failed | Fix the change in the PR (by hand: no fixer is started for it yet), push, then delete the run and start again. The new head is checked afresh |
+| `IntegrationConflict` | `error` | The head does not merge onto its base, so no suite ran | Merge or rebase the base into the branch, push, then start again |
+| `IntegrationFixtureDirty` | `error` | The suite ran but changed the committed fixture graph, so its result is not trusted | Find what wrote to `tests/fixtures/graph/` (never commit a change LogSeq made to it), then start again |
+| `IntegrationSetupError` | `error` | The host could not set up or run the suite (fetch, install, build, instance start), or it produced no report | Read the host worker's log and "Host integration" above, fix the host, then start again |
+| `IntegrationTimeout` | `error` | The activity hit its bound (heartbeat, deadline or the 2 hour step limit), or no host worker took it | Check that the host worker is running and LogSeq is installed, then start again |
+
+To start again after a stop, delete the closed run and start it ("Recovering a stuck run"). The restart finds the open PR, and the head is checked again unless it already shows `success`.
+
+**What it does not do.** Run the suite anywhere but the host, send a failure to a fixer (open question 4 of #643), post or log any output beyond the counts, or change the default to `auto` (a later change, after one real run). **UNVERIFIED:** a real run needs LogSeq and the host worker, and the tests use fakes for both.
 
 ## GitHub activities (#628)
 
@@ -339,6 +369,7 @@ Settings (all optional, read once in `src/gh-config.ts`): `ORCHESTRATOR_GH_PATH`
 | `src/activities/branch.ts`, `src/branch-types.ts`, `src/diff-guard.ts` | `guardBranch` and `pushBranch` (the only push), their input parsing and bounds, and the pure diff guard |
 | `src/activities/implementer.ts` | `runImplementerSession`: reads the issue, builds the brief and runs the session in one activity, so issue text stays out of the history |
 | `src/activities/host-integration.ts`, `src/host-integration-policy.ts` | `runHostIntegration` (#647): the integration suite on a PR head, on the host only; its input, result, queue name and bounds (importable from workflow code) |
+| `src/workflows/host-integration.ts`, `src/integration-policy.ts` | The host integration check at the gate (#648): once per head, run, record, stop; the rule for when it is needed and the commit status (#646, importable from workflow code) |
 | `src/start-server.ts`, `src/dev-server.ts` | The dev server launcher |
 | `src/activities/claude-session.ts` | `runClaudeSession`: one worktree, one branch, one `claude -p` session |
 | `src/claude-session-policy.ts` | Its timeouts, heartbeat and retry bounds (importable from workflow code) |
