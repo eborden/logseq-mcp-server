@@ -20,10 +20,13 @@ import type { TestWorkflowEnvironment } from '@temporalio/testing';
 import { bundleWorkflowCode, Worker } from '@temporalio/worker';
 import { createBranchActivities } from '../src/activities/branch.ts';
 import { createRemoteImplementerActivities } from '../src/activities/implementer.ts';
+import { createRemoteSessionActivities } from '../src/activities/remote-session.ts';
+import type { RemoteGithub } from '../src/activities/remote-session.ts';
 import { loadServerConfig } from '../src/config.ts';
 import { NON_RETRYABLE_BRANCH_FAILURES, parseDeleteBranchInput } from '../src/branch-types.ts';
 import { startDevServer } from '../src/dev-server.ts';
-import { ISSUE_STOPPED_FAILURE, issueWorkflowId, stopCommentKey } from '../src/issue-types.ts';
+import { ISSUE_STOPPED_FAILURE, attemptForFlag, issueWorkflowId, parseIssueWorkflowInput, stopCommentKey } from '../src/issue-types.ts';
+import { buildRunInput } from '../src/run-issue-input.ts';
 import type { IssueRunResult } from '../src/issue-types.ts';
 import type { RemoteSessionInput, RemoteSessionResult } from '../src/remote-session-policy.ts';
 import type { IssueView } from '../src/types.ts';
@@ -273,6 +276,76 @@ test('the wrapper refuses a closed issue and a bad input before any session', as
   assert.equal((await failureOf(run(runRemoteImplementerSession, { ...WRAPPER_INPUT, issueNumber: 31 }))).type, 'InvalidState');
   assert.equal((await failureOf(run(runRemoteImplementerSession, { ...WRAPPER_INPUT, base: '--x' }))).type, 'InvalidInput');
   assert.equal(fired, 0);
+});
+
+// ---- the run's first attempt number ------------------------------------------------------------------------------
+
+test('the run input takes an optional attempt, a positive whole number, and --attempt builds it', () => {
+  const base = { issueNumber: 5, repoDir: '/work/repo', worktreeDir: '/work/wt', base: 'main' };
+  assert.equal('attempt' in parseIssueWorkflowInput(base), false, 'absent stays absent');
+  assert.equal(parseIssueWorkflowInput({ ...base, attempt: 2 }).attempt, 2);
+  for (const bad of [0, -1, 1.5, '2', null, 100, Number.NaN]) {
+    assert.throws(() => parseIssueWorkflowInput({ ...base, attempt: bad }), /attempt must be a whole number/, String(bad));
+  }
+  assert.deepEqual(attemptForFlag(undefined), {});
+  assert.deepEqual(attemptForFlag('3'), { attempt: 3 });
+  for (const bad of ['', '0', '-1', '1.5', 'x', '100', '02']) {
+    assert.throws(() => attemptForFlag(bad), /--attempt must be a whole number/, bad);
+  }
+  const flags = { issue: '5', base: 'main', repoDir: '/work/repo', worktreeDir: undefined, hostIntegration: false, executor: 'remote' };
+  assert.equal('attempt' in buildRunInput(flags), false);
+  assert.equal(buildRunInput({ ...flags, attempt: '2' }).attempt, 2);
+  assert.throws(() => buildRunInput({ ...flags, attempt: 'two' }), /--attempt must be a whole number/);
+});
+
+test('a run started at attempt 2 fires a fresh session under a new marker key; the default keeps the old key and re-attaches', async () => {
+  const fired: string[] = [];
+  const clock = { t: 1_000_000 };
+  const github: RemoteGithub = {
+    openPrs: async () => [],
+    claudeBranches: async () => [],
+    branchTip: async () => 'b'.repeat(40),
+    checksPending: async () => false,
+    reviewedOnHead: async () => false,
+  };
+  const remote = createRemoteSessionActivities({
+    repoDir: repos.repo,
+    routines: { implementer: 'trig_i', reviewer: 'trig_r', fixer: 'trig_f' },
+    fire: {
+      fire: async () => {
+        fired.push('fire');
+        return { sessionId: `session_0${fired.length}`, url: 'https://claude.ai/code/x' };
+      },
+    },
+    github,
+    limits: { capMs: 600_000, pollIntervalMs: 60_000, settleMs: 120_000, orphanPollMs: 300_000, heartbeatIntervalMs: 50, fireAttempts: 3, fireBackoffMs: 1_000, retryAfterMaxMs: 60_000 },
+    now: () => clock.t,
+    sleep: async (ms) => {
+      clock.t += ms;
+    },
+  });
+  const { runRemoteImplementerSession } = createRemoteImplementerActivities({ readIssue: async (n) => issueView(n), runRemoteSession: remote.runRemoteSession, repo: 'eborden/logseq-mcp-server' });
+  const keys = async () => (await git(repos.repo, 'config', '--local', '--get-regexp', '^orchestratorremote\\.').catch(() => '')).split('\n').map((line) => line.split(' ')[0]);
+
+  const first = await run(runRemoteImplementerSession, WRAPPER_INPUT);
+  assert.equal(first.sessionId, 'session_01');
+  assert.deepEqual(await keys(), ['orchestratorremote.30-implementer-none.state']);
+  const again = await run(runRemoteImplementerSession, WRAPPER_INPUT);
+  assert.equal(fired.length, 1, 'the default attempt re-attaches to the old key');
+  assert.equal(again.sessionId, 'session_01');
+
+  const next = await run(runRemoteImplementerSession, { ...WRAPPER_INPUT, attempt: 2 });
+  assert.equal(fired.length, 2, 'attempt 2 fires fresh');
+  assert.equal(next.sessionId, 'session_02');
+  assert.deepEqual((await keys()).sort(), ['orchestratorremote.30-implementer-none-a2.state', 'orchestratorremote.30-implementer-none.state']);
+});
+
+test('the workflow starts the remote implementer at the run attempt and counts on from there', { timeout: 120_000 }, async () => {
+  const dead = await start(() => async () => ({ outcome: 'timed_out' }), { attempt: 3 });
+  const cause = await failure(dead.issue, dead.started);
+  assert.deepEqual(cause.details?.slice(0, 2), ['session', 'RemoteSessionTimedOut']);
+  assert.deepEqual(dead.world.attempts, [3, 4], 'the first call is the run attempt, the next call is one more');
+  await finish(dead.world);
 });
 
 // ---- the workflow ------------------------------------------------------------------------------------------------
