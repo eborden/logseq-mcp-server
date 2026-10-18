@@ -38,6 +38,9 @@ export class FireError extends Error {
 }
 
 export const FIRE_BASE_URL = 'https://api.anthropic.com';
+// Every fire call needs this header, and a call without it gets a 400. The docs promise dated versions, so a new
+// version is a one-line change here.
+export const FIRE_BETA_HEADER = 'experimental-cc-routine-2026-04-01';
 export const FIRE_TIMEOUT_MS = 30_000;
 const ROUTINE_ID = /^[A-Za-z0-9_-]{1,100}$/;
 const SESSION_ID = /^session_[A-Za-z0-9]{1,100}$/;
@@ -82,7 +85,12 @@ export function createRoutineFireClient(options: RoutineFireOptions): FireClient
     try {
       response = await doFetch(`${FIRE_BASE_URL}/v1/claude_code/routines/${routineId}/fire`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        headers: {
+          authorization: `Bearer ${token}`,
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': FIRE_BETA_HEADER,
+          'content-type': 'application/json',
+        },
         body: JSON.stringify({ text }),
         signal: controller.signal,
       });

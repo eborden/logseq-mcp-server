@@ -586,6 +586,22 @@ test('the client posts the documented request and parses only the documented ans
   assert.deepEqual(JSON.parse(seen[0]?.body ?? ''), { text: BRIEF });
 });
 
+test('the client sends exactly the four documented headers, with the beta version the fire endpoint requires', async () => {
+  const seen: Seen[] = [];
+  const client = createRoutineFireClient({
+    tokens: TOKENS,
+    fetch: fakeFetch({ status: 200, json: { claude_code_session_id: 'session_01XYZ', claude_code_session_url: 'https://claude.ai/code/session_01XYZ' } }, seen),
+  });
+  await client.fire('trig_impl1', BRIEF);
+  const headers = seen[0]?.headers ?? {};
+  // The token is compared, never printed: a failure names the header, not its value.
+  assert.equal(headers['authorization'] === `Bearer ${TOKEN}`, true, 'authorization is the bearer of the routine');
+  assert.deepEqual(Object.keys(headers).sort(), ['anthropic-beta', 'anthropic-version', 'authorization', 'content-type']);
+  assert.equal(headers['anthropic-version'], '2023-06-01');
+  assert.equal(headers['anthropic-beta'], 'experimental-cc-routine-2026-04-01');
+  assert.equal(headers['content-type'], 'application/json');
+});
+
 test('the client maps statuses to kinds, reads Retry-After, and no error holds the token, the text or a body', async () => {
   const cases: [number, string, Record<string, string>?][] = [
     [400, 'bad_request'],
