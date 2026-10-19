@@ -182,7 +182,7 @@ class World {
 
   /** The remote session activity: what each role does when fired, from the brief's own marker. */
   async runRemoteSession(raw: unknown): Promise<RemoteSessionResult> {
-    const input = raw as { role: string; headSha: string; brief: string; attempt?: number };
+    const input = raw as { role: string; headSha: string; brief: string; attempt?: number; repliesMarker?: string };
     this.sessions.push({ role: input.role, attempt: input.attempt, headSha: input.headSha });
     const marker = /<!-- orchestrator-[a-z-]+ pr=\d+ head=[0-9a-f]{40} round=\d+ -->/.exec(input.brief)?.[0] ?? '';
     if (input.role === 'reviewer') {
@@ -193,6 +193,7 @@ class World {
       this.nextComment += 1;
       return { outcome: 'timed_out', sessionId: 'session_r' };
     }
+    assert.equal(input.repliesMarker, marker, 'the fixer wait is keyed on the marker its brief tells the session to post (#699)');
     const result = await this.fixer(this, { headSha: input.headSha, attempt: input.attempt ?? 1 });
     this.candidates.push(...this.fixerComments(marker));
     return result;

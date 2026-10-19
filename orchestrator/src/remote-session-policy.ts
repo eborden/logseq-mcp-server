@@ -38,6 +38,11 @@ export interface RemoteSessionInput {
    * on the PR ends the reviewer wait, as a review on the head does (#682). Reviewer only; absent keeps the review-only wait.
    */
   readonly findingsMarker?: string;
+  /**
+   * The fixer's keyed replies marker (`fixerRepliesMarker`, findings-comment.ts). When set, a trusted comment carrying it on the
+   * PR ends the fixer wait while the branch tip has not moved (#699). Fixer only; absent keeps the push-only wait.
+   */
+  readonly repliesMarker?: string;
 }
 
 /** Why nothing was launched: something already holds the work. */
@@ -133,6 +138,15 @@ export function parseRemoteSessionInput(raw: unknown): RemoteSessionInput {
       throw new InvalidRemoteSessionInputError('findingsMarker must be the findings marker of this pr and headSha');
     }
   }
+  const rawReplies = field('repliesMarker');
+  if (rawReplies !== undefined) {
+    if (role !== 'fixer') {
+      throw new InvalidRemoteSessionInputError('repliesMarker is for the fixer only');
+    }
+    if (typeof rawReplies !== 'string' || rawReplies.length > 200 || !rawReplies.includes(` pr=${pr} head=${headSha} `)) {
+      throw new InvalidRemoteSessionInputError('repliesMarker must be the replies marker of this pr and headSha');
+    }
+  }
   return {
     role,
     issue,
@@ -143,6 +157,7 @@ export function parseRemoteSessionInput(raw: unknown): RemoteSessionInput {
     brief,
     ...(attempt === undefined ? {} : { attempt }),
     ...(rawMarker === undefined ? {} : { findingsMarker: rawMarker as string }),
+    ...(rawReplies === undefined ? {} : { repliesMarker: rawReplies as string }),
   };
 }
 

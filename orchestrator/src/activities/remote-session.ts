@@ -23,7 +23,7 @@
 // Never in a log, a result, the workflow history or an error message: the token, the brief, or a response body.
 
 import { ApplicationFailure, Context } from '@temporalio/activity';
-import { isFindingsMarker, needsInputMarker } from '../findings-comment.ts';
+import { isFindingsMarker, isFixerRepliesMarker, needsInputMarker } from '../findings-comment.ts';
 import { FireError } from '../routine-fire.ts';
 import type { FireClient } from '../routine-fire.ts';
 import {
@@ -157,6 +157,9 @@ function parseOrFail(raw: unknown): RemoteSessionInput {
     if (input.findingsMarker !== undefined && !isFindingsMarker(input.findingsMarker)) {
       throw new InvalidRemoteSessionInputError('findingsMarker must be the findings marker of this pr and headSha');
     }
+    if (input.repliesMarker !== undefined && !isFixerRepliesMarker(input.repliesMarker)) {
+      throw new InvalidRemoteSessionInputError('repliesMarker must be the replies marker of this pr and headSha');
+    }
     return input;
   } catch (error) {
     if (error instanceof InvalidRemoteSessionInputError) {
@@ -178,6 +181,8 @@ export function createRemoteSessionActivities(deps: RemoteSessionDeps) {
    *   for `settleMs` and has no check pending. A push in the window restarts the settle time. The implementer has one more end
    *   (#697): a trusted comment on the issue with the needs-input marker of this attempt, while the tip has not moved. A moved
    *   tip keeps the settle path, marker or not.
+   *   The fixer has one more end (#699): a trusted comment on the PR with its replies marker (`repliesMarker`), while the tip
+   *   has not moved. It ends the wait as `finished` with no tip, the no-progress path. A moved tip keeps the settle path.
    * - reviewer: a trusted review with a body exists on `headSha`, or (when the input has `findingsMarker`) a trusted
    *   comment on the PR carries that marker. The first of the two ends the wait. Both are reads on the same schedule.
    */
@@ -217,6 +222,15 @@ export function createRemoteSessionActivities(deps: RemoteSessionDeps) {
             if (commentId !== undefined) {
               return { outcome: 'needs_input', commentId };
             }
+          }
+          if (
+            input.role === 'fixer' &&
+            input.pr !== undefined &&
+            input.repliesMarker !== undefined &&
+            deps.github.findingsCommented !== undefined &&
+            (await deps.github.findingsCommented(input.pr, input.repliesMarker))
+          ) {
+            return { outcome: 'finished' };
           }
         }
       }
