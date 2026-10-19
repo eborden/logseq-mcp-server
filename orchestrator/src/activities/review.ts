@@ -426,6 +426,7 @@ export function createReviewActivities(deps: ReviewDeps) {
           workflowId: issueWorkflowId(input.issue),
           threads,
           marker,
+          ...(input.bodySource === undefined ? {} : { bodySource: input.bodySource }),
         });
       } catch (error) {
         throw asFailure(error);

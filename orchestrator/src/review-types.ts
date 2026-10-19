@@ -41,6 +41,8 @@ export interface ReviewStepInput {
   readonly acceptedThreadIds: readonly string[];
   /** A host integration failure on a fixture run (#676): the remote fixer's brief carries it as data. Only the fixer round reads it. */
   readonly hostFailure?: HostFailureSummary;
+  /** Where the PR body came from (#708): the remote reviewer's brief says so for a generated fallback. Absent when not known. */
+  readonly bodySource?: 'session' | 'fallback' | 'unknown';
 }
 
 export class InvalidReviewInputError extends Error {
@@ -425,6 +427,10 @@ export function parseReviewStepInput(raw: unknown): ReviewStepInput {
   } catch {
     throw new InvalidReviewInputError('hostFailure has the wrong shape');
   }
+  const bodySource = from.get('bodySource');
+  if (bodySource !== undefined && bodySource !== 'session' && bodySource !== 'fallback' && bodySource !== 'unknown') {
+    throw new InvalidReviewInputError('bodySource must be session, fallback or unknown');
+  }
   return {
     pr: wholeNumber(from.get('pr'), 'pr', 1, 999_999_999),
     issue: wholeNumber(from.get('issue'), 'issue', 1, 999_999_999),
@@ -435,5 +441,6 @@ export function parseReviewStepInput(raw: unknown): ReviewStepInput {
     round: wholeNumber(from.get('round'), 'round', 0, 100),
     acceptedThreadIds,
     ...(hostFailure === undefined ? {} : { hostFailure }),
+    ...(bodySource === undefined ? {} : { bodySource }),
   };
 }
