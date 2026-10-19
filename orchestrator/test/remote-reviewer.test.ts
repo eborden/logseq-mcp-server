@@ -448,6 +448,17 @@ test('a reviewer round of a later round asks for the marker of that round', asyn
   assert.ok(total(w.sleeps) >= WAIT_LIMITS.capMs, 'a comment of another round does not end the wait');
 });
 
+test('a later round on the SAME head fires its own session: a fixer that pushed nothing must not re-attach the review to the last round', async () => {
+  const w = await waitScenario(0);
+  const first = await w.r.run(w.r.activities.runRemoteReviewerSession);
+  assert.equal(first.findings, 1);
+  assert.equal(w.fired(), 1);
+  // The head did not move, so the session key (issue, role, head) is the same as round 0's. Before the attempt number rode
+  // along, this round found the round 0 session marker, fired nothing and stopped with MalformedFindings (the live drill, #677).
+  await failureOf(w.r.run(w.r.activities.runRemoteReviewerSession, { round: 1 }));
+  assert.equal(w.fired(), 2, 'round 1 started a session of its own');
+});
+
 test('a findings comment that appears mid-wait ends it within one poll, long before the cap', async () => {
   const w = await waitScenario(100_000);
   await w.r.run(w.r.activities.runRemoteReviewerSession);

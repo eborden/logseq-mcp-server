@@ -433,7 +433,10 @@ export function createReviewActivities(deps: ReviewDeps) {
       if (brief.length > REMOTE_TEXT_MAX_CHARS) {
         throw failure(`the remote brief is ${brief.length} characters, more than the ${REMOTE_TEXT_MAX_CHARS} a routine takes`, 'BriefTooLarge');
       }
-      const session = await remote.runRemoteSession({ role: 'reviewer', issue: input.issue, pr: input.pr, branch: issueBranch(input.issue), base: input.base, headSha: input.headSha, brief, findingsMarker: marker });
+      // `attempt` = round + 1, as the remote fixer's: a round that follows a fixer that pushed nothing reviews the same head, and
+      // the session key has the head but no round, so without it the round re-attaches to the last round's finished session,
+      // fires nothing, and finds no comment under the new round's marker (`MalformedFindings`). Round 0 is attempt 1, the old key.
+      const session = await remote.runRemoteSession({ role: 'reviewer', issue: input.issue, pr: input.pr, branch: issueBranch(input.issue), base: input.base, headSha: input.headSha, brief, findingsMarker: marker, attempt: input.round + 1 });
       if (session.outcome === 'failed' && session.claim !== 'already_reviewed') {
         // A fixed word only: the claim or the launch failure the session activity reported.
         throw failure(`the remote reviewer did not run (${session.claim ?? session.failure ?? 'failed'})`, 'RemoteSessionFailed');

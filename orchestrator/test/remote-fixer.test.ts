@@ -456,7 +456,7 @@ test('a fixer that pushes nothing is a round with no progress: no guard, the rep
   const first = world.head;
   const stop = await stopOf(await runLoop(world, { maxFixRounds: 2 }));
   assert.deepEqual(stop.details, ['review_loop', 'MaxRoundsReached', 77]);
-  assert.deepEqual(world.sessions.map((s) => [s.role, s.attempt]), [['reviewer', undefined], ['fixer', 1], ['reviewer', undefined], ['fixer', 2], ['reviewer', undefined]], 'every remote fixer round counts, and a new round fires a new session');
+  assert.deepEqual(world.sessions.map((s) => [s.role, s.attempt]), [['reviewer', 1], ['fixer', 1], ['reviewer', 2], ['fixer', 2], ['reviewer', 3]], 'every remote round counts (reviewer attempt = round + 1, as the fixer), and a new round fires a new session');
   assert.ok(world.sessions.every((s) => s.headSha === first));
   assert.equal(world.calls.filter((call) => call === 'guardRemoteBranch').length, 0, 'nothing was pushed, so nothing is guarded');
   assert.equal(world.replies.length, 2, 'the replies of each round are posted, under the key of their round');
