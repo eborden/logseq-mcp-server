@@ -662,11 +662,12 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
       const route = `${repoRoute}/pulls?state=open&head=${encodeURIComponent(`${headOwner}:${input.head}`)}&base=${encodeURIComponent(input.base)}`;
       const { items } = await listAll(route, 'pull requests', parseOpenPr);
       const found = items[0];
-      return found === undefined ? undefined : { number: found.number, url: found.url, created: false };
+      return found === undefined ? undefined : { number: found.number, url: found.url, created: false, bodySource: found.bodyOrigin };
     };
     const before = await existing();
     if (before !== undefined) {
-      // Already open: nothing is read and no body is rewritten (re-running is a no-op, foundations 4.5).
+      // Already open: nothing is read and no body is rewritten (re-running is a no-op, foundations 4.5). The source is read from the
+      // body it has, so a retry after a lost result still says which body the PR opened with.
       return before;
     }
     const chosen = await chooseBody(input);

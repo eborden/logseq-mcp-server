@@ -399,7 +399,7 @@ test('a clean first review clears the gate with no fixer run, and the run ends t
 
   const result = await runIssue(FAKE_QUEUE, issue);
 
-  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD0, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, prBody: { source: 'unchanged', unmet: 0 } });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD0, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, prBody: { source: 'unknown', unmet: 0 } });
   assert.deepEqual(w.counters, { reviewerSessions: 1, reviews: 1, fixerSessions: 0, guards: 1, pushes: 1, replies: 0, comments: 0 });
   assert.deepEqual(w.events, ['guard:a', 'push:a', 'reviewer:0', 'review:0@a']);
 });
@@ -414,7 +414,7 @@ test('threads open, a fix, a closing review on the new head, then the gate clear
 
   const result = await runIssue(FAKE_QUEUE, issue);
 
-  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: fixHead(0), pr: issue + PR_OFFSET, fixRounds: 1, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, prBody: { source: 'unchanged', unmet: 0 } });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: fixHead(0), pr: issue + PR_OFFSET, fixRounds: 1, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, prBody: { source: 'unknown', unmet: 0 } });
   // In order: a review on the first head, a fix, the guard and the push of the new commit, the replies, and then a
   // second review on the NEW head. The first review is on an older commit and does not count for the gate any more.
   assert.deepEqual(w.events, ['guard:a', 'push:a', 'reviewer:0', 'review:0@a', 'fixer:0', 'guard:1', 'push:1', 'replies:0@1', 'reviewer:1', 'review:1@1']);
@@ -445,7 +445,7 @@ test('without a person resolving the thread, the run ends waiting for threads to
     openThreads: 1,
     advisory: 0,
     advisoryOmitted: 0,
-    prBody: { source: 'unchanged', unmet: 0 },
+    prBody: { source: 'unknown', unmet: 0 },
   });
   assert.equal(w.counters.fixerSessions, 1, 'no second fixer round for a thread the reviewer accepted');
   assert.equal(w.unresolved.length, 1, 'the workflow resolved nothing');

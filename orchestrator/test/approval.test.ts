@@ -355,7 +355,7 @@ test('approved on a clear gate: one decision comment, then the merge is observed
 
   const result = await resultOf(issue);
 
-  assert.deepEqual(result, { outcome: 'merged', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, issueClosedByRun: true, decisionRecorded: true, ignoredSignals: 0 });
+  assert.deepEqual(result, { outcome: 'merged', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, issueClosedByRun: true, decisionRecorded: true, ignoredSignals: 0, prBody: { source: 'unknown', unmet: 0 } });
   const comment = world.comments.get(key);
   assert.ok(comment);
   assert.equal(comment.target, issue + PR_OFFSET, 'the comment is on the PR');
@@ -441,7 +441,7 @@ test('a timeout comments on the PR and stops: it never approves, never moves any
 
   const result = await resultOf(issue);
 
-  assert.deepEqual(result, { outcome: 'decision_timeout', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, ignoredSignals: 0 });
+  assert.deepEqual(result, { outcome: 'decision_timeout', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, ignoredSignals: 0, prBody: { source: 'unknown', unmet: 0 } });
   assert.deepEqual([...world.comments.keys()], [`decision-timeout-${issue + PR_OFFSET}`]);
   assert.equal(world.comments.get(`decision-timeout-${issue + PR_OFFSET}`)?.target, issue + PR_OFFSET);
   assert.match(world.comments.get(`decision-timeout-${issue + PR_OFFSET}`)?.body ?? '', /A timeout never approves/);
@@ -498,7 +498,7 @@ test('a malformed signal alone is not a decision: the run times out', { timeout:
 
   const result = await resultOf(issue);
 
-  assert.deepEqual(result, { outcome: 'decision_timeout', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, ignoredSignals: 2 });
+  assert.deepEqual(result, { outcome: 'decision_timeout', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, ignoredSignals: 2, prBody: { source: 'unknown', unmet: 0 } });
   assert.equal(world.comments.has(`decision-${issue + PR_OFFSET}`), false);
 });
 
@@ -512,7 +512,7 @@ test('changes_requested posts the decision comment and ends the run: no merge wa
 
   const result = await resultOf(issue);
 
-  assert.deepEqual(result, { outcome: 'changes_requested', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, ignoredSignals: 0 });
+  assert.deepEqual(result, { outcome: 'changes_requested', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, ignoredSignals: 0, prBody: { source: 'unknown', unmet: 0 } });
   const comment = world.comments.get(`decision-${issue + PR_OFFSET}`)?.body ?? '';
   assert.match(comment, /changes requested/);
   assert.match(comment, /> Rename the atlas helper\./);
@@ -550,7 +550,7 @@ test('an approval the PR never merges for times out in the merge wait: the PR is
 
   const result = await resultOf(issue);
 
-  assert.deepEqual(result, { outcome: 'merge_timeout', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, ignoredSignals: 0 });
+  assert.deepEqual(result, { outcome: 'merge_timeout', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, ignoredSignals: 0, prBody: { source: 'unknown', unmet: 0 } });
   assert.ok(world.comments.has(`merge-timeout-${issue + PR_OFFSET}`));
   assert.deepEqual(world.statusWrites, ['pr:In review', 'issue:In review']);
   assert.equal(world.counters.closeIssue, 0);
@@ -587,7 +587,7 @@ test('a PR merged with no signal goes to Done and the closed check, and says no 
 
   const result = await resultOf(issue);
 
-  assert.deepEqual(result, { outcome: 'merged', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, issueClosedByRun: true, decisionRecorded: false, ignoredSignals: 0 });
+  assert.deepEqual(result, { outcome: 'merged', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, issueClosedByRun: true, decisionRecorded: false, ignoredSignals: 0, prBody: { source: 'unknown', unmet: 0 } });
   assert.deepEqual([...world.comments.keys()], [`merged-without-decision-${issue + PR_OFFSET}`]);
   assert.deepEqual(world.statusWrites.filter((write) => write.endsWith('Done')), ['pr:Done', 'issue:Done']);
   assert.equal(world.issueOpen, false);

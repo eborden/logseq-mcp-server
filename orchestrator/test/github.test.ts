@@ -425,7 +425,7 @@ test('openPr twice creates one PR, and the request carries no labels or merge se
   const second = await github.openPr(PR_INPUT);
 
   assert.equal(first.created, true);
-  assert.deepEqual(second, { number: first.number, url: first.url, created: false });
+  assert.deepEqual(second, { number: first.number, url: first.url, created: false, bodySource: 'fallback' }, 'the source is read from the body the first call wrote');
   const [post] = await fake.callsMatching('-X POST');
   assert.ok(post !== undefined);
   assert.equal((await fake.callsMatching('-X POST')).length, 1);
@@ -450,7 +450,7 @@ test('openPr finds the PR an earlier attempt created when the create answers "al
     ];
   });
 
-  assert.deepEqual(await github.openPr(PR_INPUT), { number: 77, url: 'https://github.com/eborden/logseq-mcp-server/pull/77', created: false });
+  assert.deepEqual(await github.openPr(PR_INPUT), { number: 77, url: 'https://github.com/eborden/logseq-mcp-server/pull/77', created: false, bodySource: 'unknown' });
   assert.equal((await fake.callsMatching('-X POST')).length, 1);
 });
 

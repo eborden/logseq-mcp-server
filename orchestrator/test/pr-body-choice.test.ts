@@ -8,8 +8,8 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { createGithubActivities } from '../src/activities/github.ts';
 import { prBodyMarker, MAX_PR_BODY_CHARS } from '../src/findings-comment.ts';
-import { PR_TEMPLATE_PATH, checkPrBody, choosePrBody, fallbackPrBody, parsePrTemplate, withClosesLine } from '../src/pr-template.ts';
-import { createFake, emptyState, rawComment, recordedSleep } from './github-support.ts';
+import { MAX_FALLBACK_SECTIONS, PR_TEMPLATE_PATH, bodyOrigin, checkPrBody, choosePrBody, fallbackPrBody, parsePrTemplate, stripOwnMarkers, withClosesLine } from '../src/pr-template.ts';
+import { createFake, emptyState, rawComment, rawOpenPr, recordedSleep } from './github-support.ts';
 import type { FakeState } from './github-support.ts';
 
 const TEMPLATE_TEXT = ['<!-- guidance -->', '## Alpha', '<!-- one line -->', '## Beta', '- [ ] x', '## Gamma', ''].join('\n');
@@ -72,6 +72,30 @@ test('the orchestrator markers in a session body are removed, so the PR carries 
   assert.equal(chosen.source, 'session');
   assert.ok(!/orchestrator-/.test(chosen.body));
   assert.equal(choosePrBody(template, undefined, 7, true).reason, 'comment_too_large');
+});
+
+test('marker stripping cannot be bypassed by nesting or by a ">" inside the marker', () => {
+  for (const hostile of ['a <!-- orchest<!-- orchestrator-x -->erator-y z=1 --> b', '<!-- orchestrator-pr-body a>b -->', '<!--orchestrator-z', 'x <!--\torchestrator-q --> y']) {
+    assert.ok(!/<!--\s*orchestrator-/i.test(stripOwnMarkers(hostile)), hostile);
+  }
+  assert.equal(stripOwnMarkers('keep <!-- a normal comment --> this'), 'keep <!-- a normal comment --> this');
+});
+
+test('the fallback is bounded however large the template is, and says how many sections it left out', () => {
+  const big = parsePrTemplate(Array.from({ length: 3000 }, (_, i) => `## Section ${i} ${'x'.repeat(30)}`).join('\n'));
+  const chosen = choosePrBody(big, undefined, 9);
+  assert.ok(chosen.body.length < 20_000, `${chosen.body.length} characters`);
+  assert.equal(chosen.body.split('\n').filter((line) => line.startsWith('## ')).length, MAX_FALLBACK_SECTIONS);
+  assert.ok(chosen.body.includes(`The template has ${3000 - MAX_FALLBACK_SECTIONS} more sections`));
+  assert.ok(chosen.body.includes(`and ${3000 - MAX_FALLBACK_SECTIONS} more.`));
+  const long = choosePrBody(parsePrTemplate(`## ${'y'.repeat(5000)}\n`), undefined, 9);
+  assert.ok(long.body.length < 1000);
+});
+
+test('bodyOrigin reads the fallback line, any other text, or nothing', () => {
+  assert.equal(bodyOrigin(fallbackPrBody(template, ['Alpha'])), 'fallback');
+  assert.equal(bodyOrigin(GOOD), 'session');
+  assert.equal(bodyOrigin('  \n'), 'unknown');
 });
 
 // ---- the activity ---------------------------------------------------------------------------------------------
@@ -155,13 +179,23 @@ test('openPr: a failing body, an oversized comment, a missing template and a cha
   assert.deepEqual((await sentBody(changed.fake)).split('\n').filter((line) => line.startsWith('## ')), ['## Delta']);
 });
 
+test('openPr with the PR already open says which body it has, from the body itself', async () => {
+  for (const [body, expected] of [[fallbackPrBody(template, ['Alpha']), 'fallback'], [GOOD, 'session'], ['', 'unknown']] as const) {
+    const { github } = await setup((state) => {
+      state.pulls = [rawOpenPr(77, 'claude/30', { body })];
+    });
+    const opened = await github.openPr({ ...PR, base: 'feature/atlas' });
+    assert.deepEqual([opened.created, opened.number, opened.bodySource], [false, 77, expected]);
+  }
+});
+
 test('openPr with the PR already open reads no template and no comment, and rewrites nothing', async () => {
   const { fake, github } = await setup((state) => {
     state.repoFiles = { [`b:${PR_TEMPLATE_PATH}`]: TEMPLATE_TEXT };
   });
   await github.openPr(PR);
   const again = await github.openPr({ ...PR, attempt: 2 });
-  assert.deepEqual([again.created, again.bodySource], [false, undefined]);
+  assert.equal(again.created, false);
   assert.equal((await fake.callsMatching('-X POST')).length, 1);
   assert.equal((await fake.callsMatching('contents')).length, 1);
   assert.equal((await fake.callsMatching('-X PATCH')).length, 0);

@@ -7,6 +7,7 @@
 // never read, copied or returned. The filter lives here, inside the listing parse, so no caller can forget it.
 
 import type { FindingsCandidate } from './findings-comment.ts';
+import { bodyOrigin } from './pr-template.ts';
 import { GhError } from './gh.ts';
 import type { BoardStatus, IssueComment, IssueView, ItemKind, ReviewThread } from './types.ts';
 
@@ -307,6 +308,8 @@ export interface OpenPr {
   readonly headRef: string;
   /** Issue numbers the description closes (`Closes #N`). The text itself is not kept. */
   readonly closes: readonly number[];
+  /** Where the body came from (#707), read from its fixed fallback line. The text itself is not kept. */
+  readonly bodyOrigin: 'fallback' | 'session' | 'unknown';
 }
 
 const CLOSING_KEYWORD = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d{1,9})\b/gi;
@@ -326,6 +329,7 @@ export function parseOpenPr(raw: unknown, path: string): OpenPr | undefined {
     url: str(pr, 'html_url', what, path),
     headRef: str(head, 'ref', what, `${path}.head`),
     closes,
+    bodyOrigin: bodyOrigin(body),
   };
 }
 

@@ -281,8 +281,8 @@ export interface OpenPrResult {
   readonly url: string;
   /** False when an open PR for the same head and base was already there. */
   readonly created: boolean;
-  /** Which body a new PR opened with (#707). Absent when the PR was already open: its body was not read or rewritten. */
-  readonly bodySource?: 'session' | 'fallback';
+  /** Which body the PR has (#707): the one chosen when this call created it, or, for a PR already open, read from its body (`unknown` when that is empty). */
+  readonly bodySource?: 'session' | 'fallback' | 'unknown';
   /** How many template sections the session's body did not meet. Present with `bodySource`. */
   readonly bodyUnmet?: number;
   /** Why the session's body was not used. Absent for `session`. */
