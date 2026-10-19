@@ -272,6 +272,15 @@ export type SkipReason = 'issue_closed' | 'open_pr' | 'claude_branch' | 'already
  *   loop may not act on (an untrusted author's). Only a person resolves a thread, so the gate stays not clear until then.
  * Identifiers and counts only: no review or thread text is ever in a result.
  */
+/** Where the PR's body came from (#707): the session's own, or the one generated from the template. Counts and a reason word only. */
+export interface PrBodyReport {
+  /** `unchanged`: the PR was already open, so its body was not read or rewritten. */
+  readonly source: 'session' | 'fallback' | 'unchanged';
+  /** How many template sections the session's body did not meet. */
+  readonly unmet: number;
+  readonly reason?: string;
+}
+
 export type IssueRunResult =
   | {
       readonly outcome: 'gate_clear';
@@ -287,6 +296,7 @@ export type IssueRunResult =
       readonly advisoryOmitted: number;
       /** Remote reviewer rounds whose raw findings comment could not be hidden (#674). Present only for `executor: 'remote'`. The review was posted. */
       readonly rawCommentsNotHidden?: number;
+      readonly prBody?: PrBodyReport;
     }
   | {
       readonly outcome: 'waiting_for_threads';
@@ -301,6 +311,7 @@ export type IssueRunResult =
       readonly advisoryOmitted: number;
       /** Remote reviewer rounds whose raw findings comment could not be hidden (#674). Present only for `executor: 'remote'`. The review was posted. */
       readonly rawCommentsNotHidden?: number;
+      readonly prBody?: PrBodyReport;
     }
   | { readonly outcome: 'skipped'; readonly issueNumber: number; readonly reason: SkipReason }
   /** The maintainer asked for changes (#631). The run commented and stopped; nothing else moved. */
@@ -388,42 +399,6 @@ export function stopComment(workflowId: string, step: IssueStep, reason: StopRea
 /** The title of the PR the workflow opens: identifiers only. The session's own account of the work is its status comment on the issue. */
 export function pullRequestTitle(issueNumber: number): string {
   return `Implement issue #${issueNumber}`;
-}
-
-/**
- * The body of the PR the workflow opens, in the sections of `.github/pull_request_template.md`. The workflow knows
- * only identifiers, so it fills what it knows and points at the rest: the implementer session wrote its account (what
- * changed, what it verified and could not verify, its open questions) as a status comment on the issue.
- */
-export function pullRequestBody(issueNumber: number, branch: string): string {
-  return [
-    '## What changed',
-    `Opened by the orchestrator for issue #${issueNumber} (workflow \`${issueWorkflowId(issueNumber)}\`) from the branch \`${branch}\`, which an implementer session wrote and pushed.`,
-    '',
-    `Closes #${issueNumber}`,
-    '',
-    '## Design',
-    "See the issue and the implementer session's status comment on it. The orchestrator does not summarize the work.",
-    '',
-    '## Assumptions',
-    `See the session's status comment on #${issueNumber}.`,
-    '',
-    '## Failure behavior',
-    "See the diff and the session's status comment.",
-    '',
-    '## Preserved on purpose / questions',
-    'None recorded by the orchestrator.',
-    '',
-    '## New concepts',
-    'None recorded by the orchestrator.',
-    '',
-    '## Test plan',
-    '- [ ] Not verified by the orchestrator. A reviewer checks what the issue names, and the maintainer decides the merge.',
-    '',
-    '## Roll back',
-    'Revert the merge commit.',
-    '',
-  ].join('\n');
 }
 
 /**

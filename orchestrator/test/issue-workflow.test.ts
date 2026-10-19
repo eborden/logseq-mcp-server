@@ -103,6 +103,9 @@ class World {
   guardFails: string | undefined;
   pushFails: string | undefined;
   claimProceeds = true;
+  /** What `openPr` was asked, and what it answers about the body it chose (#707). The body text is never in the workflow. */
+  readonly openAsks: Record<string, unknown>[] = [];
+  bodyAnswer: { bodySource: 'session' | 'fallback'; bodyUnmet: number; bodyReason?: string } = { bodySource: 'fallback', bodyUnmet: 2, bodyReason: 'no_comment' };
   /** Each side effect, counted once however many attempts ran. */
   readonly counters = { claims: 0, sessions: 0, guards: 0, pushes: 0, prs: 0, adds: 0, prWrites: 0, issueWrites: 0, comments: 0 };
   readonly attempts: Record<string, number> = {};
@@ -214,9 +217,10 @@ function fakeActivities(worlds: Map<number, World>) {
       w.maybeLose('pushBranch');
       return { branch: raw.branch, headSha: raw.headSha };
     },
-    openPr: async (input: { head: string; base: string; title: string; body: string }) => {
+    openPr: async (input: { head: string; base: string; title: string; issue: number; attempt?: number }) => {
       const issue = Number(/^claude\/(\d+)$/.exec(input.head)?.[1]);
       const w = world(issue);
+      w.openAsks.push(input);
       w.attempt('openPr');
       const created = !w.prOpened;
       if (created) {
@@ -225,7 +229,7 @@ function fakeActivities(worlds: Map<number, World>) {
         w.order.push('openPr');
       }
       w.maybeLose('openPr');
-      return { number: issue + PR_OFFSET, url: `https://github.com/eborden/logseq-mcp-server/pull/${issue + PR_OFFSET}`, created };
+      return { number: issue + PR_OFFSET, url: `https://github.com/eborden/logseq-mcp-server/pull/${issue + PR_OFFSET}`, created, ...(created ? w.bodyAnswer : {}) };
     },
     addToBoard: async (target: BoardItemRef) => {
       const { w } = worldOf(target);
@@ -348,7 +352,7 @@ test('happy path: check, claim, session, PR, then the PR and the issue In review
 
   const result = await runIssue(FAKE_QUEUE, issue);
 
-  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD_SHA, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0 });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD_SHA, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, prBody: { source: 'fallback', unmet: 2, reason: 'no_comment' } });
   assert.equal(world.reviews, 1, 'one review, and no fixer: a clean first review clears the gate');
   assert.deepEqual(world.order, ['claim', 'session', 'guard', 'push', 'openPr', 'addToBoard', 'setStatus:pr', 'setStatus:issue']);
   assert.deepEqual(world.counters, { claims: 1, sessions: 1, guards: 1, pushes: 1, prs: 1, adds: 1, prWrites: 1, issueWrites: 1, comments: 0 });
@@ -357,6 +361,38 @@ test('happy path: check, claim, session, PR, then the PR and the issue In review
   // The board was read back, not assumed: after the claim, and for the PR and the issue after their moves.
   assert.equal(world.attempts['getBoardStatus:issue'], 2);
   assert.equal(world.attempts['getBoardStatus:pr'], 1);
+});
+
+test('the PR step reports which body the activity chose, and the body text is never asked for or kept by the workflow (#707)', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  const { issue, world } = newWorld();
+  world.bodyAnswer = { bodySource: 'session', bodyUnmet: 0 };
+
+  const result = await runIssue(FAKE_QUEUE, issue);
+
+  assert.deepEqual(world.openAsks, [{ head: `claude/${issue}`, base: 'main', title: `Implement issue #${issue}`, issue }]);
+  assert.deepEqual((result as { prBody?: unknown }).prBody, { source: 'session', unmet: 0 });
+  assert.equal(world.counters.prs, 1);
+});
+
+test('a fallback is reported with its reason and the number of sections it names (#707)', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  const { issue } = newWorld();
+
+  const result = await runIssue(FAKE_QUEUE, issue);
+
+  assert.deepEqual((result as { prBody?: unknown }).prBody, { source: 'fallback', unmet: 2, reason: 'no_comment' });
+});
+
+test('a result lost at the PR step is retried: one PR, and the source is reported as the first answer or as unchanged, never invented (#707)', { timeout: 180_000 }, async () => {
+  await ensureFakeWorker();
+  const { issue, world } = newWorld();
+  world.loseOnce.add('openPr');
+
+  const result = await runIssue(FAKE_QUEUE, issue);
+
+  assert.equal(world.counters.prs, 1);
+  assert.deepEqual((result as { prBody?: unknown }).prBody, { source: 'unchanged', unmet: 0 }, 'the retry found the PR open: its body was not read or rewritten');
 });
 
 test('the finished run replays against the current workflow code', { timeout: 120_000 }, async () => {
@@ -727,7 +763,7 @@ test('the real activities against the fake gh and claude: the PR is In review, a
 
   const result: unknown = await client.workflow.getHandle(issueWorkflowId(stack.input.issueNumber)).result();
 
-  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: 201, branch: 'claude/201', headSha: (result as { headSha: string }).headSha, pr: 1001, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0 });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: 201, branch: 'claude/201', headSha: (result as { headSha: string }).headSha, pr: 1001, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, prBody: { source: 'fallback', unmet: 0, reason: 'template_unavailable' } });
   const state = await stack.fake.state();
   assert.equal(state.board.find((item) => item.number === stack.input.issueNumber)?.status, 'In review');
   assert.equal(state.board.find((item) => item.number === 1001)?.status, 'In review');

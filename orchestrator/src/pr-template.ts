@@ -197,3 +197,75 @@ export function checkPrBody(template: PrTemplate, body: string): PrBodyCheck {
     ok: template.kind === 'ok' && missing.length === 0 && empty.length === 0 && !scanned.guidance,
   };
 }
+
+// ---- the body the PR opens with -------------------------------------------------------------------------------
+
+/** Which body a PR opened with: the one the session posted, or the one generated from the template. */
+export type PrBodySource = 'session' | 'fallback';
+
+export interface ChosenPrBody {
+  readonly body: string;
+  readonly source: PrBodySource;
+  /** Template sections the session's body did not meet (missing, empty or still holding guidance). All of them when it posted none. Names from the template, never body text. */
+  readonly unmet: readonly string[];
+  /** Why the session's body was not used. Absent for `session`. */
+  readonly reason?: 'no_comment' | 'check_failed' | 'comment_too_large' | 'template_unavailable';
+}
+
+// The orchestrator's own marker comments. A body from a session is data: one of these in it is removed, so the PR never
+// carries a marker another step of the orchestrator would read as its own.
+const OWN_MARKER_RE = /<!--\s*orchestrator-[^>]*-->/gi;
+
+/** `body` without any orchestrator marker comment. */
+export function stripOwnMarkers(body: string): string {
+  return body.replace(OWN_MARKER_RE, '');
+}
+
+function closesIssue(body: string, issue: number): boolean {
+  return new RegExp(`\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+#${issue}(?!\\d)`, 'i').test(body);
+}
+
+/** Adds `Closes #<issue>` unless the body already closes it: the one thing the orchestrator guarantees, since it links the issue. */
+export function withClosesLine(body: string, issue: number): string {
+  return closesIssue(body, issue) ? body : `${body.replace(/\s+$/, '')}\n\nCloses #${issue}\n`;
+}
+
+/**
+ * The body for a PR whose session did not post a usable one: every section of `template`, in its order, each with one
+ * line saying the session did not provide it, then a line naming the sections that were not met. It holds no section
+ * name of its own, so it follows the template. A template without sections gives only the pointer line.
+ */
+export function fallbackPrBody(template: PrTemplate, unmet: readonly string[]): string {
+  const headings = template.kind === 'ok' ? template.headings : [];
+  const lines: string[] = [];
+  for (const heading of headings) {
+    lines.push(`## ${heading}`, 'The implementer session did not provide this section.', '');
+  }
+  const named = unmet.length === 0 ? 'the whole description' : unmet.join(', ');
+  lines.push(`Sections not provided by the session: ${named}. See the issue and the status comment.`, '');
+  return lines.join('\n');
+}
+
+/**
+ * Picks the PR body (#707). `sessionBody` is the text the session posted (undefined: none). A body that passes
+ * `checkPrBody` against the template read now is used, with `Closes #<issue>` added when it lacks it. Anything else,
+ * including an unreadable template, gives the generated fallback: a PR is never blocked by a bad body.
+ */
+export function choosePrBody(template: PrTemplate, sessionBody: string | undefined, issue: number, tooLarge = false): ChosenPrBody {
+  const required = template.kind === 'ok' ? template.headings : [];
+  if (template.kind !== 'ok') {
+    return { body: withClosesLine(fallbackPrBody(template, []), issue), source: 'fallback', unmet: [], reason: 'template_unavailable' };
+  }
+  if (sessionBody === undefined) {
+    const reason = tooLarge ? 'comment_too_large' : 'no_comment';
+    return { body: withClosesLine(fallbackPrBody(template, required), issue), source: 'fallback', unmet: required, reason };
+  }
+  const cleaned = stripOwnMarkers(sessionBody);
+  const check = checkPrBody(template, cleaned);
+  if (check.ok) {
+    return { body: withClosesLine(cleaned, issue), source: 'session', unmet: [] };
+  }
+  const unmet = required.filter((heading) => check.missing.includes(heading) || check.empty.includes(heading) || check.guidanceSections.includes(heading));
+  // Guidance outside any template section (above the first heading) leaves nothing named; the pointer line says so.
+  return { body: withClosesLine(fallbackPrBody(template, unmet), issue), source: 'fallback', unmet, reason: 'check_failed' };
+}

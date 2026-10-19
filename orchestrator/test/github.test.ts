@@ -415,7 +415,7 @@ const PR_INPUT = {
   head: 'claude/123-importer',
   base: 'feature/atlas',
   title: 'Add the project atlas importer',
-  body: 'Closes #123\n\nAlice wrote the design.',
+  issue: 123,
 };
 
 test('openPr twice creates one PR, and the request carries no labels or merge settings', async () => {
@@ -429,7 +429,11 @@ test('openPr twice creates one PR, and the request carries no labels or merge se
   const [post] = await fake.callsMatching('-X POST');
   assert.ok(post !== undefined);
   assert.equal((await fake.callsMatching('-X POST')).length, 1);
-  assert.deepEqual(JSON.parse(post.stdin ?? ''), { title: PR_INPUT.title, head: PR_INPUT.head, base: PR_INPUT.base, body: PR_INPUT.body });
+  const sent = JSON.parse(post.stdin ?? '') as Record<string, unknown>;
+  assert.deepEqual(Object.keys(sent).sort(), ['base', 'body', 'head', 'title']);
+  assert.deepEqual([sent.title, sent.head, sent.base], [PR_INPUT.title, PR_INPUT.head, PR_INPUT.base]);
+  assert.ok(String(sent.body).includes('Closes #123'), 'the body closes the issue whatever its source');
+  assert.equal((await fake.callsMatching('contents')).length, 1, 'the second call found the PR and read no template');
 });
 
 test('openPr finds the PR an earlier attempt created when the create answers "already exists"', async () => {
@@ -452,10 +456,11 @@ test('openPr finds the PR an earlier attempt created when the create answers "al
 
 test('openPr passes a title and body full of shell characters through untouched and refuses bad input before any call', async () => {
   const { fake, github } = await setup(() => undefined);
-  const hostile = { ...PR_INPUT, title: '$(touch /tmp/x); `id` "quoted"', body: "'; rm -rf / #" };
+  const hostile = { ...PR_INPUT, title: '$(touch /tmp/x); `id` "quoted"' };
   await github.openPr(hostile);
   const [post] = await fake.callsMatching('-X POST');
-  assert.deepEqual(JSON.parse(post?.stdin ?? ''), { title: hostile.title, head: hostile.head, base: hostile.base, body: hostile.body });
+  const sent = JSON.parse(post?.stdin ?? '') as Record<string, unknown>;
+  assert.deepEqual([sent.title, sent.head, sent.base], [hostile.title, hostile.head, hostile.base]);
 
   const before = (await fake.calls()).length;
   for (const bad of [
@@ -464,7 +469,8 @@ test('openPr passes a title and body full of shell characters through untouched 
     { ...PR_INPUT, head: 'claude/123 -x' },
     { ...PR_INPUT, base: '' },
     { ...PR_INPUT, title: 'two\nlines' },
-    { ...PR_INPUT, body: '' },
+    { ...PR_INPUT, issue: 0 },
+    { ...PR_INPUT, attempt: 0 },
     'not an object',
   ]) {
     assert.equal((await failureOf(github.openPr(bad as never))).type, 'InvalidInput');
