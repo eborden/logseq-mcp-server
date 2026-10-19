@@ -475,6 +475,14 @@ With `executor: 'remote'` the fix step of the loop (`remoteFixRound` in `src/wor
 - **Rate limits.** A primary limit waits until the reset time. A secondary limit waits `Retry-After`, or at least 60 seconds, doubling on each repeat. Three waits at most per call, and a wait longer than 10 minutes fails the activity (`GitHubRateLimitTooLong`, non-retryable) instead of sleeping. The workflow must give these activities a start-to-close timeout above the longest wait.
 - **Never.** It cannot merge, apply a label (`golden-change` included), resolve a thread, or move an item into Ready or out of Backlog. `setStatus` accepts only In progress, In review and Done. `addToBoard` only adds an item to the board.
 
+### The PR template check (#706)
+
+The structure of a PR body comes from the repo's template at run time, never from code. `readPrTemplate(baseRef)` (in `src/activities/github.ts`) makes one contents read of `.github/pull_request_template.md` at the PR's base ref and returns `found` with the text, `missing` (a 404) or `too_large` (over 64 KiB); a ref that is not a branch name is `InvalidInput`, an answer of the wrong shape is a `malformed` failure. The pure part is `src/pr-template.ts`:
+
+- **Derived:** `parsePrTemplate(text)` lists the level-2 headings in order. HTML comments and fenced blocks are ignored, so are level-3 headings and checkbox lines. A template with none is `no_sections`, a typed result. `checkPrBody(template, body)` returns `present`, `missing` and `empty` section names, whether a guidance comment is left in the body (`guidanceLeft`) and in which sections, and `ok`.
+- **Not checked:** wording, order, checkbox content, links. Extra sections in a body are fine. A comment ends at a `-->` that is not part of a diagram arrow (`-->>`, or one with a word character before it), because the template's own guidance holds a diagram.
+- **Guard:** `test/pr-template-guard.test.ts` reads the real template and fails if any of its level-2 headings is written in `src/` as a string literal or a heading line. Using the result to open a PR is a later task.
+
 ### What the workflow does with them (#629)
 
 - **The workflow ID is the claim.** `claimIssue` is read, then write, so two concurrent claims can both answer `claimed: true`, and an activity cannot see whether another workflow runs for the issue. `IssueWorkflow` runs under the deterministic ID `issue-<number>` and the client starts it with a conflict policy of FAIL and a reuse policy of REJECT_DUPLICATE (`src/issue-client.ts`). That, not the board, keeps two runs off one issue.
@@ -548,6 +556,7 @@ Settings (all optional, read once in `src/gh-config.ts`): `ORCHESTRATOR_GH_PATH`
 | `src/claude-session-policy.ts` | Its timeouts, heartbeat and retry bounds (importable from workflow code) |
 | `src/config.ts`, `src/hello-types.ts`, `src/types.ts` | Typed config and input and output parsing |
 | `src/gh.ts`, `src/gh-config.ts`, `src/github-parse.ts`, `src/activities/github.ts` | The `gh` wrapper, its config, the parsers and the GitHub activities |
+| `src/pr-template.ts` | The PR template read's answer, `parsePrTemplate` and `checkPrBody` (#706): pure, derived from the template file |
 | `src/board-policy.ts`, `src/github-policy.ts` | The re-read and retry bounds of the board activities, and the timeouts and attempts of the other GitHub activities (importable from workflow code) |
 | `test/` | The crash test, the server-free unit tests, and `fake-claude.sh` (a stand-in for `claude`, so no test calls the model) and `fake-gh.mjs` (a stand-in for `gh`) |
 

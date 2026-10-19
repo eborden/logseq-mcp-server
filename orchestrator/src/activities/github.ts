@@ -51,6 +51,8 @@ import {
   parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
+import { PR_TEMPLATE_PATH, parseTemplateFile } from '../pr-template.ts';
+import type { PrTemplateRead } from '../pr-template.ts';
 import { findKeyedComment, findNeedsInputAnswer, findPrBody, hasFindingsComment } from '../findings-comment.ts';
 import type { FindingsCandidate } from '../findings-comment.ts';
 import type { RemoteGithub } from './remote-session.ts';
@@ -803,6 +805,23 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
   }
 
   /**
+   * The PR template as it is in `baseRef` (#706): one bounded read of the contents API. A file that is not there is
+   * `missing`, one over the size bound is `too_large`; neither is a failure. The structure is derived from the text
+   * by src/pr-template.ts, never kept here.
+   */
+  async function readPrTemplate(raw: unknown): Promise<PrTemplateRead> {
+    const baseRef = typeof raw === 'string' && raw.length <= 200 && /^[A-Za-z0-9._/-]+$/.test(raw) && !raw.startsWith('-') && !raw.includes('..') ? raw : refuse('baseRef must be a branch name');
+    try {
+      return parseTemplateFile(await gh.api(`${repoRoute}/contents/${PR_TEMPLATE_PATH}?ref=${encodeURIComponent(baseRef)}`));
+    } catch (error) {
+      if (error instanceof GhError && error.kind === 'exit' && error.httpStatus === 404) {
+        return { kind: 'missing' };
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Whether the PR's change needs the host integration check (#648): the pure rule of integration-policy.ts over the
    * bounded changed-files read. Paths stay in this activity; the answer is one boolean. A PR with more files than one
    * call reads is "needed", as the rule says for an incomplete read.
@@ -926,6 +945,7 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     getGateStatus,
     getPrState,
     getPrChanges,
+    readPrTemplate,
     getHostIntegrationNeed,
     closeIssue,
     listReviewThreads,
@@ -973,6 +993,7 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     getGateStatus: activity((ops, pr: number) => ops.getGateStatus(pr)),
     getPrState: activity((ops, pr: number) => ops.getPrState(pr)),
     getPrChanges: activity((ops, pr: number) => ops.getPrChanges(pr)),
+    readPrTemplate: activity((ops, baseRef: string) => ops.readPrTemplate(baseRef)),
     getHostIntegrationNeed: activity((ops, pr: number) => ops.getHostIntegrationNeed(pr)),
     closeIssue: activity((ops, issue: number) => ops.closeIssue(issue)),
     listReviewThreads: activity((ops, pr: number) => ops.listReviewThreads(pr)),
