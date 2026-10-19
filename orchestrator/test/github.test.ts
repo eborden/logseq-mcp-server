@@ -399,7 +399,7 @@ test('setStatus makes only the forward steps: not out of Ready (that is claimIss
     const failure = await failureOf(github.setStatus(issue, status));
     assert.equal(failure.type, 'InvalidState', `${issue} to ${status}`);
     assert.equal(failure.nonRetryable, true);
-    assert.match(failure.message, /only In progress to In review and In review to Done/, 'names the allowed moves');
+    assert.match(failure.message, /only In progress to In review, In progress to Needs Input, Needs Input to In progress and In review to Done/, 'names the allowed moves');
   }
   assert.equal((await editCalls(fake)).length, 0, 'nothing was written');
 

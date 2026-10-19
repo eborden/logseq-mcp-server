@@ -44,6 +44,24 @@ export const GITHUB_ACTIVITY_OPTIONS: ActivityOptions = {
   },
 };
 
+/**
+ * Options for `waitForNeedsInputAnswer` (#698): one call waits at most NEEDS_INPUT_WAIT_CHUNK_MS (an hour) and may wait out
+ * rate limits on top, so the start-to-close is two hours. It heartbeats. A retry only re-reads, so three attempts are safe,
+ * and six hours bound the call and its retries together.
+ */
+export const NEEDS_INPUT_WAIT_OPTIONS: ActivityOptions = {
+  startToCloseTimeout: '2 hours',
+  scheduleToCloseTimeout: '6 hours',
+  heartbeatTimeout: '2 minutes',
+  retry: {
+    maximumAttempts: GITHUB_ACTIVITY_MAX_ATTEMPTS,
+    initialInterval: '5 seconds',
+    backoffCoefficient: 2,
+    maximumInterval: '30 seconds',
+    nonRetryableErrorTypes: NON_RETRYABLE_GITHUB_FAILURES,
+  },
+};
+
 // ---- the host integration status (#646) --------------------------------------------------------------------------
 
 // Spelled out here, not imported from integration-policy.ts: the test of this file allows it no import but Temporal's.

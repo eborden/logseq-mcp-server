@@ -156,10 +156,10 @@ export function parseSessionResult(raw: unknown): SessionResult {
 // ---- GitHub activities (#628) ---------------------------------------------------------------------------------
 
 /** The board's Status column, in flow order (CLAUDE.md "Board statuses"). */
-export type BoardStatus = 'Backlog' | 'Ready' | 'In progress' | 'In review' | 'Done';
+export type BoardStatus = 'Backlog' | 'Ready' | 'In progress' | 'Needs Input' | 'In review' | 'Done';
 
 /** The statuses an activity may set. Backlog to Ready is the maintainer's move and is not here on purpose. */
-export type SettableStatus = 'In progress' | 'In review' | 'Done';
+export type SettableStatus = 'In progress' | 'Needs Input' | 'In review' | 'Done';
 
 export interface BlockedReadyIssue {
   readonly number: number;
@@ -217,6 +217,19 @@ export interface CommentIssueInput {
   /** Written by the caller from fixed text and identifiers, never from a session's output. */
   readonly body: string;
 }
+
+/** What `waitForNeedsInputAnswer` takes (#698). Numbers only. */
+export interface NeedsInputWaitInput {
+  readonly issue: number;
+  /** The id of the needs-input comment: only a comment with a larger id can answer it. */
+  readonly afterCommentId: number;
+  /** The longest this one call waits, in milliseconds. */
+  readonly waitMs: number;
+  /** How long it waits between two reads. */
+  readonly pollMs: number;
+}
+
+export type NeedsInputWaitResult = { readonly answered: true; readonly commentId: number } | { readonly answered: false };
 
 export interface CommentIssueResult {
   readonly commentId: number;

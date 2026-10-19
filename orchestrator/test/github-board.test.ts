@@ -412,7 +412,7 @@ test('setStatus still refuses Backlog to In review for an issue: that move is th
   for (const target of [123, ISSUE_URL, { kind: 'issue', number: 123 }] as const) {
     const failure = await failureOf(github.setStatus(target, 'In review'));
     assert.equal(failure.type, 'InvalidState');
-    assert.match(failure.message, /issue #123 is Backlog; setStatus allows only In progress to In review and In review to Done \(claimIssue claims a Ready item\)/);
+    assert.match(failure.message, /issue #123 is Backlog; setStatus allows only In progress to In review, In progress to Needs Input, Needs Input to In progress and In review to Done \(claimIssue claims a Ready item\)/);
   }
   assert.equal((await fake.callsMatching('item-edit')).length, 0);
 });
