@@ -76,14 +76,15 @@ pub struct RefsPreservedCheck {
     pub removed: Vec<RemovedRef>,
 }
 
-/// `[[term]]` to `term`, one pass. The refs are those of [`refs`], so a ref that holds another loses
+/// `[[term]]` to `term`, one pass. The refs are those of [`refs`] outside code (LogSeq makes no ref in
+/// a code span or a fenced block, so `` `m[[0]]` `` is left as written), so a ref that holds another loses
 /// its brackets too: `[[a [[b]] c]]` is `a b c`. A wrapper with no text of its own is no ref, and
 /// keeps its brackets: `[[[[b]]]]` is `[[b]]`.
 pub fn strip_brackets(text: &str) -> String {
     // The `[[` and `]]` of each ref. Refs can overlap, so the cuts are sorted before they are made;
     // none overlaps another, since a ref inside another starts after its `[[`.
     let mut cuts: Vec<usize> = Vec::new();
-    for found in refs::page_refs(text) {
+    for found in refs::page_refs_outside_code(text) {
         cuts.push(found.range.start);
         cuts.push(found.range.end - 2);
     }
@@ -102,7 +103,7 @@ pub fn strip_brackets(text: &str) -> String {
 pub fn link_counts(text: &str) -> Vec<(String, usize)> {
     let mut counts: Vec<(String, usize)> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
-    for found in refs::page_refs(text) {
+    for found in refs::page_refs_outside_code(text) {
         match index.get(found.name) {
             Some(&at) => counts[at].1 += 1,
             None => {
@@ -237,6 +238,20 @@ mod tests {
 
     fn counts(text: &str) -> Vec<(&'static str, usize)> {
         link_counts(text).into_iter().map(|(term, n)| (Box::leak(term.into_boxed_str()) as &'static str, n)).collect()
+    }
+
+    // Issue 657: text in a code span or a fenced block is no ref.
+    #[test]
+    fn code_spans_and_fences_hold_no_refs() {
+        assert_eq!(counts("use `m[[0]]` here [[Alice]]"), [("Alice", 1)]);
+        assert_eq!(counts("``a [[b]] ` c`` [[d]]"), [("d", 1)]);
+        assert_eq!(counts("```\na[[i]]\n```\n[[Bob]]"), [("Bob", 1)]);
+        assert_eq!(counts("```\na[[i]]\n[[never closed]]"), []);
+        // a run that closes nothing is plain text
+        assert_eq!(counts("a ` [[b]]"), [("b", 1)]);
+        assert_eq!(strip_brackets("use `m[[0]]` and [[Alice]]"), "use `m[[0]]` and Alice");
+        assert!(check_prose("use `m[[0]]` x", "use `m[[0]]` [[x]]").ok);
+        assert!(check_refs_preserved("`[[a]]` [[b]]", "`a` [[b]]").ok);
     }
 
     #[test]

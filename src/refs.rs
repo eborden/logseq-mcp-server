@@ -215,6 +215,78 @@ pub fn page_refs(text: &str) -> Vec<PageRef<'_>> {
     found
 }
 
+/// The byte ranges of `text` that are code: fenced blocks and inline spans. LogSeq makes no ref in
+/// either. A fence is a line that starts (after white space) with three backticks, and runs to the
+/// next such line, or to the end of the text when none closes it. An inline span opens at a run of
+/// backticks and closes at the next run of the same length on the same line; a run that closes
+/// nothing is plain text.
+pub fn code_ranges(text: &str) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut fence_start: Option<usize> = None;
+    let mut line_start = 0;
+    for line in text.split_inclusive('\n') {
+        let line_end = line_start + line.len();
+        if line.trim_start().starts_with("```") {
+            match fence_start.take() {
+                Some(start) => ranges.push(start..line_end),
+                None => fence_start = Some(line_start),
+            }
+        } else if fence_start.is_none() {
+            inline_code(line, line_start, &mut ranges);
+        }
+        line_start = line_end;
+    }
+    if let Some(start) = fence_start {
+        ranges.push(start..text.len());
+    }
+    ranges
+}
+
+/// The inline spans of one line, as ranges in the whole text (`offset` is where the line starts).
+fn inline_code(line: &str, offset: usize, ranges: &mut Vec<Range<usize>>) {
+    let bytes = line.as_bytes();
+    let run_at = |from: usize| bytes[from..].iter().take_while(|b| **b == b'`').count();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != b'`' {
+            at += 1;
+            continue;
+        }
+        let open = run_at(at);
+        let mut scan = at + open;
+        let mut closed = None;
+        while scan < bytes.len() {
+            if bytes[scan] != b'`' {
+                scan += 1;
+                continue;
+            }
+            let run = run_at(scan);
+            if run == open {
+                closed = Some(scan + run);
+                break;
+            }
+            scan += run;
+        }
+        match closed {
+            Some(end) => {
+                ranges.push(offset + at..offset + end);
+                at = end;
+            }
+            None => at += open,
+        }
+    }
+}
+
+/// [`page_refs`] without the refs that start inside code ([`code_ranges`]).
+pub fn page_refs_outside_code(text: &str) -> Vec<PageRef<'_>> {
+    let code = code_ranges(text);
+    let mut found = page_refs(text);
+    if !code.is_empty() {
+        found.retain(|found| !code.iter().any(|range| range.contains(&found.range.start)));
+    }
+    found
+}
+
 /// Every tag in `text`, without its `#`, in order. A bracketed tag, `#[[tag with spaces]]`, is one
 /// tag whose text is the name between the brackets.
 pub fn tags(text: &str) -> Vec<&str> {
