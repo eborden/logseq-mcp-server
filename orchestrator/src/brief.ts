@@ -84,6 +84,15 @@ export function briefCommands(issueNumber: number): readonly string[] {
   ];
 }
 
+/**
+ * The exact command the remote brief gives for the needs-input comment (#698, rule 10). The body is two paragraphs in one
+ * double-quoted string: the marker alone on the first line, a blank line, then the question. The marker has no quotation mark,
+ * backtick or dollar sign, so the quoting holds, and the test pins that the first line of the body is `needsInputMarker`.
+ */
+export function needsInputCommentCommand(issueNumber: number, attempt: number): string {
+  return [`gh issue comment ${issueNumber} --body "${needsInputMarker(issueNumber, attempt)}`, '', 'Question and options"'].join('\n');
+}
+
 /** The one push the remote implementer's brief prints (a normal push of its own branch, never forced). */
 export function remoteImplementerPushCommand(branch: string): string {
   return `git push -u origin ${branch}`;
@@ -121,7 +130,7 @@ function implementerBrief(input: BriefInput, remote: boolean): string {
     ? `9. Verify before you claim. Run the checks the issue names (for example \`${install}\`, \`${typecheck}\`, \`${unit}\` and \`${cargo}\`). \`${status}\` shows where you are. Say plainly what you could not verify and never report a check you did not run.`
     : `9. Verify before you claim. Run the checks the issue names, from this list only (anything else is refused): \`${install}\`, \`${typecheck}\`, \`${unit}\` and \`${cargo}\`. \`${status}\` shows where you are. Say plainly what you could not verify and never report a check you did not run.`;
   const premise = remote
-    ? `10. If the issue's premise is wrong or its scope is ambiguous, make no commit and push nothing, and stop for a person: as your last act post one comment on issue #${n} whose first line is exactly this marker and nothing more: \`${needsInputMarker(n, input.attempt ?? 1)}\`. After the marker, leave a blank line, then put your question and your options in the text, as identifiers and counts only, with no raw output and no backticks, dollar signs or quotation marks inside it. The orchestrator ends the run on that comment within minutes, so post it only when you are stopping. Do not guess at a change to a contract.`
+    ? `10. If the issue's premise is wrong or its scope is ambiguous, make no commit and push nothing, and stop for a person: as your last act post one comment on issue #${n} with exactly this command, whose first line is the marker and nothing more: \`${needsInputCommentCommand(n, input.attempt ?? 1)}\`. Replace the words Question and options with your question and your options, keep the blank line after the marker, and write them as identifiers and counts only, with no raw output and no backticks, dollar signs or quotation marks inside it. The orchestrator ends the run on that comment within minutes, so post it only when you are stopping. Do not guess at a change to a contract.`
     : `10. If the issue's premise is wrong or its scope is ambiguous, post the comment below saying so, make no commit, and stop. Do not guess at a change to a contract.`;
   const done = remote
     ? `11. When the work is done, make sure every change is committed, push the branch with \`${push}\` and check that the push succeeded, then post one status comment on issue #${n}: \`${comment}\`. Put the commits, what you verified, what you could not verify and your open questions in the text, as identifiers and counts only, with no raw output and no backticks, dollar signs or quotation marks inside it.`

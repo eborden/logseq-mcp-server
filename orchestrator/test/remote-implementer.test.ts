@@ -631,15 +631,14 @@ test('a session that ended with no push gets a second attempt, which is attempt 
   await finish(recovers.world);
 });
 
-test('a session that stopped for input stops the run as NeedsInput with no second attempt, guard or PR (#697)', { timeout: 120_000 }, async () => {
-  const { issue, world, started } = await start(() => async () => ({ outcome: 'needs_input', commentId: 31 }));
+test('a session that stopped for input with no comment id to wait on stops the run as NeedsInput with no second attempt, guard or PR (#697; with an id it parks, see needs-input-park.test.ts)', { timeout: 120_000 }, async () => {
+  const { issue, world, started } = await start(() => async () => ({ outcome: 'needs_input' }));
   const cause = await failure(issue, started);
   assert.deepEqual(cause.details?.slice(0, 2), ['session', 'NeedsInput']);
   assert.deepEqual(world.attempts, [1], 'no second attempt');
   assert.equal(world.called('guardRemoteBranch'), 0);
   assert.equal(world.called('openPr'), 0);
   assert.ok([...world.comments.keys()].some((key) => key.includes('stopped-session-NeedsInput')), 'the keyed stop comment is posted');
-  assert.match([...world.comments.values()].join('\n'), /needs-input comment \(id 31\)/);
   await finish(world);
 });
 
