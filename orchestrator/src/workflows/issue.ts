@@ -203,7 +203,7 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   );
   const prBody: PrBodyReport =
     opened.bodySource === undefined
-      ? { source: 'unchanged', unmet: 0 }
+      ? { source: 'unknown', unmet: 0 }
       : { source: opened.bodySource, unmet: opened.bodyUnmet ?? 0, ...(opened.bodyReason === undefined ? {} : { reason: opened.bodyReason }) };
   log.info('pr body', { issue, pr: opened.number, ...prBody });
   pr = opened.number;
@@ -251,7 +251,8 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   }
   // The third part (#631): wait for the maintainer's decision, then the merge. `awaitDecision: false` ends the run here.
   if (input.awaitDecision === false) {
-    return looped.outcome === 'gate_clear' || looped.outcome === 'waiting_for_threads' ? { ...looped, prBody } : looped;
+    return { ...looped, prBody };
   }
-  return await decisionStage({ input, pr: opened.number, inbox, step, stop, ...('fixRounds' in looped ? { fixRounds: looped.fixRounds } : {}) });
+  const decided = await decisionStage({ input, pr: opened.number, inbox, step, stop, ...('fixRounds' in looped ? { fixRounds: looped.fixRounds } : {}) });
+  return { ...decided, prBody };
 }

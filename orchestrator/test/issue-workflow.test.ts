@@ -384,7 +384,7 @@ test('a fallback is reported with its reason and the number of sections it names
   assert.deepEqual((result as { prBody?: unknown }).prBody, { source: 'fallback', unmet: 2, reason: 'no_comment' });
 });
 
-test('a result lost at the PR step is retried: one PR, and the source is reported as the first answer or as unchanged, never invented (#707)', { timeout: 180_000 }, async () => {
+test('a result lost at the PR step is retried: one PR, and the source is read from the PR, or reported unknown, never invented (#707)', { timeout: 180_000 }, async () => {
   await ensureFakeWorker();
   const { issue, world } = newWorld();
   world.loseOnce.add('openPr');
@@ -392,7 +392,7 @@ test('a result lost at the PR step is retried: one PR, and the source is reporte
   const result = await runIssue(FAKE_QUEUE, issue);
 
   assert.equal(world.counters.prs, 1);
-  assert.deepEqual((result as { prBody?: unknown }).prBody, { source: 'unchanged', unmet: 0 }, 'the retry found the PR open: its body was not read or rewritten');
+  assert.deepEqual((result as { prBody?: unknown }).prBody, { source: 'unknown', unmet: 0 }, 'the retry found the PR open and the fake gives no body origin');
 });
 
 test('the finished run replays against the current workflow code', { timeout: 120_000 }, async () => {

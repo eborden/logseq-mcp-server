@@ -274,14 +274,17 @@ export type SkipReason = 'issue_closed' | 'open_pr' | 'claude_branch' | 'already
  */
 /** Where the PR's body came from (#707): the session's own, or the one generated from the template. Counts and a reason word only. */
 export interface PrBodyReport {
-  /** `unchanged`: the PR was already open, so its body was not read or rewritten. */
-  readonly source: 'session' | 'fallback' | 'unchanged';
+  /** `unknown`: the PR was already open and its body is empty or was not reported. */
+  readonly source: 'session' | 'fallback' | 'unknown';
   /** How many template sections the session's body did not meet. */
   readonly unmet: number;
   readonly reason?: string;
 }
 
-export type IssueRunResult =
+/** What a run ends with. `prBody` (#707) is on every result of a run that opened a PR. */
+export type IssueRunResult = IssueRunOutcome & { readonly prBody?: PrBodyReport };
+
+export type IssueRunOutcome =
   | {
       readonly outcome: 'gate_clear';
       readonly issueNumber: number;
@@ -296,7 +299,6 @@ export type IssueRunResult =
       readonly advisoryOmitted: number;
       /** Remote reviewer rounds whose raw findings comment could not be hidden (#674). Present only for `executor: 'remote'`. The review was posted. */
       readonly rawCommentsNotHidden?: number;
-      readonly prBody?: PrBodyReport;
     }
   | {
       readonly outcome: 'waiting_for_threads';
@@ -311,7 +313,6 @@ export type IssueRunResult =
       readonly advisoryOmitted: number;
       /** Remote reviewer rounds whose raw findings comment could not be hidden (#674). Present only for `executor: 'remote'`. The review was posted. */
       readonly rawCommentsNotHidden?: number;
-      readonly prBody?: PrBodyReport;
     }
   | { readonly outcome: 'skipped'; readonly issueNumber: number; readonly reason: SkipReason }
   /** The maintainer asked for changes (#631). The run commented and stopped; nothing else moved. */

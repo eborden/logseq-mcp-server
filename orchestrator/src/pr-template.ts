@@ -213,12 +213,35 @@ export interface ChosenPrBody {
 }
 
 // The orchestrator's own marker comments. A body from a session is data: one of these in it is removed, so the PR never
-// carries a marker another step of the orchestrator would read as its own.
-const OWN_MARKER_RE = /<!--\s*orchestrator-[^>]*-->/gi;
+// carries a marker another step of the orchestrator would read as its own. Removal can assemble a new marker from the
+// pieces around the removed one, so it repeats until the text stops changing, and any opening that is left (one with no
+// closing, or split in a way the pattern misses) is made inert by escaping its `<`.
+const OWN_MARKER_RE = /<!--\s*orchestrator-[\s\S]*?-->/gi;
+const OWN_OPENING_RE = /<!--(\s*orchestrator-)/gi;
 
-/** `body` without any orchestrator marker comment. */
+/** `body` without any orchestrator marker comment, and with no `<!-- orchestrator-` left in it. */
 export function stripOwnMarkers(body: string): string {
-  return body.replace(OWN_MARKER_RE, '');
+  let text = body;
+  for (let previous = ''; previous !== text; ) {
+    previous = text;
+    text = text.replace(OWN_MARKER_RE, '').replace(OWN_OPENING_RE, '&lt;!--$1');
+  }
+  return text;
+}
+
+/** Most sections a fallback lists, and most characters of one heading it repeats. They keep the body far under GitHub's limit however large the template is. */
+export const MAX_FALLBACK_SECTIONS = 40;
+export const MAX_FALLBACK_HEADING_CHARS = 200;
+
+/** The fixed start of the fallback's pointer line. An open PR whose body holds it was opened with the fallback. */
+export const FALLBACK_LINE_PREFIX = 'Sections not provided by the session:';
+
+/** What an open PR's body says about where it came from: the fallback's fixed line, any other text, or nothing. */
+export function bodyOrigin(body: string): 'fallback' | 'session' | 'unknown' {
+  if (body.trim() === '') {
+    return 'unknown';
+  }
+  return body.includes(FALLBACK_LINE_PREFIX) ? 'fallback' : 'session';
 }
 
 function closesIssue(body: string, issue: number): boolean {
@@ -236,13 +259,20 @@ export function withClosesLine(body: string, issue: number): string {
  * name of its own, so it follows the template. A template without sections gives only the pointer line.
  */
 export function fallbackPrBody(template: PrTemplate, unmet: readonly string[]): string {
+  const clip = (heading: string) => (heading.length > MAX_FALLBACK_HEADING_CHARS ? `${heading.slice(0, MAX_FALLBACK_HEADING_CHARS)}...` : heading);
   const headings = template.kind === 'ok' ? template.headings : [];
   const lines: string[] = [];
-  for (const heading of headings) {
-    lines.push(`## ${heading}`, 'The implementer session did not provide this section.', '');
+  for (const heading of headings.slice(0, MAX_FALLBACK_SECTIONS)) {
+    lines.push(`## ${clip(heading)}`, 'The implementer session did not provide this section.', '');
   }
-  const named = unmet.length === 0 ? 'the whole description' : unmet.join(', ');
-  lines.push(`Sections not provided by the session: ${named}. See the issue and the status comment.`, '');
+  const shown = unmet.slice(0, MAX_FALLBACK_SECTIONS).map(clip);
+  const left = headings.length - Math.min(headings.length, MAX_FALLBACK_SECTIONS);
+  const leftNames = unmet.length - shown.length;
+  const named = unmet.length === 0 ? 'the whole description' : `${shown.join(', ')}${leftNames > 0 ? ` and ${leftNames} more` : ''}`;
+  if (left > 0) {
+    lines.push(`The template has ${left} more section${left === 1 ? '' : 's'} than are listed here.`, '');
+  }
+  lines.push(`${FALLBACK_LINE_PREFIX} ${named}. See the issue and the status comment.`, '');
   return lines.join('\n');
 }
 
