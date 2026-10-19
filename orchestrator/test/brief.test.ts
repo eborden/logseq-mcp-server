@@ -3,11 +3,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BriefTooLargeError, briefCommands, buildBrief, buildRemoteImplementerBrief, CO_AUTHOR_LINE, encodeIssueData, ISSUE_DATA_CLOSE, ISSUE_DATA_OPEN, needsInputCommentCommand } from '../src/brief.ts';
+import { BriefTooLargeError, briefCommands, buildBrief, buildRemoteImplementerBrief, CO_AUTHOR_LINE, encodeIssueData, ISSUE_DATA_CLOSE, ISSUE_DATA_OPEN, needsInputCommentCommand, prBodyCommentCommand } from '../src/brief.ts';
 import { DEFAULT_ALLOWED_TOOLS, DEFAULT_DISALLOWED_TOOLS } from '../src/config.ts';
 import { commandAllowed } from './tool-rules.ts';
 import type { BriefInput } from '../src/brief.ts';
-import { needsInputMarker } from '../src/findings-comment.ts';
+import { needsInputMarker, prBodyMarker } from '../src/findings-comment.ts';
 import { MAX_PROMPT_CHARS } from '../src/types.ts';
 import type { IssueView } from '../src/types.ts';
 
@@ -230,4 +230,27 @@ test('the needs-input command builds a body whose first line is exactly the mark
     assert.doesNotMatch(command, /\$|`|--body-file|-F /);
   }
   assert.ok(!buildBrief(input()).includes('gh issue comment 123 --body "<!--'), 'the local brief has no needs-input command');
+});
+
+test('the remote brief names the template and the handoff by path and gives the exact PR body command; the local brief does not (#705)', () => {
+  const remote = buildRemoteImplementerBrief({ ...input(), attempt: 2 });
+  assert.ok(remote.includes('.github/pull_request_template.md'));
+  assert.ok(remote.includes('docs/architecture-foundations.md'));
+  assert.ok(remote.includes(`\`${prBodyCommentCommand(123, 2)}\``), 'the brief prints the exact command');
+  assert.ok(!remote.includes(prBodyMarker(123, 1)), 'only this attempt');
+  assert.ok(!buildBrief(input()).includes('orchestrator-pr-body'));
+  assert.ok(remote.length < MAX_PROMPT_CHARS);
+});
+
+test('the PR body command builds a body whose first line is exactly prBodyMarker, and the lists allow it (#705)', () => {
+  for (const [issue, attempt] of [[123, 1], [7, 12]] as const) {
+    const command = prBodyCommentCommand(issue, attempt);
+    const body = /^gh issue comment \d+ --body "([\s\S]*)"$/.exec(command)?.[1] ?? '';
+    const lines = body.split('\n');
+    assert.equal(lines[0], prBodyMarker(issue, attempt));
+    assert.equal(lines[1], '');
+    assert.ok((lines[2] ?? '').length > 0);
+    assert.ok(commandAllowed(DEFAULT_ALLOWED_TOOLS, DEFAULT_DISALLOWED_TOOLS, command), `the lists must allow: ${command}`);
+    assert.doesNotMatch(command, /\$|`|--body-file|-F /);
+  }
 });

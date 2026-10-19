@@ -48,6 +48,35 @@ export function needsInputMarker(issue: number, attempt: number): string {
   return `<!-- orchestrator-needs-input issue=${issue} attempt=${attempt} -->`;
 }
 
+/**
+ * The first line of the comment a remote implementer posts with the PR body it wrote (#705). It names the issue and the
+ * attempt, so the body of an earlier attempt is never read for a later one. Everything after the marker is the body: data,
+ * read by `findPrBody` and never executed.
+ */
+export function prBodyMarker(issue: number, attempt: number): string {
+  return `<!-- orchestrator-pr-body issue=${issue} attempt=${attempt} -->`;
+}
+
+/** A PR body comment longer than this is refused, not cut: a body this long is not a handoff. */
+export const MAX_PR_BODY_CHARS = 60_000;
+
+/**
+ * The text after the marker of the newest trusted comment whose first line is `marker` (the listing orders comments oldest
+ * first, so the last match is the newest), or undefined when there is none. Untrusted authors and a marker on a later line
+ * never count. Throws `FindingsTooLargeError` when that comment is over `MAX_PR_BODY_CHARS`. Reads only.
+ */
+export function findPrBody(candidates: readonly FindingsCandidate[], marker: string): string | undefined {
+  const newest = keyedComments(candidates, marker).at(-1);
+  if (newest === undefined) {
+    return undefined;
+  }
+  if (newest.body.length > MAX_PR_BODY_CHARS) {
+    throw new FindingsTooLargeError(`the PR body comment is longer than ${MAX_PR_BODY_CHARS} characters`);
+  }
+  const text = newest.body.trimStart();
+  return text.slice(text.indexOf('\n') < 0 ? text.length : text.indexOf('\n') + 1).trim();
+}
+
 /** True when a comment body carries any orchestrator marker (`<!-- orchestrator-...`): a comment of ours or of a session we started, never an answer. */
 export function carriesOrchestratorMarker(body: string): boolean {
   return body.includes('<!-- orchestrator-');
