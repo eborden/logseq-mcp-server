@@ -39,6 +39,15 @@ export function findingsMarker(pr: number, headSha: string, round: number): stri
   return `<!-- orchestrator-findings pr=${pr} head=${headSha} round=${round} -->`;
 }
 
+/**
+ * The first line of the comment a remote implementer posts as its last act when it stops for a person (#697). It names the
+ * issue and the attempt, so a comment of an earlier attempt never ends a later wait. What follows the marker is a question
+ * for the maintainer: it is never read here.
+ */
+export function needsInputMarker(issue: number, attempt: number): string {
+  return `<!-- orchestrator-needs-input issue=${issue} attempt=${attempt} -->`;
+}
+
 /** The key the fixer's replies comment starts with. It names the PR, the head the round started from and the round. */
 export function fixerRepliesMarker(pr: number, headSha: string, round: number): string {
   return `<!-- orchestrator-fixer-replies pr=${pr} head=${headSha} round=${round} -->`;
@@ -62,6 +71,11 @@ function keyedComments(candidates: readonly FindingsCandidate[], marker: string)
 /** True when at least one trusted comment carries `marker`. The remote wait ends on this; the parse decides what it holds. */
 export function hasFindingsComment(candidates: readonly FindingsCandidate[], marker: string): boolean {
   return keyedComments(candidates, marker).length > 0;
+}
+
+/** The first trusted comment that carries `marker` on its first line (the oldest, as the listing orders them), or undefined. Reads only. */
+export function findKeyedComment(candidates: readonly FindingsCandidate[], marker: string): FindingsCandidate | undefined {
+  return keyedComments(candidates, marker)[0];
 }
 
 /** True when `value` is a marker `findingsMarker` could have made. Round 0 is the first review, before any fixer round (#687). */

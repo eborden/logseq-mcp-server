@@ -11,6 +11,7 @@
 //
 // The attempt counter lives here, in workflow state, and starts at the run's `attempt` (default 1). A session that ended with no push at all (the cap passed) gets one more
 // attempt, which fires a new session because the marker key carries the attempt; a retry of the same attempt re-attaches.
+// A session that stopped for a person (a needs-input comment, #697) stops the run at once with no second attempt.
 // Anything else (a claim, a failed launch, a push that never settled, a guard refusal) stops for a person.
 // Deterministic: no clock, I/O or randomness.
 
@@ -20,6 +21,7 @@ import type { RemoteImplementerActivities } from '../activities/implementer.ts';
 import { BRANCH_ACTIVITY_OPTIONS } from '../branch-types.ts';
 import {
   ISSUE_STEP_TIMEOUT,
+  NEEDS_INPUT,
   REMOTE_IMPLEMENTER_ATTEMPTS,
   REMOTE_LAUNCH_FAILED,
   REMOTE_NO_HEAD,
@@ -64,6 +66,10 @@ export async function remoteImplementer(ctx: RemoteImplementerContext): Promise<
     const result = await step('session', () => remote.runRemoteImplementerSession({ ...input, attempt }));
     if (result.outcome === 'failed') {
       return await stop('session', result.claim === undefined ? REMOTE_LAUNCH_FAILED : REMOTE_SESSION_CLAIMED);
+    }
+    if (result.outcome === 'needs_input') {
+      // The session asked a person and pushed nothing: no second attempt (it would ask again), no guard, no PR (#697).
+      return await stop('session', NEEDS_INPUT, result.commentId === undefined ? undefined : `The session left a needs-input comment (id ${result.commentId}) on this issue.`);
     }
     if (result.outcome === 'timed_out') {
       if (result.headSha === undefined && attempt < last) {

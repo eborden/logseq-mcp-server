@@ -97,6 +97,8 @@ export function findingsCommentNotHiddenComment(workflowId: string, pr: number, 
 export const REMOTE_SESSION_CLAIMED = 'RemoteSessionClaimed';
 export const REMOTE_LAUNCH_FAILED = 'RemoteLaunchFailed';
 export const REMOTE_SESSION_TIMED_OUT = 'RemoteSessionTimedOut';
+/** The remote implementer stopped for a person and said so in a needs-input comment (#697). */
+export const NEEDS_INPUT = 'NeedsInput';
 export const REMOTE_NO_HEAD = 'RemoteSessionNoHead';
 export const REMOTE_BRANCH_MOVED = 'BranchMoved';
 /** The stop reason of a remote fixer whose push the guard refuses (#675). The push cannot be undone by the worker: the branch is left for a person. */

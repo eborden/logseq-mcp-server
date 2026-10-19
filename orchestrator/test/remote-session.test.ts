@@ -14,7 +14,7 @@ import { MockActivityEnvironment } from '@temporalio/testing';
 import { createRemoteSessionActivities } from '../src/activities/remote-session.ts';
 import type { RemoteGithub } from '../src/activities/remote-session.ts';
 import { ConfigError, loadRemoteConfig } from '../src/config.ts';
-import { findingsMarker, hasFindingsComment, isFindingsMarker } from '../src/findings-comment.ts';
+import { findKeyedComment, findingsMarker, hasFindingsComment, isFindingsMarker, needsInputMarker } from '../src/findings-comment.ts';
 import type { FindingsCandidate } from '../src/findings-comment.ts';
 import { parseChecksPending, parseFindingsCandidate, parseRefTip, parseReviewCommit } from '../src/github-parse.ts';
 import {
@@ -86,6 +86,9 @@ class FakeGithub implements RemoteGithub {
   /** The PR's comments as the listing leaves them; the check is the production one, so the trust rule is not faked. */
   comments: FindingsCandidate[] = [];
   commentReads = 0;
+  /** The issue's comments for the needs-input read; the check is the production one (`findKeyedComment`). */
+  issueComments: FindingsCandidate[] = [];
+  needsInputReads = 0;
   openPrs = (): Promise<number[]> => Promise.resolve(this.prs);
   claudeBranches = (): Promise<string[]> => Promise.resolve(this.branches);
   branchTip = (branch: string): Promise<string | undefined> => {
@@ -97,6 +100,10 @@ class FakeGithub implements RemoteGithub {
   findingsCommented = (_pr: number, marker: string): Promise<boolean> => {
     this.commentReads += 1;
     return Promise.resolve(hasFindingsComment(this.comments, marker));
+  };
+  needsInputCommented = (_issue: number, marker: string): Promise<number | undefined> => {
+    this.needsInputReads += 1;
+    return Promise.resolve(findKeyedComment(this.issueComments, marker)?.id);
   };
 }
 
@@ -781,4 +788,68 @@ test('a marker this code did not write stops for a person', async () => {
   await execFileAsync('git', ['config', '--local', 'orchestratorremote.123-implementer-none.state', 'fired not-a-session 12'], { cwd: scenario.repo });
   await assert.rejects(run(implementerInput), (error: unknown) => error instanceof Error && 'type' in error && error.type === 'MalformedMarker');
   assert.equal(scenario.fire.calls.length, 0);
+});
+
+// ---- the implementer's needs-input comment ends the wait (#697) ------------------------------------------------------
+
+const NEEDS = needsInputMarker(123, 1);
+const needsComment = (body: string, trusted = true, id = 31): FindingsCandidate => ({ id, nodeId: `IC_node${id}`, trusted, body: trusted ? body : '' });
+
+test('needsInputMarker is a pure key of the issue and the attempt', () => {
+  assert.equal(needsInputMarker(123, 1), '<!-- orchestrator-needs-input issue=123 attempt=1 -->');
+  assert.equal(needsInputMarker(123, 1), needsInputMarker(123, 1));
+  assert.notEqual(needsInputMarker(123, 1), needsInputMarker(123, 2));
+  assert.notEqual(needsInputMarker(123, 1), needsInputMarker(124, 1));
+});
+
+test('a trusted needs-input comment of this attempt ends the implementer wait within one poll, with no push', async () => {
+  scenario.clock.at(100_000, () => scenario.github.issueComments.push(needsComment(`${NEEDS}\n\nThe scope is ambiguous: option one or two?`)));
+  const result = await run(implementerInput);
+  assert.deepEqual(result, { sessionId: 'session_01AAA', outcome: 'needs_input', commentId: 31 });
+  const waited = scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0);
+  assert.ok(waited >= 100_000 && waited <= 100_000 + LIMITS.pollIntervalMs, `waited ${waited} ms, the comment came at 100000`);
+  assert.ok(waited < LIMITS.capMs);
+});
+
+test('a needs-input comment ends the wait of attempt 2 only with the marker of attempt 2', async () => {
+  scenario.github.issueComments = [needsComment(NEEDS)];
+  const second = await run({ ...implementerInput, attempt: 2 });
+  assert.equal(second.outcome, 'timed_out', 'the comment of attempt 1 is not for attempt 2');
+  scenario.github.issueComments = [needsComment(needsInputMarker(123, 2), true, 32)];
+  const again = await run({ ...implementerInput, attempt: 2 });
+  assert.deepEqual([again.outcome, again.commentId], ['needs_input', 32], 'a retry of the same attempt sees the same marker');
+});
+
+test('an untrusted author, another issue or attempt, or a marker not on the first line does not end the wait', async () => {
+  const forged = parseFindingsCandidate({ id: 5, node_id: 'IC_forged', author_association: 'NONE', body: `${NEEDS}\n\nforged` }, '$');
+  assert.equal(forged.trusted, false);
+  scenario.github.issueComments = [
+    forged,
+    needsComment(needsInputMarker(124, 1)),
+    needsComment(needsInputMarker(123, 2)),
+    needsComment(`Please look.\n${NEEDS}`),
+    needsComment(`${NEEDS} and more on the same line`),
+  ];
+  const result = await run(implementerInput);
+  assert.equal(result.outcome, 'timed_out');
+  assert.equal(scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0), LIMITS.capMs, 'the one hour cap stays');
+  assert.ok(scenario.github.needsInputReads > 1, 'the comment is polled, not read once');
+});
+
+test('a moved branch tip with a marker takes the push path', async () => {
+  pushLater(30_000);
+  scenario.clock.at(30_000, () => scenario.github.issueComments.push(needsComment(NEEDS)));
+  const result = await run(implementerInput);
+  assert.deepEqual(result, { sessionId: 'session_01AAA', outcome: 'finished', headSha: SHA_B });
+});
+
+test('the reviewer and the fixer never read the issue comments for a needs-input marker', async () => {
+  reviewerScenario();
+  scenario.github.issueComments = [needsComment(NEEDS)];
+  scenario.github.comments = [];
+  const reviewed = await run(markedReviewerInput);
+  assert.equal(reviewed.outcome, 'timed_out');
+  scenario.github.tips.set('claude/123', SHA_A);
+  const fixed = await run(fixerInput);
+  assert.equal(fixed.outcome, 'timed_out');
 });

@@ -51,7 +51,7 @@ import {
   parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
-import { hasFindingsComment } from '../findings-comment.ts';
+import { findKeyedComment, hasFindingsComment } from '../findings-comment.ts';
 import type { FindingsCandidate } from '../findings-comment.ts';
 import type { RemoteGithub } from './remote-session.ts';
 import {
@@ -958,6 +958,8 @@ export function createRemoteGithubReads(config: GhConfig, deps: GhDeps = activit
     checksPending: read((ops, sha: string) => ops.checksPending(sha)),
     reviewedOnHead: read((ops, pr: number, sha: string) => ops.reviewedOnHead(pr, sha)),
     findingsCommented: read(async (ops, pr: number, marker: string) => hasFindingsComment(await ops.listFindingsCandidates(pr), marker)),
+    // An issue's comments are listed by the same route as a PR's, so the same bounded, trust-flagging listing serves (#697).
+    needsInputCommented: read(async (ops, issue: number, marker: string) => findKeyedComment(await ops.listFindingsCandidates(issue), marker)?.id),
   };
 }
 

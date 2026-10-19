@@ -23,7 +23,7 @@
 // Never in a log, a result, the workflow history or an error message: the token, the brief, or a response body.
 
 import { ApplicationFailure, Context } from '@temporalio/activity';
-import { isFindingsMarker } from '../findings-comment.ts';
+import { isFindingsMarker, needsInputMarker } from '../findings-comment.ts';
 import { FireError } from '../routine-fire.ts';
 import type { FireClient } from '../routine-fire.ts';
 import {
@@ -50,6 +50,11 @@ export interface RemoteGithub {
    * reads object without it keeps the review-only wait; the real one (`createRemoteGithubReads`) has it.
    */
   findingsCommented?(pr: number, marker: string): Promise<boolean>;
+  /**
+   * The id of the first comment of a trusted author on the issue that carries `marker` on its first line, or undefined (#697).
+   * Read only. Optional like `findingsCommented`: without it the implementer wait is the push wait alone.
+   */
+  needsInputCommented?(issue: number, marker: string): Promise<number | undefined>;
 }
 
 export interface RemoteSessionDeps {
@@ -139,8 +144,9 @@ async function findClaim(github: RemoteGithub, input: RemoteSessionInput): Promi
 }
 
 interface WaitEnd {
-  readonly outcome: 'finished' | 'timed_out';
+  readonly outcome: 'finished' | 'timed_out' | 'needs_input';
   readonly headSha?: string;
+  readonly commentId?: number;
 }
 
 // ---- the activity ------------------------------------------------------------------------------------------------
@@ -169,7 +175,9 @@ export function createRemoteSessionActivities(deps: RemoteSessionDeps) {
   /**
    * Reads GitHub every `pollIntervalMs` until the session's work shows or `capMs` have passed since `since`.
    * - implementer and fixer: the branch tip differs from where the session started (none, or `headSha`), has not moved
-   *   for `settleMs` and has no check pending. A push in the window restarts the settle time.
+   *   for `settleMs` and has no check pending. A push in the window restarts the settle time. The implementer has one more end
+   *   (#697): a trusted comment on the issue with the needs-input marker of this attempt, while the tip has not moved. A moved
+   *   tip keeps the settle path, marker or not.
    * - reviewer: a trusted review with a body exists on `headSha`, or (when the input has `findingsMarker`) a trusted
    *   comment on the PR carries that marker. The first of the two ends the wait. Both are reads on the same schedule.
    */
@@ -204,6 +212,12 @@ export function createRemoteSessionActivities(deps: RemoteSessionDeps) {
           }
         } else {
           lastTip = undefined;
+          if (input.role === 'implementer' && deps.github.needsInputCommented !== undefined) {
+            const commentId = await deps.github.needsInputCommented(input.issue, needsInputMarker(input.issue, input.attempt ?? 1));
+            if (commentId !== undefined) {
+              return { outcome: 'needs_input', commentId };
+            }
+          }
         }
       }
       if (now() - since >= capMs) {
@@ -288,8 +302,8 @@ export function createRemoteSessionActivities(deps: RemoteSessionDeps) {
     if (marker?.kind === 'firing') {
       // An earlier attempt may have made a session whose id was lost. Watch GitHub for its work before another is fired.
       const end = await waitForEnd(input, now(), limits.orphanPollMs);
-      if (end.outcome === 'finished') {
-        return { outcome: 'finished', ...(end.headSha === undefined ? {} : { headSha: end.headSha }) };
+      if (end.outcome !== 'timed_out') {
+        return { outcome: end.outcome, ...(end.headSha === undefined ? {} : { headSha: end.headSha }), ...(end.commentId === undefined ? {} : { commentId: end.commentId }) };
       }
       await clearMarker(deps.repoDir, input);
       marker = undefined;

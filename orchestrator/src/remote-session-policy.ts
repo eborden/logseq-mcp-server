@@ -48,8 +48,8 @@ export const REMOTE_CLAIMS: readonly RemoteClaim[] = ['open_pr', 'branch_exists'
 export type RemoteLaunchFailure = 'rate_limited' | 'server_error' | 'network';
 export const REMOTE_LAUNCH_FAILURES: readonly RemoteLaunchFailure[] = ['rate_limited', 'server_error', 'network'];
 
-export type RemoteOutcome = 'finished' | 'timed_out' | 'failed';
-export const REMOTE_OUTCOMES: readonly RemoteOutcome[] = ['finished', 'timed_out', 'failed'];
+export type RemoteOutcome = 'finished' | 'timed_out' | 'failed' | 'needs_input';
+export const REMOTE_OUTCOMES: readonly RemoteOutcome[] = ['finished', 'timed_out', 'failed', 'needs_input'];
 
 export interface RemoteSessionResult {
   readonly outcome: RemoteOutcome;
@@ -57,6 +57,8 @@ export interface RemoteSessionResult {
   readonly sessionId?: string;
   /** The branch tip (implementer, fixer) or the reviewed head (reviewer) the outcome was read from. */
   readonly headSha?: string;
+  /** Set with `needs_input`: the id of the trusted needs-input comment that ended the wait (#697). Its text is never read. */
+  readonly commentId?: number;
   /** Set with `failed` when the claim found the work taken: nothing was launched. */
   readonly claim?: RemoteClaim;
   /** Set with `failed` when the launch failed within its budget. */
