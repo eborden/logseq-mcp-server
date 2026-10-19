@@ -89,6 +89,8 @@ export interface ReviewLoopContext {
    * head as it does after any fix. A round that pushes nothing stops for a person: the head would only fail again.
    */
   readonly hostFailure?: HostFailureSummary;
+  /** Where the PR body came from (#708), passed to each review round so the reviewer can say a body is a generated fallback. */
+  readonly bodySource?: 'session' | 'fallback' | 'unknown';
 }
 
 export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunResult> {
@@ -112,6 +114,7 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
     round,
     acceptedThreadIds: [...accepted],
     ...(pendingHostFailure === undefined ? {} : { hostFailure: pendingHostFailure }),
+    ...(context.bodySource === undefined ? {} : { bodySource: context.bodySource }),
   });
 
   /**

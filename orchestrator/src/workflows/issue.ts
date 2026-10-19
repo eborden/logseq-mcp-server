@@ -240,7 +240,7 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   );
   let looped: IssueRunResult;
   try {
-    looped = await loopScope.run(() => reviewLoop({ input, pr: opened.number, branch, headSha: checked.headSha, step, stop }));
+    looped = await loopScope.run(() => reviewLoop({ input, pr: opened.number, branch, headSha: checked.headSha, step, stop, ...(opened.bodySource === undefined ? {} : { bodySource: opened.bodySource }) }));
   } catch (error) {
     if (timedOut && isCancellation(error)) {
       return await CancellationScope.nonCancellable(() => stop('review_loop', 'ReviewLoopTimeout'));
@@ -253,6 +253,6 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   if (input.awaitDecision === false) {
     return { ...looped, prBody };
   }
-  const decided = await decisionStage({ input, pr: opened.number, inbox, step, stop, ...('fixRounds' in looped ? { fixRounds: looped.fixRounds } : {}) });
+  const decided = await decisionStage({ input, pr: opened.number, inbox, step, stop, ...(opened.bodySource === undefined ? {} : { bodySource: opened.bodySource }), ...('fixRounds' in looped ? { fixRounds: looped.fixRounds } : {}) });
   return { ...decided, prBody };
 }
