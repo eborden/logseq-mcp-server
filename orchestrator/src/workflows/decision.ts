@@ -102,6 +102,8 @@ export interface DecisionContext {
   readonly inbox: DecisionInbox;
   /** Fixer rounds the review loop used (#676): the host failure round counts against the same `maxFixRounds`. Default 0. */
   readonly fixRounds?: number;
+  /** Where the PR body came from (#708), carried into a host failure review round. */
+  readonly bodySource?: 'session' | 'fallback' | 'unknown';
   /** Runs one activity call; a failure of it ends the run at `name` (issue.ts). */
   readonly step: <T>(name: IssueStep, call: () => Promise<T>) => Promise<T>;
   /** Ends the run with one comment on the issue and a Failed workflow (issue.ts). */
@@ -142,7 +144,7 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
           if (fixRoundsUsed >= maxFixRounds) {
             return false;
           }
-          const looped = await reviewLoop({ input, pr, branch: issueBranch(issue), headSha: failedHead, step, stop, startRound: fixRoundsUsed, hostFailure: summary });
+          const looped = await reviewLoop({ input, pr, branch: issueBranch(issue), headSha: failedHead, step, stop, startRound: fixRoundsUsed, hostFailure: summary, ...(context.bodySource === undefined ? {} : { bodySource: context.bodySource }) });
           // The loop reports the rounds it used; a round ran either way, so it is counted at least once.
           fixRoundsUsed = 'fixRounds' in looped ? looped.fixRounds : fixRoundsUsed + 1;
           return true;
