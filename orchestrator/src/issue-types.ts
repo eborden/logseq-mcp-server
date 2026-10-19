@@ -24,9 +24,9 @@ export function issueBranch(issueNumber: number): string {
  * the run as a whole except the step bound (2 hours each) and the review loop's own timer; after it, the maintainer's
  * decision and the merge each get at most MAX_DECISION_TIMEOUT_MS (10 days, #631), so 21 days covers the longest wait
  * the input can ask for with room for the work before it, without a park. A run may also park for a person's answer (#698) at most
- * MAX_NEEDS_INPUT_PARKS times, each for at most MAX_NEEDS_INPUT_TIMEOUT_MS (14 days), so the whole run is limited to 60 days.
+ * MAX_NEEDS_INPUT_PARKS times, each for at most MAX_NEEDS_INPUT_TIMEOUT_MS (14 days), so the whole run is limited to 50 days.
  */
-export const ISSUE_RUN_TIMEOUT = '60 days';
+export const ISSUE_RUN_TIMEOUT = '50 days';
 /** The longest any one step may take, retries included (`scheduleToCloseTimeout` of its activities). */
 export const ISSUE_STEP_TIMEOUT = '2 hours';
 /** How many times the workflow reads the board to confirm an item shows a Status it was just given, and the wait between. */
