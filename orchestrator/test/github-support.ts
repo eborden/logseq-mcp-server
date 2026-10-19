@@ -59,6 +59,8 @@ export interface FakeState {
   /** Commit statuses by sha, oldest first, and a total the combined status claims (#646). */
   statuses?: Record<string, { context: string; state: string; description?: string }[]>;
   statusTotal?: number;
+  /** Files of the repository by `<ref>:<path>` (#706): their text, or a raw contents answer. */
+  repoFiles?: Record<string, string | Record<string, unknown>>;
   faults: Fault[];
 }
 

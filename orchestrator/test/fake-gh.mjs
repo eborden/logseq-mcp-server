@@ -279,6 +279,14 @@ if (argv[0] === 'api') {
     save();
     send(201, { state: sent.state, context: sent.context });
   }
+  if ((match = /^repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(path)) && method === 'GET') {
+    // A file of the repository at a ref (#706): `state.repoFiles['<ref>:<path>']` is its text, or a raw answer object.
+    const found = (state.repoFiles ?? {})[`${params.get('ref')}:${match[1]}`];
+    if (found === undefined) {
+      respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 });
+    }
+    send(200, typeof found === 'string' ? { type: 'file', encoding: 'base64', size: Buffer.byteLength(found), content: Buffer.from(found).toString('base64') } : found);
+  }
   if ((match = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/files$/.exec(path))) {
     send(200, page(((state.prFiles ?? {})[match[1]] ?? []).map((file) => (typeof file === 'string' ? { filename: file } : file)), params));
   }
