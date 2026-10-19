@@ -55,6 +55,7 @@ export interface RemoteGithub {
    * Read only. Optional like `findingsCommented`: without it the implementer wait is the push wait alone.
    */
   needsInputCommented?(issue: number, marker: string): Promise<number | undefined>;
+  prBodyRead?(issue: number, marker: string): Promise<string | undefined>;
 }
 
 export interface RemoteSessionDeps {

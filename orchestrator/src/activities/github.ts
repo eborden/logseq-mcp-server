@@ -51,7 +51,7 @@ import {
   parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
-import { findKeyedComment, findNeedsInputAnswer, hasFindingsComment } from '../findings-comment.ts';
+import { findKeyedComment, findNeedsInputAnswer, findPrBody, hasFindingsComment } from '../findings-comment.ts';
 import type { FindingsCandidate } from '../findings-comment.ts';
 import type { RemoteGithub } from './remote-session.ts';
 import {
@@ -1008,6 +1008,8 @@ export function createRemoteGithubReads(config: GhConfig, deps: GhDeps = activit
     reviewedOnHead: read((ops, pr: number, sha: string) => ops.reviewedOnHead(pr, sha)),
     findingsCommented: read(async (ops, pr: number, marker: string) => hasFindingsComment(await ops.listFindingsCandidates(pr), marker)),
     // An issue's comments are listed by the same route as a PR's, so the same bounded, trust-flagging listing serves (#697).
+    // The PR body the session wrote (#705): the text of the newest trusted comment keyed for this issue and attempt. Data only.
+    prBodyRead: read(async (ops, issue: number, marker: string) => findPrBody(await ops.listFindingsCandidates(issue), marker)),
     needsInputCommented: read(async (ops, issue: number, marker: string) => findKeyedComment(await ops.listFindingsCandidates(issue), marker)?.id),
   };
 }

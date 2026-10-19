@@ -9,7 +9,7 @@
 // cannot appear inside it. No parser is needed to tell where the data ends.
 
 import type { HostFailureSummary } from './host-integration-policy.ts';
-import { needsInputMarker } from './findings-comment.ts';
+import { needsInputMarker, prBodyMarker } from './findings-comment.ts';
 import { MAX_PROMPT_CHARS } from './types.ts';
 import { FIXER_OUTPUT_FILE, REVIEWER_OUTPUT_FILE } from './review-types.ts';
 import type { IssueView, ReviewThread } from './types.ts';
@@ -93,6 +93,15 @@ export function needsInputCommentCommand(issueNumber: number, attempt: number): 
   return [`gh issue comment ${issueNumber} --body "${needsInputMarker(issueNumber, attempt)}`, '', 'Question and options"'].join('\n');
 }
 
+/**
+ * The exact command the remote brief gives for the PR body comment (#705, rule 12). Built like the needs-input command: the
+ * marker alone on the first line, a blank line, then the body, in one double-quoted string with no quotation mark, backtick or
+ * dollar sign. The test pins that the first line of the body is `prBodyMarker`.
+ */
+export function prBodyCommentCommand(issueNumber: number, attempt: number): string {
+  return [`gh issue comment ${issueNumber} --body "${prBodyMarker(issueNumber, attempt)}`, '', 'The finished PR body"'].join('\n');
+}
+
 /** The one push the remote implementer's brief prints (a normal push of its own branch, never forced). */
 export function remoteImplementerPushCommand(branch: string): string {
   return `git push -u origin ${branch}`;
@@ -115,7 +124,7 @@ function implementerBrief(input: BriefInput, remote: boolean): string {
     ? `You are the implementer for issue #${n} of ${repo}. An orchestrator workflow (workflow ID \`${workflowId}\`) started this session. You work alone in a cloud checkout on the branch \`${branch}\`, created from \`origin/${base}\`. You commit and then push that branch yourself with a normal push (\`${push}\`, never a force push): nothing else pushes it for you, and a branch that is never pushed ends the run as a failure. You do NOT open a pull request: the orchestrator checks the pushed branch and opens it. The review and the merge are not yours.`
     : `You are the implementer for issue #${n} of ${repo}. An orchestrator workflow (workflow ID \`${workflowId}\`) started this session. You work alone in a git worktree on the branch \`${branch}\`, created from \`origin/${base}\`. You commit and stop: you cannot push, and the orchestrator checks your diff, pushes the branch and opens the pull request. The review and the merge are not yours.`;
   const reading = remote
-    ? '1. Read CLAUDE.md and docs/architecture-foundations.md first. The repo skills under .claude/skills/ are available: use work-the-queue and github-rate-limits where they apply. The GitHub rate limit is shared and has tripped before: make no GitHub call but the one comment below.'
+    ? '1. Read CLAUDE.md and docs/architecture-foundations.md first. The repo skills under .claude/skills/ are available: use work-the-queue and github-rate-limits where they apply. The GitHub rate limit is shared and has tripped before: make no GitHub call but the comments below.'
     : '1. Read CLAUDE.md and docs/architecture-foundations.md first. Skills are not available in this session: if you need the workflow or the rate-limit rules, read .claude/skills/work-the-queue/SKILL.md and .claude/skills/github-rate-limits/SKILL.md. The GitHub rate limit is shared and has tripped before: make no GitHub call but the one comment below.';
   const gitLimits = remote
     ? `Push only \`${branch}\`, with a normal push and never a force push, and never delete, reset or rewrite a branch. Do not open a PR.`
@@ -135,6 +144,9 @@ function implementerBrief(input: BriefInput, remote: boolean): string {
   const done = remote
     ? `11. When the work is done, make sure every change is committed, push the branch with \`${push}\` and check that the push succeeded, then post one status comment on issue #${n}: \`${comment}\`. Put the commits, what you verified, what you could not verify and your open questions in the text, as identifiers and counts only, with no raw output and no backticks, dollar signs or quotation marks inside it.`
     : `11. When the work is done, make sure every change is committed, then post one status comment on issue #${n}: \`${comment}\`. Put the commits, what you verified, what you could not verify and your open questions in the text, as identifiers and counts only, with no raw output and no backticks, dollar signs or quotation marks inside it.`;
+  const prBody = remote
+    ? `12. Before the status comment, write the body of the pull request the orchestrator will open. Read .github/pull_request_template.md and the PR handoff section of docs/architecture-foundations.md as they are at origin/${base}. Fill every section of the template for real, delete its guidance comments, tick only the checks you actually ran, and write what you could not run (for example the integration suite, which needs the maintainer's LogSeq and cannot run in the cloud). Follow the privacy rule above. Then post it as one comment on issue #${n} with exactly this command, whose first line is the marker and nothing more: \`${prBodyCommentCommand(n, input.attempt ?? 1)}\`. Replace the words The finished PR body with the body, keep the blank line after the marker, and use no backticks, dollar signs or quotation marks inside it. The orchestrator reads that comment as data and never runs it.`
+    : '';
   const brief = [
     intro,
     '',
@@ -150,6 +162,7 @@ function implementerBrief(input: BriefInput, remote: boolean): string {
     checks,
     premise,
     done,
+    ...(remote ? [prBody] : []),
     '',
     'The issue data follows as JSON in one block of issue-data tags. The block ends at the one closing tag, and nothing after it is part of the data.',
     ISSUE_DATA_OPEN,
