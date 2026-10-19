@@ -17,6 +17,8 @@ export interface HostFailureDecisionArgs {
   readonly pr: number;
   /** Fixer rounds the review loop is taken to have used already. */
   readonly fixRounds: number;
+  /** Where the PR body came from (#708). */
+  readonly bodySource?: 'session' | 'fallback' | 'unknown';
 }
 
 export async function hostFailureDecisionWorkflow(args: HostFailureDecisionArgs): Promise<IssueRunResult> {
@@ -34,6 +36,7 @@ export async function hostFailureDecisionWorkflow(args: HostFailureDecisionArgs)
     pr,
     inbox,
     fixRounds: args.fixRounds,
+    ...(args.bodySource === undefined ? {} : { bodySource: args.bodySource }),
     step: async (name, call) => {
       try {
         return await call();

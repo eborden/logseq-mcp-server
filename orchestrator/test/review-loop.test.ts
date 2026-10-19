@@ -141,6 +141,8 @@ class World {
   readonly pushed = new Set<string>();
   readonly repliedRounds = new Set<number>();
   readonly stepInputs: ReviewStepInput[] = [];
+  /** The body source the fake open-PR step reports (#708). Absent: it reports none. */
+  bodySource: 'session' | 'fallback' | 'unknown' | undefined;
   firstHalf = { claimed: false, sessions: 0, prs: 0 };
   issueStatus: BoardStatus | undefined = 'Ready';
   prStatus: BoardStatus | undefined;
@@ -190,7 +192,8 @@ function fakeActivities() {
     openPr: async (input: { head: string }) => {
       const issue = issueOfBranch(input.head);
       world(issue).firstHalf.prs += 1;
-      return { number: issue + PR_OFFSET, url: 'https://example.invalid/pull', created: true };
+      const source = world(issue).bodySource;
+      return { number: issue + PR_OFFSET, url: 'https://example.invalid/pull', created: true, ...(source === undefined ? {} : { bodySource: source, bodyUnmet: 0 }) };
     },
     addToBoard: async (target: BoardItemRef) => {
       const { w } = worldOf(target);
@@ -959,3 +962,18 @@ test('real activities: a clean review of a clean PR clears the gate with no fixe
   assert.deepEqual(await readdir(join(dir, 'clean')).then((names) => names.includes('wt-review-0')), true, 'the reviewer had its own worktree');
 });
 
+
+test('the body source of the open-PR step reaches the input of every review and fix round (#708)', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  const { issue, world: w } = newWorld((world) => {
+    oneFindingFirst(world);
+    world.accepts = true;
+    world.humanResolves = true;
+    world.bodySource = 'fallback';
+  });
+
+  await runIssue(FAKE_QUEUE, issue);
+
+  assert.equal(w.stepInputs.length, 3, 'a review, a fix and a second review');
+  assert.deepEqual(w.stepInputs.map((input) => input.bodySource), ['fallback', 'fallback', 'fallback']);
+});
