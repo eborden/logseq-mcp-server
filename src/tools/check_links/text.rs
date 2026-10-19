@@ -256,6 +256,10 @@ mod tests {
         assert_eq!(counts("` ``[[x]]`` [[y]]"), [("y", 1)]);
         // a shorter run inside a longer span does not close it
         assert_eq!(counts("``a ` [[b]] ` c`` [[d]]"), [("d", 1)]);
+        // an indented fence still counts
+        assert_eq!(counts("  ```\na[[i]]\n  ```\n[[Bob]]"), [("Bob", 1)]);
+        // a ref that starts outside code and holds a span stays a ref
+        assert_eq!(counts("[[a `x` b]]"), [("a `x` b", 1)]);
         assert_eq!(strip_brackets("use `m[[0]]` and [[Alice]]"), "use `m[[0]]` and Alice");
         assert!(check_prose("use `m[[0]]` x", "use `m[[0]]` [[x]]").ok);
         assert!(check_refs_preserved("`[[a]]` [[b]]", "`a` [[b]]").ok);
