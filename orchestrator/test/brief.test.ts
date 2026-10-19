@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BriefTooLargeError, briefCommands, buildBrief, buildRemoteImplementerBrief, CO_AUTHOR_LINE, encodeIssueData, ISSUE_DATA_CLOSE, ISSUE_DATA_OPEN } from '../src/brief.ts';
+import { BriefTooLargeError, briefCommands, buildBrief, buildRemoteImplementerBrief, CO_AUTHOR_LINE, encodeIssueData, ISSUE_DATA_CLOSE, ISSUE_DATA_OPEN, needsInputCommentCommand } from '../src/brief.ts';
 import { DEFAULT_ALLOWED_TOOLS, DEFAULT_DISALLOWED_TOOLS } from '../src/config.ts';
 import { commandAllowed } from './tool-rules.ts';
 import type { BriefInput } from '../src/brief.ts';
@@ -207,12 +207,27 @@ test('the remote brief keeps the issue text as JSON data and is bounded', () => 
 
 test('the remote brief asks for a needs-input comment keyed on the issue and the attempt, and the local brief does not (#697)', () => {
   const first = buildRemoteImplementerBrief(input());
-  assert.ok(first.includes(`\`${needsInputMarker(123, 1)}\``), 'attempt 1 is the default');
-  assert.match(first, /first line is exactly this marker and nothing more/);
+  assert.ok(first.includes(`\`${needsInputCommentCommand(123, 1)}\``), 'attempt 1 is the default, and the brief prints the exact command');
+  assert.match(first, /whose first line is the marker and nothing more/);
   assert.match(first, /no backticks, dollar signs or quotation marks/);
   const third = buildRemoteImplementerBrief({ ...input(), attempt: 3 });
-  assert.ok(third.includes(`\`${needsInputMarker(123, 3)}\``));
+  assert.ok(third.includes(`\`${needsInputCommentCommand(123, 3)}\``));
   assert.ok(!third.includes(needsInputMarker(123, 1)));
   assert.ok(!buildBrief(input()).includes('orchestrator-needs-input'), 'the local session has no wait to end');
   assert.ok(third.length < MAX_PROMPT_CHARS);
+});
+
+test('the needs-input command builds a body whose first line is exactly the marker, and the lists allow it (#698)', () => {
+  for (const [issue, attempt] of [[123, 1], [123, 3], [7, 12]] as const) {
+    const command = needsInputCommentCommand(issue, attempt);
+    const body = /^gh issue comment \d+ --body "([\s\S]*)"$/.exec(command)?.[1] ?? '';
+    const lines = body.split('\n');
+    assert.equal(lines[0], needsInputMarker(issue, attempt), 'the first line is the marker and nothing more');
+    assert.equal(lines[1], '', 'a blank line follows the marker');
+    assert.ok((lines[2] ?? '').length > 0, 'the question comes after it');
+    assert.ok(command.startsWith(`gh issue comment ${issue} --body `));
+    assert.ok(commandAllowed(DEFAULT_ALLOWED_TOOLS, DEFAULT_DISALLOWED_TOOLS, command), `the lists must allow: ${command}`);
+    assert.doesNotMatch(command, /\$|`|--body-file|-F /);
+  }
+  assert.ok(!buildBrief(input()).includes('gh issue comment 123 --body "<!--'), 'the local brief has no needs-input command');
 });
