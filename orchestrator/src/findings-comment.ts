@@ -53,6 +53,11 @@ export function fixerRepliesMarker(pr: number, headSha: string, round: number): 
   return `<!-- orchestrator-fixer-replies pr=${pr} head=${headSha} round=${round} -->`;
 }
 
+/** True when `value` is a marker `fixerRepliesMarker` could have made. */
+export function isFixerRepliesMarker(value: string): boolean {
+  return /^<!-- orchestrator-fixer-replies pr=[1-9]\d{0,9} head=[0-9a-f]{40} round=(?:0|[1-9]\d{0,5}) -->$/.test(value);
+}
+
 /** A body longer than this cannot hold a findings file within its own byte bound, so it is refused before any scan. */
 const MAX_COMMENT_CHARS = MAX_OUTPUT_FILE_BYTES + 2_000;
 

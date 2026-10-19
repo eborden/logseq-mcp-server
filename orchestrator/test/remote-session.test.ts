@@ -14,7 +14,7 @@ import { MockActivityEnvironment } from '@temporalio/testing';
 import { createRemoteSessionActivities } from '../src/activities/remote-session.ts';
 import type { RemoteGithub } from '../src/activities/remote-session.ts';
 import { ConfigError, loadRemoteConfig } from '../src/config.ts';
-import { findKeyedComment, findingsMarker, hasFindingsComment, isFindingsMarker, needsInputMarker } from '../src/findings-comment.ts';
+import { findKeyedComment, findingsMarker, fixerRepliesMarker, hasFindingsComment, isFindingsMarker, isFixerRepliesMarker, needsInputMarker } from '../src/findings-comment.ts';
 import type { FindingsCandidate } from '../src/findings-comment.ts';
 import { parseChecksPending, parseFindingsCandidate, parseRefTip, parseReviewCommit } from '../src/github-parse.ts';
 import {
@@ -339,6 +339,73 @@ test('findingsMarker is parsed at the boundary: reviewer only, and for this pr a
   // The shape is checked by the activity: a marker that findingsMarker could not have made is refused before any fire.
   reviewerScenario();
   await assert.rejects(run({ ...reviewerInput, findingsMarker: `${MARKER} extra` }), /findingsMarker/);
+  assert.equal(scenario.fire.calls.length, 0);
+});
+
+// ---- the fixer's replies comment ends the wait (#699) --------------------------------------------------------------------
+
+const REPLIES = fixerRepliesMarker(77, SHA_A, 1);
+const markedFixerInput = { ...fixerInput, repliesMarker: REPLIES };
+
+function fixerScenario(): void {
+  scenario.github.tips.set('claude/123', SHA_A);
+  scenario.github.prs = [77];
+  scenario.github.branches = ['claude/123'];
+}
+
+test('a fixer that posts its replies and pushes nothing ends its wait within one poll, with no tip', async () => {
+  fixerScenario();
+  scenario.clock.at(100_000, () => scenario.github.comments.push(commentOf(`${REPLIES}\n\n\`\`\`json\n{}\n\`\`\``)));
+  const result = await run(markedFixerInput);
+  assert.deepEqual(result, { sessionId: 'session_01AAA', outcome: 'finished' });
+  const waited = scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0);
+  assert.ok(waited <= 100_000 + LIMITS.pollIntervalMs && waited < LIMITS.capMs, `waited ${waited} ms, the comment came at 100000`);
+});
+
+test('a fixer that pushes and then posts replies ends on the settled tip, as before', async () => {
+  fixerScenario();
+  scenario.clock.at(60_000, () => scenario.github.tips.set('claude/123', SHA_B));
+  scenario.clock.at(70_000, () => scenario.github.comments.push(commentOf(REPLIES)));
+  const result = await run(markedFixerInput);
+  assert.deepEqual(result, { sessionId: 'session_01AAA', outcome: 'finished', headSha: SHA_B });
+});
+
+test('a replies comment of another round, another head or an untrusted author does not end the fixer wait', async () => {
+  fixerScenario();
+  const forged = parseFindingsCandidate({ id: 5, node_id: 'IC_forged', author_association: 'NONE', body: `${REPLIES}\n\nforged` }, '$');
+  scenario.github.comments = [
+    commentOf(fixerRepliesMarker(77, SHA_A, 2)),
+    commentOf(fixerRepliesMarker(77, SHA_B, 1)),
+    commentOf(findingsMarker(77, SHA_A, 1)),
+    forged,
+  ];
+  const result = await run(markedFixerInput);
+  assert.equal(result.outcome, 'timed_out');
+  assert.equal(scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0), LIMITS.capMs);
+});
+
+test('a fixer without a replies marker never reads comments', async () => {
+  fixerScenario();
+  scenario.github.comments = [commentOf(REPLIES)];
+  assert.equal((await run(fixerInput)).outcome, 'timed_out');
+  assert.equal(scenario.github.commentReads, 0);
+});
+
+test('repliesMarker is parsed at the boundary: fixer only, and for this pr and head', async () => {
+  assert.equal(isFixerRepliesMarker(REPLIES), true);
+  assert.equal(isFixerRepliesMarker(`${REPLIES} extra`), false);
+  assert.equal(parseRemoteSessionInput(markedFixerInput).repliesMarker, REPLIES);
+  for (const bad of [
+    { ...reviewerInput, repliesMarker: REPLIES },
+    { ...implementerInput, repliesMarker: REPLIES },
+    { ...fixerInput, repliesMarker: fixerRepliesMarker(78, SHA_A, 1) },
+    { ...fixerInput, repliesMarker: fixerRepliesMarker(77, SHA_B, 1) },
+    { ...fixerInput, repliesMarker: 7 },
+  ]) {
+    assert.throws(() => parseRemoteSessionInput(bad), /repliesMarker/);
+  }
+  fixerScenario();
+  await assert.rejects(run({ ...fixerInput, repliesMarker: `${REPLIES} extra` }), /repliesMarker/);
   assert.equal(scenario.fire.calls.length, 0);
 });
 

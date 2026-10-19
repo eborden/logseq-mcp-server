@@ -657,6 +657,7 @@ export function createReviewActivities(deps: ReviewDeps) {
         base: input.base,
         headSha: input.headSha,
         brief,
+        repliesMarker: marker,
         attempt: input.round + 1,
       });
       if (session.outcome === 'failed') {
