@@ -23,9 +23,10 @@ export function issueBranch(issueNumber: number): string {
  * The longest the whole run may take. The client sets it as the workflow execution timeout. Before the gate nothing caps
  * the run as a whole except the step bound (2 hours each) and the review loop's own timer; after it, the maintainer's
  * decision and the merge each get at most MAX_DECISION_TIMEOUT_MS (10 days, #631), so 21 days covers the longest wait
- * the input can ask for with room for the work before it.
+ * the input can ask for with room for the work before it, without a park. A run may also park for a person's answer (#698) at most
+ * MAX_NEEDS_INPUT_PARKS times, each for at most MAX_NEEDS_INPUT_TIMEOUT_MS (14 days), so the whole run is limited to 60 days.
  */
-export const ISSUE_RUN_TIMEOUT = '21 days';
+export const ISSUE_RUN_TIMEOUT = '60 days';
 /** The longest any one step may take, retries included (`scheduleToCloseTimeout` of its activities). */
 export const ISSUE_STEP_TIMEOUT = '2 hours';
 /** How many times the workflow reads the board to confirm an item shows a Status it was just given, and the wait between. */
@@ -77,6 +78,8 @@ export interface IssueWorkflowInput {
    * re-attaching to the old session. The in-run counter for a dead session goes on from here. Ignored by `local`.
    */
   readonly attempt?: number;
+  /** The longest one park for a person's answer waits, in milliseconds (#698). Absent means DEFAULT_NEEDS_INPUT_TIMEOUT_MS. */
+  readonly needsInputTimeoutMs?: number;
 }
 
 export type HostIntegrationMode = 'auto' | 'off';
@@ -100,6 +103,35 @@ export const REMOTE_SESSION_TIMED_OUT = 'RemoteSessionTimedOut';
 /** The remote implementer stopped for a person and said so in a needs-input comment (#697). */
 export const NEEDS_INPUT = 'NeedsInput';
 export const REMOTE_NO_HEAD = 'RemoteSessionNoHead';
+/** The park for a person's answer ended with no answer within the limit (#698). */
+export const NEEDS_INPUT_TIMEOUT = 'NeedsInputTimeout';
+
+/** The most times one run parks for an answer. A third needs-input stops the run as `NeedsInput`. */
+export const MAX_NEEDS_INPUT_PARKS = 2;
+/** How long a park waits by default, and the bounds of the run input `needsInputTimeoutMs`. */
+export const DEFAULT_NEEDS_INPUT_TIMEOUT_MS = 7 * 24 * 60 * 60_000;
+export const MIN_NEEDS_INPUT_TIMEOUT_MS = 1_000;
+export const MAX_NEEDS_INPUT_TIMEOUT_MS = 14 * 24 * 60 * 60_000;
+/** How often the wait reads the issue's comments, and how long one wait activity runs before the workflow asks again (keeps the history short). */
+export const NEEDS_INPUT_POLL_MS = 5 * 60_000;
+export const NEEDS_INPUT_WAIT_CHUNK_MS = 60 * 60_000;
+
+/** The board status a parked run shows. The option is looked up by name on the board. */
+export const NEEDS_INPUT_BOARD_STATUS = 'Needs Input';
+
+/** The key of the one comment a park posts: the issue's attempt number makes a second park post its own. */
+export function needsInputParkCommentKey(attempt: number): string {
+  return `needs-input-park-${attempt}`;
+}
+
+/** The text of the park comment. Fixed words and identifiers only: it never repeats the session's question. */
+export function needsInputParkComment(workflowId: string, attempt: number, timeoutMs: number): string {
+  const days = Math.max(1, Math.round(timeoutMs / (24 * 60 * 60_000)));
+  return [
+    `The orchestrator (workflow \`${workflowId}\`) is waiting for an answer: the session of attempt ${attempt} stopped with a question for a person.`,
+    `A comment on this issue answers it. The run reads this issue about every ${NEEDS_INPUT_POLL_MS / 60_000} minutes, and the next comment by a trusted author (OWNER, MEMBER or COLLABORATOR) that is newer than the session's question starts attempt ${attempt + 1}. The run waits at most ${days} day${days === 1 ? '' : 's'}, then stops.`,
+  ].join('\n\n');
+}
 export const REMOTE_BRANCH_MOVED = 'BranchMoved';
 /** The stop reason of a remote fixer whose push the guard refuses (#675). The push cannot be undone by the worker: the branch is left for a person. */
 export const FIXER_PUSH_REJECTED = 'FixerPushRejected';
@@ -201,6 +233,7 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
     throw new InvalidIssueInputError('executor must be local or remote');
   }
   const attempt = optionalWholeNumber(raw, 'attempt', 1, MAX_ATTEMPT);
+  const needsInputTimeoutMs = optionalWholeNumber(raw, 'needsInputTimeoutMs', MIN_NEEDS_INPUT_TIMEOUT_MS, MAX_NEEDS_INPUT_TIMEOUT_MS);
   return {
     issueNumber,
     repoDir: absolutePath('repoDir', repoDir),
@@ -214,6 +247,7 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
     ...(hostIntegration === undefined ? {} : { hostIntegration }),
     ...(executor === undefined ? {} : { executor }),
     ...(attempt === undefined ? {} : { attempt }),
+    ...(needsInputTimeoutMs === undefined ? {} : { needsInputTimeoutMs }),
   };
 }
 
@@ -300,6 +334,7 @@ export type IssueStep =
   | 'claim'
   | 'confirm_claim'
   | 'session'
+  | 'park'
   | 'guard'
   | 'push'
   | 'open_pr'

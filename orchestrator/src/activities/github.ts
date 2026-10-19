@@ -51,7 +51,7 @@ import {
   parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
-import { findKeyedComment, hasFindingsComment } from '../findings-comment.ts';
+import { findKeyedComment, findNeedsInputAnswer, hasFindingsComment } from '../findings-comment.ts';
 import type { FindingsCandidate } from '../findings-comment.ts';
 import type { RemoteGithub } from './remote-session.ts';
 import {
@@ -78,6 +78,8 @@ import type {
   CommentIssueInput,
   CommentIssueResult,
   GateStatus,
+  NeedsInputWaitInput,
+  NeedsInputWaitResult,
   IssueCheck,
   IssueView,
   ItemKind,
@@ -104,26 +106,33 @@ const MAX_TEXT_CHARS = 60_000;
 const MAX_REVIEW_COMMENTS = 100;
 const HEARTBEAT_SLICE_MS = 5_000;
 
-const SETTABLE: readonly SettableStatus[] = ['In progress', 'In review', 'Done'];
+const SETTABLE: readonly SettableStatus[] = ['In progress', 'Needs Input', 'In review', 'Done'];
 /** The moves `setStatus` makes for an issue: from a status to the one next step it may take. */
-const ISSUE_MOVES: ReadonlyMap<string, SettableStatus> = new Map<string, SettableStatus>([
-  ['In progress', 'In review'],
-  ['In review', 'Done'],
+const ISSUE_MOVES: ReadonlyMap<string, readonly SettableStatus[]> = new Map<string, readonly SettableStatus[]>([
+  // A run that waits for a person's answer parks the item in Needs Input and moves it back when the answer arrives (#698).
+  ['In progress', ['In review', 'Needs Input']],
+  ['Needs Input', ['In progress']],
+  ['In review', ['Done']],
 ]);
 /**
  * What a PR may do that an issue may not, and the only difference. A PR is added to the board in Backlog (the board's
  * default, which nothing here changes), and it never passes through Ready or In progress: its first move is Backlog
  * to In review. For an issue that same move is the maintainer's (Backlog to Ready is a gate), so it stays refused.
  */
-const PR_ONLY_MOVES: ReadonlyMap<string, SettableStatus> = new Map<string, SettableStatus>([['Backlog', 'In review']]);
-/** The moves by kind, keyed by the item's current status. A PR has the issue moves plus its own first move. */
-const ALLOWED_MOVES: ReadonlyMap<ItemKind, ReadonlyMap<string, SettableStatus>> = new Map<ItemKind, ReadonlyMap<string, SettableStatus>>([
+const PR_ONLY_MOVES: ReadonlyMap<string, readonly SettableStatus[]> = new Map<string, readonly SettableStatus[]>([['Backlog', ['In review']]]);
+/** A PR never waits for an answer: it keeps the two moves it had before Needs Input existed. */
+const PR_SHARED_MOVES: ReadonlyMap<string, readonly SettableStatus[]> = new Map<string, readonly SettableStatus[]>([
+  ['In progress', ['In review']],
+  ['In review', ['Done']],
+]);
+/** The moves by kind, keyed by the item's current status. A PR has the shared moves plus its own first move. */
+const ALLOWED_MOVES: ReadonlyMap<ItemKind, ReadonlyMap<string, readonly SettableStatus[]>> = new Map<ItemKind, ReadonlyMap<string, readonly SettableStatus[]>>([
   ['issue', ISSUE_MOVES],
-  ['pr', new Map<string, SettableStatus>([...PR_ONLY_MOVES, ...ISSUE_MOVES])],
+  ['pr', new Map<string, readonly SettableStatus[]>([...PR_ONLY_MOVES, ...PR_SHARED_MOVES])],
 ]);
 
 function allowedMovesText(kind: ItemKind): string {
-  const moves = [...(ALLOWED_MOVES.get(kind) ?? [])].map(([from, to]) => `${from} to ${to}`);
+  const moves = [...(ALLOWED_MOVES.get(kind) ?? [])].flatMap(([from, targets]) => targets.map((to) => `${from} to ${to}`));
   const last = moves.pop();
   return moves.length === 0 ? (last ?? 'nothing') : `${moves.join(', ')} and ${last ?? ''}`;
 }
@@ -259,6 +268,20 @@ function parseCommentIssueInput(raw: unknown): CommentIssueInput {
     issue: parseIssueNumber(input.get('issue'), 'issue'),
     key: inputText(input, 'key', KEY, 100),
     body: inputText(input, 'body', undefined, MAX_TEXT_CHARS),
+  };
+}
+
+function parseNeedsInputWaitInput(raw: unknown): NeedsInputWaitInput {
+  const input = inputObject(raw, 'waitForNeedsInputAnswer input');
+  const bounded = (key: string, min: number, max: number): number => {
+    const value = input.get(key);
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max ? value : refuse(`${key} must be a whole number from ${min} to ${max}`);
+  };
+  return {
+    issue: parseIssueNumber(input.get('issue'), 'issue'),
+    afterCommentId: parseIssueNumber(input.get('afterCommentId'), 'afterCommentId'),
+    waitMs: bounded('waitMs', 0, 24 * 60 * 60_000),
+    pollMs: bounded('pollMs', 1, 24 * 60 * 60_000),
   };
 }
 
@@ -574,7 +597,7 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
   /**
    * Moves an issue or a PR one step, then reads the board again and fails unless it shows the status asked for.
    *
-   * Which moves: `ALLOWED_MOVES` by kind. An issue makes In progress to In review and In review to Done. A PR makes
+   * Which moves: `ALLOWED_MOVES` by kind. An issue makes In progress to In review, In progress to Needs Input and back (#698, a run waiting for an answer) and In review to Done. A PR makes
    * those two and, as its own first move, Backlog to In review (a PR is added in Backlog and never goes through
    * Ready or In progress). Ready is never a target (a move into Ready is the maintainer's), Backlog is never one
    * either, nothing moves out of Done or back, and a skipped step (Backlog to Done) is refused. A repeat finds the
@@ -599,7 +622,7 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
       return { changed: false, status };
     }
     const allowed = ALLOWED_MOVES.get(item.kind)?.get(lookup.status);
-    if (allowed !== status) {
+    if (allowed?.includes(status) !== true) {
       throw new GithubRefusal(
         'InvalidState',
         `${describeItem(item)} is ${lookup.status}; setStatus allows only ${allowedMovesText(item.kind)}` +
@@ -834,6 +857,29 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     return (await listAll(`${repoRoute}/issues/${pr}/comments`, 'pr comments', parseFindingsCandidate)).items;
   }
 
+  /**
+   * Waits up to `waitMs` for the answer to a needs-input comment (#698): reads the issue's comments now and every `pollMs`
+   * after, and returns the id of the first trusted comment that is newer than `afterCommentId` and carries no orchestrator
+   * marker. Reads only, so a retry or a restart re-reads and cannot start anything. The wait is the activity's own sleep, which
+   * heartbeats and stops on cancellation. Answers `answered: false` when the time is up; the workflow decides what that means.
+   */
+  async function waitForNeedsInputAnswer(raw: unknown): Promise<NeedsInputWaitResult> {
+    const input = parseNeedsInputWaitInput(raw);
+    let left = input.waitMs;
+    for (;;) {
+      const answer = findNeedsInputAnswer((await listAll(`${repoRoute}/issues/${input.issue}/comments`, 'issue comments', parseFindingsCandidate)).items, input.afterCommentId);
+      if (answer !== undefined) {
+        return { answered: true, commentId: answer.id };
+      }
+      if (left <= 0) {
+        return { answered: false };
+      }
+      const slice = Math.min(left, input.pollMs);
+      await sleep(slice);
+      left -= slice;
+    }
+  }
+
   /** Hides the raw findings comment (#674). Idempotent. Refuses an answer that does not show the comment hidden. */
   async function minimizeComment(raw: unknown): Promise<{ readonly minimized: true }> {
     const input = inputObject(raw, 'minimizeComment input');
@@ -884,6 +930,7 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     listReviewThreads,
     replyToThread,
     listFindingsCandidates,
+    waitForNeedsInputAnswer,
     minimizeComment,
     getHostIntegration,
     postCommitStatus,
@@ -930,6 +977,7 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     listReviewThreads: activity((ops, pr: number) => ops.listReviewThreads(pr)),
     replyToThread: activity((ops, input: ReplyToThreadInput) => ops.replyToThread(input)),
     listFindingsCandidates: activity((ops, pr: number) => ops.listFindingsCandidates(pr)),
+    waitForNeedsInputAnswer: activity((ops, input: NeedsInputWaitInput) => ops.waitForNeedsInputAnswer(input)),
     minimizeComment: activity((ops, input: { nodeId: string }) => ops.minimizeComment(input)),
     getHostIntegration: activity((ops, input: { sha: string }) => ops.getHostIntegration(input)),
     postCommitStatus: activity((ops, input: PostCommitStatusInput) => ops.postCommitStatus(input)),

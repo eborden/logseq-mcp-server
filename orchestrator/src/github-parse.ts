@@ -220,7 +220,7 @@ export function parseBoardItems(raw: unknown, repo: string): { readonly items: B
   return { items, totalCount };
 }
 
-const BOARD_STATUSES: readonly BoardStatus[] = ['Backlog', 'Ready', 'In progress', 'In review', 'Done'];
+const BOARD_STATUSES: readonly BoardStatus[] = ['Backlog', 'Ready', 'In progress', 'Needs Input', 'In review', 'Done'];
 
 export function parseBoardStatus(raw: string, what: string, path: string): BoardStatus {
   const status = BOARD_STATUSES.find((candidate) => candidate === raw);

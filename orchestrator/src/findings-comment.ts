@@ -48,6 +48,20 @@ export function needsInputMarker(issue: number, attempt: number): string {
   return `<!-- orchestrator-needs-input issue=${issue} attempt=${attempt} -->`;
 }
 
+/** True when a comment body carries any orchestrator marker (`<!-- orchestrator-...`): a comment of ours or of a session we started, never an answer. */
+export function carriesOrchestratorMarker(body: string): boolean {
+  return body.includes('<!-- orchestrator-');
+}
+
+/**
+ * The first comment that answers a needs-input comment (#698): by a trusted author, newer than `afterCommentId` (REST ids grow
+ * with time), and with no orchestrator marker anywhere in it, so neither the park comment nor a status comment of ours can
+ * count. The listing keeps no text for an untrusted author, and `trusted` is checked as well. Reads only.
+ */
+export function findNeedsInputAnswer(candidates: readonly FindingsCandidate[], afterCommentId: number): FindingsCandidate | undefined {
+  return candidates.find((candidate) => candidate.trusted && candidate.id > afterCommentId && !carriesOrchestratorMarker(candidate.body));
+}
+
 /** The key the fixer's replies comment starts with. It names the PR, the head the round started from and the round. */
 export function fixerRepliesMarker(pr: number, headSha: string, round: number): string {
   return `<!-- orchestrator-fixer-replies pr=${pr} head=${headSha} round=${round} -->`;
