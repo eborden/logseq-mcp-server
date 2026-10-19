@@ -12,7 +12,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ApplicationFailure } from '@temporalio/activity';
 import { MockActivityEnvironment } from '@temporalio/testing';
 import { createGithubActivities, createRemoteGithubReads } from '../src/activities/github.ts';
-import { findingsMarker } from '../src/findings-comment.ts';
+import { findingsMarker, needsInputMarker } from '../src/findings-comment.ts';
 import { BOARD_ACTIVITY_OPTIONS } from '../src/board-policy.ts';
 import { GITHUB_ACTIVITY_TIMEOUTS } from '../src/gh-config.ts';
 import { GITHUB_ACTIVITY_MAX_ATTEMPTS, GITHUB_ACTIVITY_OPTIONS } from '../src/github-policy.ts';
@@ -897,4 +897,22 @@ test('findingsCommented of the remote reads: a trusted comment with the marker i
   assert.equal(await otherKey.findingsCommented?.(77, marker), false, 'another round or head does not match');
   const otherPr = await withComments([keyed(6, 'OWNER', marker)])();
   assert.equal(await otherPr.findingsCommented?.(78, marker), false, 'the PR number picks the route');
+});
+
+// ---- the remote wait's needs-input read (#697) ------------------------------------------------------------------------
+
+test('needsInputCommented of the remote reads: the id of a trusted comment with the marker, else undefined', async () => {
+  const marker = needsInputMarker(30, 1);
+  const withComments = async (comments: unknown[]) => {
+    const { fake } = await setup((state) => {
+      state.comments['30'] = comments;
+    });
+    return createRemoteGithubReads(fake.config);
+  };
+  const keyed = (id: number, association: string, first: string) => ({ ...rawComment(id, association, `${first}\n\nbody`), node_id: `IC_${id}` });
+
+  assert.equal(await (await withComments([keyed(1, 'NONE', 'a remark'), keyed(2, 'OWNER', marker)])).needsInputCommented?.(30, marker), 2);
+  assert.equal(await (await withComments([keyed(3, 'NONE', marker)])).needsInputCommented?.(30, marker), undefined, 'a stranger with the marker is data');
+  assert.equal(await (await withComments([keyed(4, 'OWNER', needsInputMarker(30, 2)), keyed(5, 'OWNER', needsInputMarker(31, 1))])).needsInputCommented?.(30, marker), undefined);
+  assert.equal(await (await withComments([keyed(6, 'OWNER', marker)])).needsInputCommented?.(31, marker), undefined, 'the issue number picks the route');
 });
