@@ -45,7 +45,7 @@ pub struct Nested {
     pub excerpt: String,
 }
 
-/// Check 2: as many `[[` as `]]`, and no `[[` opened inside another on the same line.
+/// Check 2: as many `[[` as `]]`, none closed before it opens, and no `[[` opened inside another on the same line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BracketCheck {
     pub ok: bool,
@@ -203,6 +203,24 @@ fn first_nested(chars: &[char]) -> Option<usize> {
     })
 }
 
+/// Whether every `]]` comes after a `[[` it can close, scanning in order the way `matches` counts.
+fn in_order(chars: &[char]) -> bool {
+    let (mut depth, mut at) = (0usize, 0);
+    while at + 1 < chars.len() {
+        match (chars[at], chars[at + 1]) {
+            ('[', '[') => depth += 1,
+            (']', ']') if depth == 0 => return false,
+            (']', ']') => depth -= 1,
+            _ => {
+                at += 1;
+                continue;
+            }
+        }
+        at += 2;
+    }
+    true
+}
+
 /// Check 2. Bracket balance is of the raw text, code included, by design: a lone `[[` in a code span
 /// is no ref to LogSeq, but it is still a likely typo, and the totals count it too. Checks 1, 3 and 4
 /// read refs, so they skip code.
@@ -211,7 +229,7 @@ pub fn check_brackets(after: &str) -> BracketCheck {
     let closes = after.matches("]]").count();
     let chars: Vec<char> = after.chars().collect();
     let nested = first_nested(&chars).map(|at| Nested { line: position(&chars, at).0, excerpt: excerpt(&chars, at) });
-    BracketCheck { ok: opens == closes && nested.is_none(), opens, closes, nested }
+    BracketCheck { ok: opens == closes && in_order(&chars) && nested.is_none(), opens, closes, nested }
 }
 
 /// Check 4. Refs are counted per page name (`key_of`), the way LogSeq matches them, so a ref that
@@ -243,6 +261,18 @@ mod tests {
     }
 
     // Issue 657: text in a code span or a fenced block is no ref.
+    // Issue 654: the totals match, but a `]]` comes before any `[[`.
+    #[test]
+    fn mis_ordered_brackets_are_not_balanced() {
+        let stray = check_brackets("x ]] y [[z");
+        assert_eq!((stray.ok, stray.opens, stray.closes), (false, 1, 1));
+        assert!(!check_brackets("]][[").ok);
+        assert!(!check_brackets("[[a]] ]] [[b").ok);
+        assert!(check_brackets("[[a]] [[b]]").ok);
+        // nesting is still its own warning, not an ordering fault
+        assert!(check_brackets("[[a [[b]] c]]").nested.is_some());
+    }
+
     #[test]
     fn code_spans_and_fences_hold_no_refs() {
         assert_eq!(counts("use `m[[0]]` here [[Alice]]"), [("Alice", 1)]);
