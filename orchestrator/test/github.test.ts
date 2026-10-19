@@ -12,7 +12,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ApplicationFailure } from '@temporalio/activity';
 import { MockActivityEnvironment } from '@temporalio/testing';
 import { createGithubActivities, createRemoteGithubReads } from '../src/activities/github.ts';
-import { findingsMarker, needsInputMarker } from '../src/findings-comment.ts';
+import { findingsMarker, needsInputMarker, prBodyMarker } from '../src/findings-comment.ts';
 import { BOARD_ACTIVITY_OPTIONS } from '../src/board-policy.ts';
 import { GITHUB_ACTIVITY_TIMEOUTS } from '../src/gh-config.ts';
 import { GITHUB_ACTIVITY_MAX_ATTEMPTS, GITHUB_ACTIVITY_OPTIONS } from '../src/github-policy.ts';
@@ -915,4 +915,22 @@ test('needsInputCommented of the remote reads: the id of a trusted comment with 
   assert.equal(await (await withComments([keyed(3, 'NONE', marker)])).needsInputCommented?.(30, marker), undefined, 'a stranger with the marker is data');
   assert.equal(await (await withComments([keyed(4, 'OWNER', needsInputMarker(30, 2)), keyed(5, 'OWNER', needsInputMarker(31, 1))])).needsInputCommented?.(30, marker), undefined);
   assert.equal(await (await withComments([keyed(6, 'OWNER', marker)])).needsInputCommented?.(31, marker), undefined, 'the issue number picks the route');
+});
+
+// ---- the PR body read (#705) ------------------------------------------------------------------------------------------
+
+test('prBodyRead of the remote reads: the text after the marker of the newest trusted keyed comment, else undefined', async () => {
+  const marker = prBodyMarker(30, 1);
+  const withComments = async (comments: unknown[]) => {
+    const { fake } = await setup((state) => {
+      state.comments['30'] = comments;
+    });
+    return createRemoteGithubReads(fake.config);
+  };
+  const keyed = (id: number, association: string, first: string, text = 'body') => ({ ...rawComment(id, association, `${first}\n\n${text}`), node_id: `IC_${id}` });
+
+  assert.equal(await (await withComments([keyed(1, 'NONE', 'a remark'), keyed(2, 'OWNER', marker, 'old'), keyed(3, 'OWNER', marker, 'new')])).prBodyRead?.(30, marker), 'new', 'the newest trusted one');
+  assert.equal(await (await withComments([keyed(4, 'NONE', marker)])).prBodyRead?.(30, marker), undefined, 'a stranger with the marker is data');
+  assert.equal(await (await withComments([keyed(5, 'OWNER', prBodyMarker(30, 2)), keyed(6, 'OWNER', prBodyMarker(31, 1))])).prBodyRead?.(30, marker), undefined, 'another attempt or issue');
+  assert.equal(await (await withComments([keyed(7, 'OWNER', marker)])).prBodyRead?.(31, marker), undefined, 'the issue number picks the route');
 });
