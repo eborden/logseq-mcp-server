@@ -111,9 +111,9 @@ fn cut_resolved(result: &Value, kept: usize, total: usize, oversize: bool) -> Va
     cut
 }
 
-/// How many non-overlapping copies of `token` the text holds.
-fn count_of(text: &str, token: &str) -> usize {
-    text.matches(token).count()
+/// How many closed `[[term]]` refs the text holds (#658). An opener with no closer is not a ref.
+fn count_refs(text: &str) -> usize {
+    link_counts(text).iter().map(|(_, count)| count).sum()
 }
 
 /// Runs the linking gate over `before` and `after`. Returns each check's outcome, `ok`
@@ -202,7 +202,7 @@ pub async fn check_links(client: &LogseqClient, before: &str, after: &str) -> Re
         // `hasMore` follows the warnings. None of these warnings offers a way to fetch more.
         has_more: warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()),
         warnings: &warnings,
-        totals: RefTotals { refs_before: count_of(before, "[["), refs_after: brackets.opens, terms: terms.len() },
+        totals: RefTotals { refs_before: count_refs(before), refs_after: count_refs(after), terms: terms.len() },
         ok: prose.ok && brackets.ok && refs_ok && refs_preserved.ok,
         prose: &prose,
         brackets: &brackets,
