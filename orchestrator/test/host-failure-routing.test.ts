@@ -335,7 +335,7 @@ after(async () => {
 
 let runNumber = 0;
 
-async function start(extra: Partial<IssueWorkflowInput> = {}, fixRounds = 0, setup: (w: World) => void = () => undefined) {
+async function start(extra: Partial<IssueWorkflowInput> = {}, fixRounds = 0, setup: (w: World) => void = () => undefined, bodySource?: 'session' | 'fallback' | 'unknown') {
   world = freshWorld();
   setup(world);
   runNumber += 1;
@@ -351,7 +351,7 @@ async function start(extra: Partial<IssueWorkflowInput> = {}, fixRounds = 0, set
     executor: 'remote',
     ...extra,
   };
-  const args: HostFailureDecisionArgs = { input, pr: PR, fixRounds };
+  const args: HostFailureDecisionArgs = { input, pr: PR, fixRounds, ...(bodySource === undefined ? {} : { bodySource }) };
   return await client.workflow.start('hostFailureDecisionWorkflow', { taskQueue: QUEUE, workflowId: `host-failure-${runNumber}`, args: [args] });
 }
 
@@ -403,6 +403,19 @@ test('a fail on a fixture run starts exactly one fixer round with the summary, t
   assert.deepEqual(world.statusWrites, ['a:pending:no counts', 'a:failure:80 passed, 2 failed', 'b:pending:no counts', 'b:success:82 passed, 0 failed']);
   assert.deepEqual([...world.comments.keys()], [], 'no comment: the run is not stopped');
   assertNothingPublicHoldsTheSummary();
+  await handle.signal(maintainerDecisionSignal, { decision: 'approved', at: '2025-03-04', message: 'Ship it.' });
+  await handle.terminate('test done');
+});
+
+test('the body source reaches the host failure fixer round (#708)', { timeout: 120_000 }, async () => {
+  const handle = await start({}, 0, (w) => {
+    w.hostRuns = [FAIL_ON_FIXTURE, PASS];
+    w.pushes = [H2];
+  }, 'fallback');
+  await until('the pass on the new head', () => world.statuses.get(H2)?.state === 'success');
+
+  assert.equal(world.fixerInputs.length, 1);
+  assert.equal((world.fixerInputs[0] as { bodySource?: string }).bodySource, 'fallback');
   await handle.signal(maintainerDecisionSignal, { decision: 'approved', at: '2025-03-04', message: 'Ship it.' });
   await handle.terminate('test done');
 });
