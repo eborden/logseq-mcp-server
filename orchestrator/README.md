@@ -481,7 +481,8 @@ The structure of a PR body comes from the repo's template at run time, never fro
 
 - **Derived:** `parsePrTemplate(text)` lists the level-2 headings in order. HTML comments and fenced blocks are ignored, so are level-3 headings and checkbox lines. A template with none is `no_sections`, a typed result. `checkPrBody(template, body)` returns `present`, `missing` and `empty` section names, whether a guidance comment is left in the body (`guidanceLeft`) and in which sections, and `ok`.
 - **Not checked:** wording, order, checkbox content, links. Extra sections in a body are fine. A comment ends at a `-->` that is not part of a diagram arrow (`-->>`, or one with a word character before it), because the template's own guidance holds a diagram.
-- **Guard:** `test/pr-template-guard.test.ts` reads the real template and fails if any of its level-2 headings is written in `src/` as a string literal or a heading line. Using the result to open a PR is a later task.
+- **Guard:** `test/pr-template-guard.test.ts` reads the real template and fails if any of its level-2 headings is written in `src/` as a whole string literal or as `## Name` (even inside a one-line string). It is a tripwire for the obvious copy, not proof: concatenation, interpolation, `join` and regex literals are not seen. `src/issue-types.ts` still writes the PR body skeleton by hand; the guard lists it as a known copy, to be emptied by the task that opens the PR from the template (a second check fails once the entry is stale). A setext heading (`A` over `---`) is not a section.
+- **Comments:** one that opens and closes on the same line ends at its first `-->`; the diagram-arrow rule applies only to a comment that spans lines. Using the result to open a PR is a later task.
 
 ### What the workflow does with them (#629)
 

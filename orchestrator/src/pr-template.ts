@@ -64,8 +64,10 @@ interface Scanned {
 }
 
 const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
-// The end of an HTML comment. Strictly any `-->` ends one, but guidance comments hold diagrams whose arrows (`A-->B`,
-// `A-->>B`) must not: an arrow has a word character before it or a `>` or word character after it.
+// The end of an HTML comment that began on an earlier line. Strictly any `-->` ends one, but guidance comments hold
+// diagrams whose arrows (`A-->B`, `A-->>B`) must not: an arrow has a word character before it or a `>` or word
+// character after it. A comment that closes on the line it opened on ends at its first `-->`, whatever surrounds it.
+const STRICT_END_RE = /-->/;
 const COMMENT_END_RE = /(?<!\w)-->(?!>)|-->(?!>)(?=\s*$)/;
 const H2_RE = /^ {0,3}##[ \t]+(\S.*?)(?:[ \t]+#+)?[ \t]*$/;
 
@@ -87,9 +89,11 @@ function scan(markdown: string): Scanned {
     let kept = '';
     let rest = line;
     let sawComment = false;
+    let openedHere = false;
     for (;;) {
       if (inComment) {
-        const end = COMMENT_END_RE.exec(rest);
+        const end = openedHere ? STRICT_END_RE.exec(rest) : COMMENT_END_RE.exec(rest);
+        openedHere = false;
         sawComment = true;
         if (end === null) {
           rest = '';
@@ -106,6 +110,7 @@ function scan(markdown: string): Scanned {
         kept += rest.slice(0, start);
         rest = rest.slice(start + 4);
         inComment = true;
+        openedHere = true;
       }
     }
     if (sawComment) {
