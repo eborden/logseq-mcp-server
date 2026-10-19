@@ -273,6 +273,14 @@ test('the remote reviewer brief names the template path, the handoff pointer and
   assert.ok(brief.includes('same findings comment'), 'the finding goes through the one findings comment');
 });
 
+test('the template is read at the base, and an unreadable body or template is reported, not judged', () => {
+  const brief = buildRemoteReviewerBrief({ ...REVIEW_BASE, marker: '<!-- orchestrator-findings pr=77 -->', bodySource: 'session' });
+  assert.ok(brief.includes(`git show origin/main:${PR_TEMPLATE_PATH}`));
+  assert.ok(brief.includes('not in the checkout'));
+  assert.ok(brief.includes('missing, empty or unreadable'));
+  assert.ok(brief.includes('raise no body finding you cannot support'));
+});
+
 test('a fallback body is said to be the orchestrator\'s, not the author\'s account; a session body is not', () => {
   const marker = '<!-- orchestrator-findings pr=77 -->';
   const fallback = buildRemoteReviewerBrief({ ...REVIEW_BASE, marker, bodySource: 'fallback' });
