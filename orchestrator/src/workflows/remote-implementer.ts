@@ -115,7 +115,7 @@ async function awaitAnswer(ctx: RemoteImplementerContext, afterCommentId: number
  * counts the waits for a person's answer (budget MAX_NEEDS_INPUT_PARKS). A park spends none of the first. Each session, after
  * either, is the next attempt number, so it has a new session key and cannot attach to an earlier session.
  */
-export async function remoteImplementer(ctx: RemoteImplementerContext): Promise<{ readonly headSha: string }> {
+export async function remoteImplementer(ctx: RemoteImplementerContext): Promise<{ readonly headSha: string; readonly attempt: number }> {
   const { input, branch, step, stop } = ctx;
   let headSha: string | undefined;
   let attempt = input.attempt ?? 1;
@@ -161,7 +161,7 @@ export async function remoteImplementer(ctx: RemoteImplementerContext): Promise<
 
   try {
     const guarded = await branches.guardRemoteBranch({ repoDir: input.repoDir, branch, headSha: tip, base: input.base });
-    return { headSha: guarded.headSha };
+    return { headSha: guarded.headSha, attempt };
   } catch (error) {
     if (ctx.isCancellation(error)) {
       throw error;

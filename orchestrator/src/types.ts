@@ -270,8 +270,10 @@ export interface OpenPrInput {
   readonly head: string;
   readonly base: string;
   readonly title: string;
-  /** Filled from `.github/pull_request_template.md` by the caller. */
-  readonly body: string;
+  /** The issue the PR closes. The body is chosen inside the activity (#707), so its text is never in a workflow's history. */
+  readonly issue: number;
+  /** The remote session attempt whose posted body is read. Absent for a local session, which posts none. */
+  readonly attempt?: number;
 }
 
 export interface OpenPrResult {
@@ -279,6 +281,12 @@ export interface OpenPrResult {
   readonly url: string;
   /** False when an open PR for the same head and base was already there. */
   readonly created: boolean;
+  /** Which body a new PR opened with (#707). Absent when the PR was already open: its body was not read or rewritten. */
+  readonly bodySource?: 'session' | 'fallback';
+  /** How many template sections the session's body did not meet. Present with `bodySource`. */
+  readonly bodyUnmet?: number;
+  /** Why the session's body was not used. Absent for `session`. */
+  readonly bodyReason?: string;
 }
 
 export interface ReviewComment {

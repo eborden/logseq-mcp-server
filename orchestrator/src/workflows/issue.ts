@@ -32,6 +32,7 @@ import {
   ApplicationFailure,
   CancellationScope,
   isCancellation,
+  log,
   proxyActivities,
   setHandler,
   sleep,
@@ -61,12 +62,11 @@ import {
   issueBranch,
   issueWorkflowId,
   parseIssueWorkflowInput,
-  pullRequestBody,
   pullRequestTitle,
   stopComment,
   stopCommentKey,
 } from '../issue-types.ts';
-import type { IssueRunResult, IssueStep, SkipReason, StopReason } from '../issue-types.ts';
+import type { IssueRunResult, IssueStep, PrBodyReport, SkipReason, StopReason } from '../issue-types.ts';
 import type { BoardItemRef, SessionExitStatus, SettableStatus } from '../types.ts';
 
 const github = proxyActivities<Pick<GithubActivities, 'checkIssue' | 'claimIssue' | 'openPr' | 'commentIssue' | 'getPrState'>>({
@@ -178,8 +178,12 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   // `pushBranch` publishes it. Remote: the session pushed its own branch, so the guard runs on the fetched tip before the PR
   // opens, a refusal deletes the branch, and there is no push.
   let checked: { readonly headSha: string };
+  // The remote attempt whose posted PR body is read (#707). A local session posts none.
+  let bodyAttempt: number | undefined;
   if (input.executor === 'remote') {
-    checked = await remoteImplementer({ input, branch, step, stop, reasonOf: failureReason, isCancellation, countsOf: guardCounts });
+    const remoteResult = await remoteImplementer({ input, branch, step, stop, reasonOf: failureReason, isCancellation, countsOf: guardCounts });
+    checked = remoteResult;
+    bodyAttempt = remoteResult.attempt;
   } else {
     const session = await onExecutor(input.executor, 'session', stop, () => step('session', () => implementer.runImplementerSession(input)));
     if (session.exitStatus !== 'success') {
@@ -191,9 +195,17 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
     await step('push', () => branches.pushBranch({ repoDir: input.repoDir, branch, headSha: checked.headSha, base: input.base }));
   }
 
+  // The body (#707) is chosen inside the activity, so its text never enters this history: the session's posted body when it
+  // passes the template check, else one generated from the template. Neither blocks the PR. The source is logged and carried
+  // in the result, never implied.
   const opened = await step('open_pr', () =>
-    github.openPr({ head: branch, base: input.base, title: pullRequestTitle(issue), body: pullRequestBody(issue, branch) }),
+    github.openPr({ head: branch, base: input.base, title: pullRequestTitle(issue), issue, ...(bodyAttempt === undefined ? {} : { attempt: bodyAttempt }) }),
   );
+  const prBody: PrBodyReport =
+    opened.bodySource === undefined
+      ? { source: 'unchanged', unmet: 0 }
+      : { source: opened.bodySource, unmet: opened.bodyUnmet ?? 0, ...(opened.bodyReason === undefined ? {} : { reason: opened.bodyReason }) };
+  log.info('pr body', { issue, pr: opened.number, ...prBody });
   pr = opened.number;
 
   // Remote only (#673): the session cannot be stopped, so the branch can move between the guard's last read and the PR's
@@ -239,7 +251,7 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   }
   // The third part (#631): wait for the maintainer's decision, then the merge. `awaitDecision: false` ends the run here.
   if (input.awaitDecision === false) {
-    return looped;
+    return looped.outcome === 'gate_clear' || looped.outcome === 'waiting_for_threads' ? { ...looped, prBody } : looped;
   }
   return await decisionStage({ input, pr: opened.number, inbox, step, stop, ...('fixRounds' in looped ? { fixRounds: looped.fixRounds } : {}) });
 }

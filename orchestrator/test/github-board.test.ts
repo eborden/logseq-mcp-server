@@ -439,7 +439,7 @@ test('a PR opened by the workflow ends up In review on the board with no manual 
     state.issues['123'] = rawIssue(123);
     state.board = [{ number: 123, status: 'Ready' }];
   });
-  const input = { head: 'claude/123-importer', base: 'feature/atlas', title: 'Add the project atlas importer', body: 'Closes #123' };
+  const input = { head: 'claude/123-importer', base: 'feature/atlas', title: 'Add the project atlas importer', issue: 123 };
 
   // What #629 does after the session: claim, open the PR, add it, move it, read the board back.
   assert.equal((await github.claimIssue(123)).proceed, true);

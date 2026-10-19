@@ -51,9 +51,10 @@ import {
   parseReviewThreads,
 } from '../github-parse.ts';
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
-import { PR_TEMPLATE_PATH, parseTemplateFile } from '../pr-template.ts';
-import type { PrTemplateRead } from '../pr-template.ts';
-import { findKeyedComment, findNeedsInputAnswer, findPrBody, hasFindingsComment } from '../findings-comment.ts';
+import { PR_TEMPLATE_PATH, choosePrBody, parsePrTemplate, parseTemplateFile } from '../pr-template.ts';
+import type { ChosenPrBody, PrTemplateRead } from '../pr-template.ts';
+import { FindingsTooLargeError } from '../review-types.ts';
+import { findKeyedComment, findNeedsInputAnswer, findPrBody, hasFindingsComment, prBodyMarker } from '../findings-comment.ts';
 import type { FindingsCandidate } from '../findings-comment.ts';
 import type { RemoteGithub } from './remote-session.ts';
 import {
@@ -261,8 +262,19 @@ function parseOpenPrInput(raw: unknown): OpenPrInput {
     head: inputText(input, 'head', HEAD, 200),
     base: inputText(input, 'base', BASE, 100),
     title: inputText(input, 'title', /^[^\r\n]+$/, 256),
-    body: inputText(input, 'body', undefined, MAX_TEXT_CHARS),
+    issue: parseIssueNumber(input.get('issue'), 'issue'),
+    ...parseAttempt(input.get('attempt')),
   };
+}
+
+function parseAttempt(raw: unknown): { attempt?: number } {
+  if (raw === undefined) {
+    return {};
+  }
+  if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 1 || raw > 99) {
+    return refuse('attempt must be a positive integer');
+  }
+  return { attempt: raw };
 }
 
 function parseCommentIssueInput(raw: unknown): CommentIssueInput {
@@ -654,16 +666,19 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     };
     const before = await existing();
     if (before !== undefined) {
+      // Already open: nothing is read and no body is rewritten (re-running is a no-op, foundations 4.5).
       return before;
     }
+    const chosen = await chooseBody(input);
+    const report = { bodySource: chosen.source, bodyUnmet: chosen.unmet.length, ...(chosen.reason === undefined ? {} : { bodyReason: chosen.reason }) };
     try {
       const created = parseCreatedPr(
         await gh.api(`${repoRoute}/pulls`, {
           method: 'POST',
-          body: { title: input.title, head: input.head, base: input.base, body: input.body },
+          body: { title: input.title, head: input.head, base: input.base, body: chosen.body },
         }),
       );
-      return { ...created, created: true };
+      return { ...created, created: true, ...report };
     } catch (error) {
       // "A pull request already exists" (422) means an earlier attempt got through; return that one.
       if (error instanceof GhError && error.httpStatus === 422) {
@@ -819,6 +834,31 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
       }
       throw error;
     }
+  }
+
+  /**
+   * The body a new PR opens with (#707): the session's posted body for this attempt when it passes the template check, else
+   * the fallback generated from the template. Both reads are bounded; the template is read at `base` now, so a template
+   * change takes effect with no code change. A comment over its bound or an unreadable template is a fallback, never a
+   * failure: a PR is not blocked by a bad body. Without an `attempt` (a local session posts none) there is nothing to read.
+   * The body is read and used inside this activity, so the text never enters the workflow's history.
+   */
+  async function chooseBody(input: OpenPrInput): Promise<ChosenPrBody> {
+    const read = await readPrTemplate(input.base);
+    const template = parsePrTemplate(read.kind === 'found' ? read.text : '');
+    let body: string | undefined;
+    let tooLarge = false;
+    if (input.attempt !== undefined) {
+      try {
+        body = findPrBody(await listFindingsCandidates(input.issue), prBodyMarker(input.issue, input.attempt));
+      } catch (error) {
+        if (!(error instanceof FindingsTooLargeError)) {
+          throw error;
+        }
+        tooLarge = true;
+      }
+    }
+    return choosePrBody(template, body, input.issue, tooLarge);
   }
 
   /**
