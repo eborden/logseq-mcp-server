@@ -7,6 +7,7 @@ import { BriefTooLargeError, briefCommands, buildBrief, buildRemoteImplementerBr
 import { DEFAULT_ALLOWED_TOOLS, DEFAULT_DISALLOWED_TOOLS } from '../src/config.ts';
 import { commandAllowed } from './tool-rules.ts';
 import type { BriefInput } from '../src/brief.ts';
+import { needsInputMarker } from '../src/findings-comment.ts';
 import { MAX_PROMPT_CHARS } from '../src/types.ts';
 import type { IssueView } from '../src/types.ts';
 
@@ -202,4 +203,16 @@ test('the remote brief keeps the issue text as JSON data and is bounded', () => 
   assert.equal(brief.split(ISSUE_DATA_CLOSE).length, 2, 'one closing tag');
   assert.equal((dataOf(brief) as { body: string }).body, hostile);
   assert.throws(() => buildRemoteImplementerBrief(input({ body: 'x'.repeat(MAX_PROMPT_CHARS) })), BriefTooLargeError);
+});
+
+test('the remote brief asks for a needs-input comment keyed on the issue and the attempt, and the local brief does not (#697)', () => {
+  const first = buildRemoteImplementerBrief(input());
+  assert.ok(first.includes(`\`${needsInputMarker(123, 1)}\``), 'attempt 1 is the default');
+  assert.match(first, /first line is exactly this marker and nothing more/);
+  assert.match(first, /no backticks, dollar signs or quotation marks/);
+  const third = buildRemoteImplementerBrief({ ...input(), attempt: 3 });
+  assert.ok(third.includes(`\`${needsInputMarker(123, 3)}\``));
+  assert.ok(!third.includes(needsInputMarker(123, 1)));
+  assert.ok(!buildBrief(input()).includes('orchestrator-needs-input'), 'the local session has no wait to end');
+  assert.ok(third.length < MAX_PROMPT_CHARS);
 });
