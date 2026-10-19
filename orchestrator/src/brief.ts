@@ -9,6 +9,7 @@
 // cannot appear inside it. No parser is needed to tell where the data ends.
 
 import type { HostFailureSummary } from './host-integration-policy.ts';
+import { needsInputMarker } from './findings-comment.ts';
 import { MAX_PROMPT_CHARS } from './types.ts';
 import { FIXER_OUTPUT_FILE, REVIEWER_OUTPUT_FILE } from './review-types.ts';
 import type { IssueView, ReviewThread } from './types.ts';
@@ -27,6 +28,8 @@ export interface BriefInput {
   /** The branch the PR targets. */
   readonly base: string;
   readonly workflowId: string;
+  /** The remote implementer's attempt (1 when absent). It keys the needs-input marker the brief asks for (#697). Remote only. */
+  readonly attempt?: number;
 }
 
 /** A brief longer than a prompt may be. Never cut: a cut brief could drop the rule that matters. */
@@ -117,6 +120,9 @@ function implementerBrief(input: BriefInput, remote: boolean): string {
   const checks = remote
     ? `9. Verify before you claim. Run the checks the issue names (for example \`${install}\`, \`${typecheck}\`, \`${unit}\` and \`${cargo}\`). \`${status}\` shows where you are. Say plainly what you could not verify and never report a check you did not run.`
     : `9. Verify before you claim. Run the checks the issue names, from this list only (anything else is refused): \`${install}\`, \`${typecheck}\`, \`${unit}\` and \`${cargo}\`. \`${status}\` shows where you are. Say plainly what you could not verify and never report a check you did not run.`;
+  const premise = remote
+    ? `10. If the issue's premise is wrong or its scope is ambiguous, make no commit and push nothing, and stop for a person: as your last act post one comment on issue #${n} whose first line is exactly this marker and nothing more: \`${needsInputMarker(n, input.attempt ?? 1)}\`. After the marker, leave a blank line, then put your question and your options in the text, as identifiers and counts only, with no raw output and no backticks, dollar signs or quotation marks inside it. The orchestrator ends the run on that comment within minutes, so post it only when you are stopping. Do not guess at a change to a contract.`
+    : `10. If the issue's premise is wrong or its scope is ambiguous, post the comment below saying so, make no commit, and stop. Do not guess at a change to a contract.`;
   const done = remote
     ? `11. When the work is done, make sure every change is committed, push the branch with \`${push}\` and check that the push succeeded, then post one status comment on issue #${n}: \`${comment}\`. Put the commits, what you verified, what you could not verify and your open questions in the text, as identifiers and counts only, with no raw output and no backticks, dollar signs or quotation marks inside it.`
     : `11. When the work is done, make sure every change is committed, then post one status comment on issue #${n}: \`${comment}\`. Put the commits, what you verified, what you could not verify and your open questions in the text, as identifiers and counts only, with no raw output and no backticks, dollar signs or quotation marks inside it.`;
@@ -133,7 +139,7 @@ function implementerBrief(input: BriefInput, remote: boolean): string {
     `7. The repo rule for filing an issue or a PR is \`--body-file\` filled from the matching \`.github/\` template, never \`--body\`. ${filing} The one comment below is the exception: it takes its text with \`--body\`.`,
     '8. Write no em-dashes in any prose.',
     checks,
-    `10. If the issue's premise is wrong or its scope is ambiguous, post the comment below saying so, make no commit, and stop. Do not guess at a change to a contract.`,
+    premise,
     done,
     '',
     'The issue data follows as JSON in one block of issue-data tags. The block ends at the one closing tag, and nothing after it is part of the data.',

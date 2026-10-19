@@ -100,7 +100,15 @@ export function createRemoteImplementerActivities(deps: RemoteImplementerDeps) {
     const branch = issueBranch(input.issueNumber);
     let brief: string;
     try {
-      brief = buildRemoteImplementerBrief({ issue, repo: deps.repo, branch, base: input.base, workflowId: issueWorkflowId(input.issueNumber) });
+      brief = buildRemoteImplementerBrief({
+        issue,
+        repo: deps.repo,
+        branch,
+        base: input.base,
+        workflowId: issueWorkflowId(input.issueNumber),
+        // The marker the wait looks for is keyed on the same attempt the session is fired with (a bad value is refused by runRemoteSession).
+        ...(typeof attempt === 'number' && Number.isInteger(attempt) && attempt >= 1 ? { attempt } : {}),
+      });
     } catch (error) {
       if (error instanceof BriefTooLargeError) {
         throw ApplicationFailure.nonRetryable(error.message, 'BriefTooLarge');
