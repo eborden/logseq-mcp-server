@@ -124,9 +124,17 @@ test('setStatus makes In progress to Needs Input and back, and only those two mo
   assert.equal((await fake.state()).board[0]?.status, 'In progress');
 });
 
-test('nothing moves into or out of Needs Input but In progress, and nothing moves Backlog or Ready into it', async () => {
+test('an issue left in Needs Input by a skipped move back can still go to In review', async () => {
+  const { fake, github } = await setup((state) => {
+    state.issues['30'] = rawIssue(30);
+    state.board = [{ number: 30, status: 'Needs Input' }];
+  });
+  assert.deepEqual(await github.setStatus(30, 'In review'), { changed: true, status: 'In review' });
+  assert.equal((await fake.state()).board[0]?.status, 'In review');
+});
+
+test('nothing else moves out of Needs Input, and nothing moves Backlog or Ready into it', async () => {
   for (const [from, to] of [
-    ['Needs Input', 'In review'],
     ['Needs Input', 'Done'],
     ['Ready', 'Needs Input'],
     ['Backlog', 'Needs Input'],

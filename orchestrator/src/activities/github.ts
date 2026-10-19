@@ -111,7 +111,8 @@ const SETTABLE: readonly SettableStatus[] = ['In progress', 'Needs Input', 'In r
 const ISSUE_MOVES: ReadonlyMap<string, readonly SettableStatus[]> = new Map<string, readonly SettableStatus[]>([
   // A run that waits for a person's answer parks the item in Needs Input and moves it back when the answer arrives (#698).
   ['In progress', ['In review', 'Needs Input']],
-  ['Needs Input', ['In progress']],
+  // In review as well, so a skipped move back (a board fault never fails a run) cannot strand the run at board_issue.
+  ['Needs Input', ['In progress', 'In review']],
   ['In review', ['Done']],
 ]);
 /**
@@ -597,7 +598,7 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
   /**
    * Moves an issue or a PR one step, then reads the board again and fails unless it shows the status asked for.
    *
-   * Which moves: `ALLOWED_MOVES` by kind. An issue makes In progress to In review, In progress to Needs Input and back (#698, a run waiting for an answer) and In review to Done. A PR makes
+   * Which moves: `ALLOWED_MOVES` by kind. An issue makes In progress to In review, In progress to Needs Input and back (#698, a run waiting for an answer), Needs Input to In review (a skipped move back must not strand the run) and In review to Done. A PR makes
    * those two and, as its own first move, Backlog to In review (a PR is added in Backlog and never goes through
    * Ready or In progress). Ready is never a target (a move into Ready is the maintainer's), Backlog is never one
    * either, nothing moves out of Done or back, and a skipped step (Backlog to Done) is refused. A repeat finds the
