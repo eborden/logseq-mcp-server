@@ -203,7 +203,9 @@ fn first_nested(chars: &[char]) -> Option<usize> {
     })
 }
 
-/// Check 2.
+/// Check 2. Bracket balance is of the raw text, code included, by design: a lone `[[` in a code span
+/// is no ref to LogSeq, but it is still a likely typo, and the totals count it too. Checks 1, 3 and 4
+/// read refs, so they skip code.
 pub fn check_brackets(after: &str) -> BracketCheck {
     let opens = after.matches("[[").count();
     let closes = after.matches("]]").count();
@@ -249,6 +251,11 @@ mod tests {
         assert_eq!(counts("```\na[[i]]\n[[never closed]]"), []);
         // a run that closes nothing is plain text
         assert_eq!(counts("a ` [[b]]"), [("b", 1)]);
+        // a span closes only on a run of its own length: a longer run closes nothing, so the single
+        // backtick is plain text and the double-backtick span after it holds [[x]]
+        assert_eq!(counts("` ``[[x]]`` [[y]]"), [("y", 1)]);
+        // a shorter run inside a longer span does not close it
+        assert_eq!(counts("``a ` [[b]] ` c`` [[d]]"), [("d", 1)]);
         assert_eq!(strip_brackets("use `m[[0]]` and [[Alice]]"), "use `m[[0]]` and Alice");
         assert!(check_prose("use `m[[0]]` x", "use `m[[0]]` [[x]]").ok);
         assert!(check_refs_preserved("`[[a]]` [[b]]", "`a` [[b]]").ok);
@@ -393,6 +400,9 @@ mod tests {
         assert_eq!(check_brackets("[[a\n[[b]]").nested, None);
         // non-overlapping, left to right
         assert_eq!(check_brackets("[[[").opens, 1);
+        // raw by design: brackets in code still count, though check_links reads no ref there
+        let in_code = check_brackets("use `a[[i]` here and [[b]]");
+        assert_eq!((in_code.ok, in_code.opens, in_code.closes), (false, 2, 1));
     }
 
     #[test]
