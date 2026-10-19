@@ -29,6 +29,15 @@ async fn a_text_with_no_terms_makes_no_call() {
 }
 
 #[tokio::test]
+async fn totals_count_closed_refs_and_not_openers() {
+    // #658: two unclosed openers are no refs
+    let logseq = mock_logseq(vec![]).await;
+    let result = check_links(&client(&logseq), "[[a [[b", "[[a [[b").await.unwrap();
+    assert_eq!(result["totals"], json!({"refsBefore": 0, "refsAfter": 0, "terms": 0}));
+    assert_eq!(result["brackets"]["opens"], 2);
+}
+
+#[tokio::test]
 async fn however_many_terms_there_are_one_query_binds_them_as_one_sorted_collection() {
     let logseq = mock_logseq(vec![json!([
         [page(1, "alice", "Alice", true), "name", "alice"],
