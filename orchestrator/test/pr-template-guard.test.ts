@@ -27,7 +27,7 @@ async function sourceFiles(dir: string): Promise<string[]> {
 
 /**
  * The files of `files` that write one of `headings` the way code would copy it: as a whole string literal ('Name',
- * "Name" or `Name`) or as a markdown heading line (`## Name`). A heading that only occurs inside a longer sentence
+ * "Name" or `Name`) or as a markdown heading (`## Name`, anywhere, even inside a one-line string). A heading that only occurs inside a longer sentence
  * ("what changed" in a comment) is ordinary prose, not a copy of the structure.
  */
 export function leaks(files: readonly { path: string; text: string }[], headings: readonly string[]): string[] {
@@ -35,7 +35,7 @@ export function leaks(files: readonly { path: string; text: string }[], headings
   for (const { path, text } of files) {
     for (const heading of headings) {
       const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      if (new RegExp(`(['"\`])${escaped}\\1|^\\s*(?:[/*]+\\s*)?#{2}\\s+${escaped}\\s*$`, 'mi').test(text)) {
+      if (new RegExp(`(['"\`])${escaped}\\1|(?<![#\\w])#{2}\\s+${escaped}(?![A-Za-z0-9_])`, 'mi').test(text)) {
         hits.push(`${path}: ${heading}`);
       }
     }
@@ -43,18 +43,40 @@ export function leaks(files: readonly { path: string; text: string }[], headings
   return hits;
 }
 
-test('no level-2 heading of the real PR template appears in orchestrator/src', async () => {
+/**
+ * Files that still hold a copy, each to be emptied by the task that opens the PR from the template. `issue-types.ts`
+ * writes the PR body skeleton by hand. The list may only shrink: a file listed here with no copy left fails the
+ * second check below, so the entry is removed with the copy.
+ */
+const KNOWN_COPIES: readonly string[] = ['issue-types.ts'];
+
+async function scan() {
   const template = parsePrTemplate(await readFile(TEMPLATE, 'utf8'));
   assert.equal(template.kind, 'ok', 'the real template has level-2 headings');
   const headings = template.kind === 'ok' ? template.headings : [];
   const files = await Promise.all((await sourceFiles(SRC)).map(async (path) => ({ path: path.slice(SRC.length + 1), text: await readFile(path, 'utf8') })));
   assert.ok(files.length > 10, 'the scan sees the source files');
-  assert.deepEqual(leaks(files, headings), []);
+  return { files, headings };
+}
+
+test('no level-2 heading of the real PR template appears in orchestrator/src, outside the known copies', async () => {
+  const { files, headings } = await scan();
+  assert.deepEqual(leaks(files.filter((file) => !KNOWN_COPIES.includes(file.path)), headings), []);
+});
+
+test('every known copy still holds one, so the list shrinks with the copies', async () => {
+  const { files, headings } = await scan();
+  for (const known of KNOWN_COPIES) {
+    assert.ok(leaks(files.filter((file) => file.path === known), headings).length > 0, `${known} no longer holds a heading: remove it from KNOWN_COPIES`);
+  }
 });
 
 test('the scan catches a heading added to a source file', () => {
   assert.deepEqual(leaks([{ path: 'a.ts', text: "const required = ['Alpha part', 'Beta'];" }], ['Alpha part', 'Gamma']), ['a.ts: Alpha part']);
   assert.deepEqual(leaks([{ path: 'b.ts', text: '// ## Gamma\nconst x = `Gamma`;' }], ['Gamma']), ['b.ts: Gamma']);
+  assert.deepEqual(leaks([{ path: 'd.ts', text: "const body = '## Gamma\\n';" }], ['Gamma']), ['d.ts: Gamma']);
+  assert.deepEqual(leaks([{ path: 'e.ts', text: "const body = '## Gamma (undo)';" }], ['Gamma']), ['e.ts: Gamma']);
+  assert.deepEqual(leaks([{ path: 'f.ts', text: "const x = '## Gammas';" }], ['Gamma']), []);
   assert.deepEqual(leaks([{ path: 'c.ts', text: '// the alpha part, as designed' }], ['Alpha part', 'Design']), []);
   assert.deepEqual(leaks([{ path: 'a.ts', text: 'nothing here' }], ['Alpha part']), []);
 });

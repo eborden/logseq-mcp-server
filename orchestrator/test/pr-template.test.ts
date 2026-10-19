@@ -79,6 +79,25 @@ test('a diagram arrow inside a comment does not end it, and a heading line with 
   assert.deepEqual(result.present, ['A', 'B']);
 });
 
+test('a comment that opens and closes on one line ends at its first arrow, whatever follows', () => {
+  assert.deepEqual(headingsOf('## A\n<!--hint--> note\n## B\nt'), ['A', 'B']);
+  assert.deepEqual(headingsOf('## A\n<!-- hint-->text\n## B\nt'), ['A', 'B']);
+  assert.deepEqual(headingsOf('## A\n<!--hint--> ## B\n## C'), ['A', 'B', 'C']);
+  assert.deepEqual(headingsOf('## A\n<!--hint-->\n## B\n<!-- x --><!-- y -->\n## C'), ['A', 'B', 'C']);
+  const result = checkPrBody(parsePrTemplate('## A\n## B\n'), '## A\n<!--hint--> note\n## B\nt');
+  assert.deepEqual(result.present, ['A', 'B']);
+  assert.deepEqual(result.guidanceSections, ['A']);
+});
+
+test('ok is false for an empty section alone, and for leftover guidance alone', () => {
+  const template = parsePrTemplate('## A\n## B\n');
+  const emptyOnly = checkPrBody(template, '## A\ntext\n## B\n');
+  assert.deepEqual([emptyOnly.missing, emptyOnly.empty, emptyOnly.guidanceLeft, emptyOnly.ok], [[], ['B'], false, false]);
+  const guidanceOnly = checkPrBody(template, '## A\ntext\n<!-- left -->\n## B\ntext');
+  assert.deepEqual([guidanceOnly.missing, guidanceOnly.empty, guidanceOnly.guidanceLeft, guidanceOnly.ok], [[], [], true, false]);
+  assert.equal(checkPrBody(template, '## A\ntext\n## B\ntext').ok, true);
+});
+
 test('a comment that spans lines or sits before the first heading is leftover guidance; one inside a fence is not', () => {
   const template = parsePrTemplate('## A\n');
   assert.equal(checkPrBody(template, '<!-- note -->\n## A\ntext').guidanceLeft, true);
