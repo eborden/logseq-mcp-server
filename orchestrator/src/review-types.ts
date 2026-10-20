@@ -303,7 +303,7 @@ export const MAX_ADVISORY_CHARS = 20_000;
 const REASON_TEXT: Readonly<Record<AdvisoryReason, string>> = {
   file_not_in_diff: 'the file is not changed by this commit',
   thread_cap: `the review is at its cap of ${MAX_FILE_THREADS} file-level threads`,
-  thread_failed: 'GitHub did not accept a thread for it',
+  thread_failed: 'GitHub refused a thread for it',
 };
 
 /**
