@@ -25,6 +25,7 @@ import {
   InvalidQueueInputError,
   MAX_RUNNING_READ,
   QUEUE_TOO_MANY_RUNS,
+  isStopStep,
   parseRunStatusesInput,
   parseStartQueuedRunInput,
 } from '../queue-types.ts';
@@ -120,7 +121,12 @@ export function createQueueActivities(deps: QueueActivityDeps) {
       const cause = error.cause;
       if (cause instanceof ApplicationFailure && cause.type === ISSUE_STOPPED_FAILURE) {
         const details = stopDetails(cause.details);
-        return { issue, status: isParkedStop(details) ? 'parked' : 'failed', ...(details.reason === undefined ? {} : { stopReason: details.reason }) };
+        return {
+          issue,
+          status: isParkedStop(details) ? 'parked' : 'failed',
+          ...(details.reason === undefined ? {} : { stopReason: details.reason }),
+          ...(details.step === undefined || !isStopStep(details.step) ? {} : { step: details.step }),
+        };
       }
     }
     return { issue, status: 'failed' };
