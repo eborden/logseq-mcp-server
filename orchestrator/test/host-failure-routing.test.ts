@@ -289,7 +289,8 @@ function fakeActivities() {
     postRemoteSessionReview: async (input: { headSha: string }) => {
       world.reviewed.add(input.headSha);
       world.reviews.push(input.headSha);
-      return { reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 };
+      // A different id for each review, so a statement that kept an earlier review's id would show it (#718).
+      return { reviewId: 5000 + world.reviews.length, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 };
     },
     minimizeFindingsComment: async () => ({ minimized: true }),
     listOpenThreads: async () => ({ threads: [] }),
@@ -335,7 +336,7 @@ after(async () => {
 
 let runNumber = 0;
 
-async function start(extra: Partial<IssueWorkflowInput> = {}, fixRounds = 0, setup: (w: World) => void = () => undefined, bodySource?: 'session' | 'fallback' | 'unknown') {
+async function start(extra: Partial<IssueWorkflowInput> = {}, fixRounds = 0, setup: (w: World) => void = () => undefined, bodySource?: 'session' | 'fallback' | 'unknown', lastReview?: HostFailureDecisionArgs['lastReview']) {
   world = freshWorld();
   setup(world);
   runNumber += 1;
@@ -351,7 +352,7 @@ async function start(extra: Partial<IssueWorkflowInput> = {}, fixRounds = 0, set
     executor: 'remote',
     ...extra,
   };
-  const args: HostFailureDecisionArgs = { input, pr: PR, fixRounds, ...(bodySource === undefined ? {} : { bodySource }) };
+  const args: HostFailureDecisionArgs = { input, pr: PR, fixRounds, ...(bodySource === undefined ? {} : { bodySource }), ...(lastReview === undefined ? {} : { lastReview }) };
   return await client.workflow.start('hostFailureDecisionWorkflow', { taskQueue: QUEUE, workflowId: `host-failure-${runNumber}`, args: [args] });
 }
 
@@ -403,6 +404,29 @@ test('a fail on a fixture run starts exactly one fixer round with the summary, t
   assert.deepEqual(world.statusWrites, ['a:pending:no counts', 'a:failure:80 passed, 2 failed', 'b:pending:no counts', 'b:success:82 passed, 0 failed']);
   assert.deepEqual([...world.comments.keys()], [], 'no comment: the run is not stopped');
   assertNothingPublicHoldsTheSummary();
+  await handle.signal(maintainerDecisionSignal, { decision: 'approved', at: '2025-03-04', message: 'Ship it.' });
+  await handle.terminate('test done');
+});
+
+test('the gate-clear statement for the head a host failure fix round pushed links that round\'s review, not the first one (#718)', { timeout: 120_000 }, async () => {
+  const handle = await start(
+    {},
+    0,
+    (w) => {
+      w.hostRuns = [FAIL_ON_FIXTURE, PASS];
+      w.pushes = [H2];
+    },
+    undefined,
+    // The review loop's last review (id 5000) was on H1, the head the host check then failed on.
+    { advisory: 0, advisoryOmitted: 0, reviewId: 5000, headSha: H1 },
+  );
+  await until('the gate-clear statement for the fix head', () => world.comments.has(`gate-clear-${PR}-${H2}`));
+
+  assert.deepEqual(world.reviews, [H2], 'the fix round posted one review, on the new head (id 5001)');
+  const statement = world.comments.get(`gate-clear-${PR}-${H2}`) ?? '';
+  assert.ok(statement.includes('[last review](#pullrequestreview-5001)'), 'the statement links the fix round\'s review');
+  assert.equal(statement.includes('pullrequestreview-5000'), false, 'the first head\'s review is not linked from the fix head\'s statement');
+  assert.equal(world.comments.has(`gate-clear-${PR}-${H1}`), false, 'no statement for the head the host check failed on');
   await handle.signal(maintainerDecisionSignal, { decision: 'approved', at: '2025-03-04', message: 'Ship it.' });
   await handle.terminate('test done');
 });
