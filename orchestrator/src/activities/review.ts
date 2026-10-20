@@ -174,9 +174,25 @@ export function findingKey(input: ReviewStepInput, finding: Finding): string {
   return `finding-${input.pr}-r${input.round}-${input.headSha.slice(0, SHORT)}-${digest}`;
 }
 
-/** A cancelled activity must stop, not fall back to another way of placing a finding. Any other failure is the caller's to handle. */
-function rethrowCancellation(error: unknown): void {
-  if (error instanceof CancelledFailure) {
+/**
+ * Whether GitHub (or the boundary check in front of it) refused to take a thread: a non-retryable `GitHubClientError` (a 4xx
+ * other than 408 and 429, such as the 422 of a line the diff does not hold) or `InvalidInput`. Only that is the case for
+ * another way of placing a finding. Everything else (a 5xx, a timeout, a 429, a network error, an exhausted rate limit, a
+ * failed read, a cancelled activity) says nothing about the finding, so it is rethrown for the activity to retry or stop
+ * (BR-0003), and never turned into an advisory finding that holds no gate.
+ */
+function isRefusal(error: unknown): boolean {
+  return error instanceof ApplicationFailure && error.nonRetryable === true && (error.type === 'GitHubClientError' || error.type === 'InvalidInput');
+}
+
+/** Returns the thread's result, or `undefined` when GitHub refused it. Any other failure is thrown. */
+async function tryAddThread(add: () => Promise<AddReviewThreadResult>): Promise<AddReviewThreadResult | undefined> {
+  try {
+    return await add();
+  } catch (error) {
+    if (isRefusal(error)) {
+      return undefined;
+    }
     throw error;
   }
 }
@@ -428,10 +444,12 @@ export function createReviewActivities(deps: ReviewDeps) {
 
   /**
    * Opens a thread for each finding on an unchanged line of a changed file (#714). The thread is on the file, with the path
-   * and the original line in its first comment. When GitHub does not take that (the call fails or is refused), the finding is
-   * anchored on the nearest changed line of its file instead, and its text says so. A file with no changed line, or a second
-   * refusal, makes the finding advisory (`thread_failed`), listed in the review body: never dropped. Only the finding's
-   * path, already a file of the diff, and fixed words go in a thread. A cancelled activity stops here.
+   * and the original line in its first comment. When GitHub refuses that (a non-retryable client error such as a 422), the
+   * finding is anchored on the nearest changed line of its file instead, and its text says so. A second refusal
+   * (`thread_failed`) or a file with no changed line makes the finding advisory, listed in the review
+   * body: never dropped. A failure that is not a refusal (a 5xx, a timeout, a 429, a failed read) is thrown, so the
+   * activity retries: that is idempotent by key, and a finding is never made advisory by an outage. Only the finding's
+   * path, already a file of the diff, and fixed words go in a thread.
    */
   async function placeFileFindings(
     input: ReviewStepInput,
@@ -443,20 +461,11 @@ export function createReviewActivities(deps: ReviewDeps) {
     const failed: AdvisoryFinding[] = [];
     for (const finding of findings) {
       const base = { pr: input.pr, commitId: input.headSha, path: finding.path, key: findingKey(input, finding) };
-      let result: AddReviewThreadResult | undefined;
-      try {
-        result = await deps.addReviewThread({ ...base, body: fileThreadBody(finding) });
-      } catch (error) {
-        rethrowCancellation(error);
-      }
+      let result = await tryAddThread(() => deps.addReviewThread({ ...base, body: fileThreadBody(finding) }));
       if (result === undefined) {
         const line = nearestChangedLine(changed?.get(finding.path) ?? [], finding.line);
         if (line !== undefined) {
-          try {
-            result = await deps.addReviewThread({ ...base, line, body: nearestThreadBody(finding, line) });
-          } catch (error) {
-            rethrowCancellation(error);
-          }
+          result = await tryAddThread(() => deps.addReviewThread({ ...base, line, body: nearestThreadBody(finding, line) }));
         }
       }
       if (result === undefined) {

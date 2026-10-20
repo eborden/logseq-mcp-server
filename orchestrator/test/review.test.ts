@@ -609,7 +609,7 @@ test('the reviewer: a file with no changed line, or a refused fallback, makes th
   assert.deepEqual(await gone.run(gone.activities.postSessionReview), { reviewId: 5001, posted: true, comments: 0, fileLevel: 0, nearest: 0, advisory: 1, omitted: 0 });
   assert.equal((await threadPosts(gone)).length, 1, 'the file-level call only: there is no line to try');
   const goneReview = await postedReviewBody(gone);
-  assert.ok(goneReview.body.includes('`gone.txt:1` (GitHub did not accept a thread for it)') && goneReview.body.includes('NO-LINE finding'));
+  assert.ok(goneReview.body.includes('`gone.txt:1` (GitHub refused a thread for it)') && goneReview.body.includes('NO-LINE finding'));
 
   // Both calls refused.
   const refused = await scenario((state) => { state.refuseThreads = 'all'; });
@@ -619,6 +619,46 @@ test('the reviewer: a file with no changed line, or a refused fallback, makes th
   assert.equal((await threadPosts(refused)).length, 2);
   assert.ok((await postedReviewBody(refused)).body.includes('FILE-LEVEL finding'));
   assert.equal(((await new MockActivityEnvironment().run(refused.github.listReviewThreads, 77)) as ReviewThread[]).length, 0, 'no thread exists');
+});
+
+test('the reviewer: a retryable failure of the file-level thread (a 502, a 429) fails the activity, and the retry opens exactly one thread, with no advisory finding', async () => {
+  const transient = [
+    ['502', httpAnswer(502, { message: 'Bad Gateway' }), 'gh: Bad Gateway (HTTP 502)\n'],
+    ['429', httpAnswer(429, { message: 'Too Many Requests' }), 'gh: Too Many Requests (HTTP 429)\n'],
+  ] as const;
+  for (const [status, stdout, stderr] of transient) {
+    const s = await scenario((state) => {
+      state.faults.push({ match: 'pulls/77/comments', times: 1, stdout, stderr, exit: 1 });
+    });
+    await s.script(1, findingsScript([FILE_THREAD]));
+    await s.run(s.activities.runReviewerSession);
+    await assert.rejects(s.run(s.activities.postSessionReview), Error, status);
+    assert.equal((await s.fake.callsMatching('/pulls/77/reviews')).filter((call) => call.argv.includes('POST')).length, 0, `${status}: no review is posted on a finding no thread holds`);
+    assert.equal(((await new MockActivityEnvironment().run(s.github.listReviewThreads, 77)) as ReviewThread[]).length, 0, `${status}: nothing became advisory, and no thread exists yet`);
+    assert.equal((await threadPosts(s)).length, 1, `${status}: one call, which failed, and no second way of placing the finding`);
+
+    assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: true, comments: 0, fileLevel: 1, nearest: 0, advisory: 0, omitted: 0 }, status);
+    assert.equal(((await new MockActivityEnvironment().run(s.github.listReviewThreads, 77)) as ReviewThread[]).length, 1, `${status}: exactly one thread after the retry`);
+    assert.ok((await postedReviewBody(s)).body.includes('1 as file-level thread, 0 as threads on the nearest changed line, 0 advisory (no thread).'), `${status}: the review lists nothing as advisory`);
+  }
+});
+
+test('the reviewer: a retryable failure of the nearest-line fallback fails the activity too, and the retry opens exactly one thread', async () => {
+  const s = await scenario(
+    (state) => {
+      state.refuseThreads = 'file';
+      // The file-level call is let through to be refused (422), then the fallback call fails once with a 502.
+      state.faults.push({ match: 'pulls/77/comments', skip: 1, times: 1, stdout: httpAnswer(502, { message: 'Bad Gateway' }), stderr: 'gh: Bad Gateway (HTTP 502)\n', exit: 1 });
+    },
+    { 'wide.txt': WIDE_COMMITTED },
+    { 'wide.txt': WIDE_BASE },
+  );
+  await s.script(1, findingsScript([{ path: 'wide.txt', line: 20, body: 'PLACED finding' }]));
+  await s.run(s.activities.runReviewerSession);
+  await assert.rejects(s.run(s.activities.postSessionReview));
+  assert.equal((await s.fake.callsMatching('/pulls/77/reviews')).filter((call) => call.argv.includes('POST')).length, 0, 'no review, so no advisory finding');
+  assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: true, comments: 0, fileLevel: 0, nearest: 1, advisory: 0, omitted: 0 });
+  assert.equal(((await new MockActivityEnvironment().run(s.github.listReviewThreads, 77)) as ReviewThread[]).length, 1);
 });
 
 test('the reviewer: more file-level findings than the cap open the cap and list the rest as advisory', async () => {
