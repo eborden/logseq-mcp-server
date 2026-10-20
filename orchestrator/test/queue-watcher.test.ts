@@ -48,11 +48,27 @@ import {
   TICK_DEADLINE_REASON,
   parseQueueWatcherInput,
   parseStartQueuedRunInput,
+  CLOSED_RUN_REASONS,
+  MAX_RUN_STATUS_LOOKUPS,
+  closedRunReason,
+  parseRunStatusesInput,
+  restartCommand,
 } from '../src/queue-types.ts';
-import type { QueueRunTemplate, RunningIssues, StartQueuedRunInput, StartQueuedRunResult, TickReport } from '../src/queue-types.ts';
+import type {
+  QueueRunTemplate,
+  RunStatusEntry,
+  RunStatuses,
+  RunStatusesInput,
+  RunningIssues,
+  StartQueuedRunInput,
+  StartQueuedRunResult,
+  TickReport,
+} from '../src/queue-types.ts';
+import { KNOWN_STOP_REASONS, closedStatusOfName, isParkedStop, stopDetails } from '../src/run-status.ts';
 import type { BlockedReadyIssue, ReadyIssues, TakenIssues, TrustedIssues } from '../src/types.ts';
 import { forbiddenCalls } from './invariants.ts';
 import { freePort } from './support.ts';
+import { STUB_FAILURE_MESSAGE, stubFinishSignal } from './workflows/queue-stub.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -93,6 +109,55 @@ test('a start request is parsed at the boundary: a positive issue number and a v
   for (const bad of [{ issue: 0, run: RUN }, { issue: 1.5, run: RUN }, { issue: '12', run: RUN }, { run: RUN }, { issue: 12 }, { issue: 12, run: 'x' }, null]) {
     assert.throws(() => parseStartQueuedRunInput(bad), InvalidQueueInputError, JSON.stringify(bad));
   }
+});
+
+test('a status request is parsed at the boundary: 1 to 20 positive issue numbers, sorted and without repeats', () => {
+  assert.equal(MAX_RUN_STATUS_LOOKUPS, 20);
+  assert.deepEqual(parseRunStatusesInput({ issues: [13, 11, 13, 12] }), { issues: [11, 12, 13] });
+  const twenty = Array.from({ length: 20 }, (_, index) => index + 1);
+  assert.equal(parseRunStatusesInput({ issues: twenty }).issues.length, 20);
+  for (const bad of [{ issues: [] }, { issues: [...twenty, 21] }, { issues: [0] }, { issues: [1.5] }, { issues: ['12'] }, { issues: 12 }, { issues: [1_000_000_000] }, {}, null, 'x', []]) {
+    assert.throws(() => parseRunStatusesInput(bad), InvalidQueueInputError, JSON.stringify(bad));
+  }
+});
+
+test('a closed run is a fixed word; a completed one is completed_but_open because its issue is still Ready and open', () => {
+  assert.deepEqual(CLOSED_RUN_REASONS, ['failed', 'parked', 'terminated', 'timed_out', 'cancelled', 'completed_but_open', 'id_already_ran']);
+  assert.equal(closedRunReason('completed'), 'completed_but_open');
+  for (const status of ['failed', 'parked', 'terminated', 'timed_out', 'cancelled'] as const) {
+    assert.equal(closedRunReason(status), status);
+  }
+  // Temporal's own names for the closed ends; a run that is open, or continued as new, is not a closed end.
+  assert.deepEqual(['COMPLETED', 'FAILED', 'TERMINATED', 'TIMED_OUT', 'CANCELLED', 'RUNNING', 'CONTINUED_AS_NEW', 'UNSPECIFIED', 'x'].map(closedStatusOfName), ['completed', 'failed', 'terminated', 'timed_out', 'cancelled', undefined, undefined, undefined, undefined]);
+});
+
+test('the command for a closed run is fixed text and the issue number: delete the run first, because a closed run holds its ID', () => {
+  const run = 'temporal workflow delete --workflow-id issue-12, then npm run run-issue -- --issue 12';
+  assert.equal(restartCommand(12, 'failed'), run);
+  assert.equal(restartCommand(12, 'terminated'), run);
+  assert.equal(restartCommand(12, 'timed_out'), run);
+  assert.equal(restartCommand(12, 'cancelled'), run);
+  assert.equal(restartCommand(12, 'parked'), `${run} --attempt <k>`, 'a parked run starts again with the next attempt number');
+  assert.equal(restartCommand(12, 'completed_but_open'), undefined, 'a finished run is not restarted: a person looks at why the issue is still open');
+  assert.equal(restartCommand(12, 'id_already_ran'), undefined);
+});
+
+test('a stop reason is reported only when it is one of the orchestrator words; a step only as a plain lowercase word', () => {
+  assert.deepEqual(stopDetails(['review_loop', 'MaxRoundsReached', 7]), { step: 'review_loop', reason: 'MaxRoundsReached' });
+  assert.deepEqual(stopDetails(['session', 'NeedsInput', undefined]), { step: 'session', reason: 'NeedsInput' });
+  assert.deepEqual(stopDetails(['review_loop', 'a sentence with spaces']), { step: 'review_loop' });
+  assert.deepEqual(stopDetails(['review_loop', 'SomeNewWord']), { step: 'review_loop' });
+  assert.deepEqual(stopDetails(['Not A Step', 'MaxRoundsReached']), { reason: 'MaxRoundsReached' });
+  assert.deepEqual(stopDetails([42, { text: CANARY }]), {});
+  for (const bad of [undefined, null, 'x', 7, {}]) {
+    assert.deepEqual(stopDetails(bad), {});
+  }
+  assert.equal(isParkedStop({ step: 'park', reason: 'NeedsInputTimeout' }), true);
+  assert.equal(isParkedStop({ step: 'park' }), true);
+  assert.equal(isParkedStop({ step: 'session', reason: 'NeedsInput' }), true);
+  assert.equal(isParkedStop({ step: 'session', reason: 'SessionError' }), false);
+  assert.equal(isParkedStop({ step: 'review_loop', reason: 'MaxRoundsReached' }), false);
+  assert.equal(isParkedStop({}), false);
 });
 
 test('every activity of a tick has a start-to-close timeout of about two minutes and a bounded retry', () => {
@@ -180,8 +245,11 @@ class World {
   delays = new Map<string, number>();
   /** Activity name (or `startQueuedRun:<n>`) to the failure it throws. */
   failures = new Map<string, ApplicationFailure>();
+  /** How a closed run ended, by issue number (#724). An issue with no entry gets no answer from the status read. */
+  runStatuses = new Map<number, RunStatusEntry>();
   readonly trustReads: number[][] = [];
   readonly startCalls: StartQueuedRunInput[] = [];
+  readonly statusReads: number[][] = [];
 }
 
 let world = new World();
@@ -239,6 +307,15 @@ function fakeQueueActivities() {
         throw new Error('simulated: the worker died after the start, before its result was recorded');
       }
       return { status: 'started' };
+    },
+    readRunStatuses: async (input: RunStatusesInput): Promise<RunStatuses> => {
+      const delay = world.delays.get('readRunStatuses');
+      if (delay !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      failIf('readRunStatuses');
+      world.statusReads.push([...input.issues]);
+      return { runs: input.issues.flatMap((issue) => world.runStatuses.get(issue) ?? []) };
     },
   };
 }
@@ -401,6 +478,168 @@ test('an issue whose ID already ran is skipped with that reason and does not use
     { number: 11, reason: 'id_already_ran' },
     { number: 14, reason: 'over_cap' },
   ]);
+});
+
+// ---- closed runs, by how they ended (#724) -----------------------------------------------------------------------------
+
+/** A Ready issue whose ID already ran, and how the run ended; two fresh issues beside it start as usual. */
+async function closedRunTick(issue: number, entry: RunStatusEntry | undefined): Promise<TickReport> {
+  world = new World();
+  world.ready = [issue, 90, 91];
+  world.everStarted.add(issue);
+  if (entry !== undefined) {
+    world.runStatuses.set(issue, entry);
+  }
+  return await fakeTick();
+}
+
+test('a Ready issue with a failed run is skipped as failed, with its stop reason and the command; the watcher starts nothing for it', async () => {
+  const report = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'MaxRoundsReached' });
+
+  assert.equal(report.outcome, 'ok');
+  assert.deepEqual(report.started, [90, 91], 'a closed run holds no slot');
+  assert.deepEqual(report.skipped, [
+    { number: 11, reason: 'failed', stopReason: 'MaxRoundsReached', restart: 'temporal workflow delete --workflow-id issue-11, then npm run run-issue -- --issue 11' },
+  ]);
+  assert.deepEqual(report.closedRuns, { counts: { failed: 1 }, notLookedUp: 0 });
+  assert.deepEqual(world.statusReads, [[11]]);
+  assert.deepEqual(world.startCalls.filter((call) => call.issue === 11).length, 1, 'the one start that found the closed run, and no restart');
+  assert.equal(world.running.includes(11), false);
+});
+
+test('a failed run that recorded no stop reason of the orchestrator is failed without one', async () => {
+  const report = await closedRunTick(11, { issue: 11, status: 'failed' });
+
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'failed', restart: 'temporal workflow delete --workflow-id issue-11, then npm run run-issue -- --issue 11' }]);
+});
+
+test('a Ready issue with a parked run is reported as parked, with the command that starts it at a next attempt', async () => {
+  const report = await closedRunTick(11, { issue: 11, status: 'parked', stopReason: 'NeedsInputTimeout' });
+
+  assert.deepEqual(report.started, [90, 91]);
+  assert.deepEqual(report.skipped, [
+    { number: 11, reason: 'parked', stopReason: 'NeedsInputTimeout', restart: 'temporal workflow delete --workflow-id issue-11, then npm run run-issue -- --issue 11 --attempt <k>' },
+  ]);
+  assert.deepEqual(report.closedRuns, { counts: { parked: 1 }, notLookedUp: 0 });
+});
+
+test('a Ready issue with a completed run is reported as completed_but_open: the merge did not close the issue', async () => {
+  const report = await closedRunTick(11, { issue: 11, status: 'completed' });
+
+  assert.deepEqual(report.started, [90, 91]);
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'completed_but_open' }], 'no command: a person looks at why the issue is still open');
+  assert.deepEqual(report.closedRuns, { counts: { completed_but_open: 1 }, notLookedUp: 0 });
+});
+
+test('a Ready issue with a terminated run is reported as terminated, with the command', async () => {
+  const report = await closedRunTick(11, { issue: 11, status: 'terminated' });
+
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'terminated', restart: 'temporal workflow delete --workflow-id issue-11, then npm run run-issue -- --issue 11' }]);
+  assert.deepEqual(report.closedRuns, { counts: { terminated: 1 }, notLookedUp: 0 });
+});
+
+test('a timed out run and a cancelled run are named for what they are, not as failed', async () => {
+  for (const status of ['timed_out', 'cancelled'] as const) {
+    const report = await closedRunTick(11, { issue: 11, status });
+
+    assert.deepEqual(report.skipped, [{ number: 11, reason: status, restart: 'temporal workflow delete --workflow-id issue-11, then npm run run-issue -- --issue 11' }], status);
+    assert.deepEqual(report.closedRuns, { counts: { [status]: 1 }, notLookedUp: 0 }, status);
+  }
+});
+
+test('a closed run the status read has no answer for keeps id_already_ran, and is counted under it', async () => {
+  const report = await closedRunTick(11, undefined);
+
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'id_already_ran' }]);
+  assert.deepEqual(report.closedRuns, { counts: { id_already_ran: 1 }, notLookedUp: 0 });
+});
+
+test('a stop reason that is not a plain word is dropped by the workflow, whatever an activity answers', async () => {
+  const report = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: `${CANARY} with spaces` });
+
+  assert.equal(report.skipped[0]?.reason, 'failed');
+  assert.equal('stopReason' in (report.skipped[0] ?? {}), false);
+  assert.equal(JSON.stringify(report).includes(CANARY), false);
+});
+
+test('more closed runs than the lookup cap: the lowest are read, the rest keep id_already_ran and the report says how many it did not read', async () => {
+  world = new World();
+  const closed = Array.from({ length: MAX_RUN_STATUS_LOOKUPS + 5 }, (_, index) => 100 + index);
+  world.ready = [...closed].reverse();
+  for (const issue of closed) {
+    world.everStarted.add(issue);
+    world.runStatuses.set(issue, { issue, status: 'failed', stopReason: 'MaxRoundsReached' });
+  }
+
+  const report = await fakeTick({ ...RUN, cap: 1 });
+
+  assert.deepEqual(world.statusReads, [closed.slice(0, MAX_RUN_STATUS_LOOKUPS)], 'one read, for the lowest 20');
+  assert.deepEqual(report.started, [], 'every start found a closed run');
+  assert.equal(report.skipped.length, 25);
+  assert.deepEqual(report.skipped.filter((skip) => skip.reason === 'failed').map((skip) => skip.number), closed.slice(0, MAX_RUN_STATUS_LOOKUPS), 'at most 20 issue numbers are named');
+  assert.deepEqual(report.skipped.filter((skip) => skip.reason === 'id_already_ran'), closed.slice(MAX_RUN_STATUS_LOOKUPS).map((number) => ({ number, reason: 'id_already_ran' })));
+  assert.deepEqual(report.closedRuns, { counts: { failed: 20, id_already_ran: 5 }, notLookedUp: 5 });
+  assert.equal(report.outcome, 'ok');
+});
+
+test('closed runs of several kinds are counted per reason, in a fixed order', async () => {
+  world = new World();
+  world.ready = [11, 12, 13, 14, 15];
+  for (const [issue, status] of [[11, 'completed'], [12, 'failed'], [13, 'failed'], [14, 'parked']] as const) {
+    world.everStarted.add(issue);
+    world.runStatuses.set(issue, { issue, status });
+  }
+  world.everStarted.add(15);
+
+  const report = await fakeTick({ ...RUN, cap: 5 });
+
+  assert.deepEqual(Object.entries(report.closedRuns?.counts ?? {}), [['failed', 2], ['parked', 1], ['completed_but_open', 1], ['id_already_ran', 1]]);
+  assert.deepEqual(report.skipped.map((skip) => [skip.number, skip.reason]), [[11, 'completed_but_open'], [12, 'failed'], [13, 'failed'], [14, 'parked'], [15, 'id_already_ran']]);
+});
+
+test('a status read that fails after its retries fails the tick at run_status: the starts stay reported, the skips stay id_already_ran, the message stays out', async () => {
+  world = new World();
+  world.ready = [11, 90];
+  world.everStarted.add(11);
+  world.failures.set('readRunStatuses', ApplicationFailure.nonRetryable(CANARY, 'TooLarge'));
+
+  const report = await fakeTick();
+
+  assert.equal(report.outcome, 'failed');
+  assert.deepEqual(report.failure, { step: 'run_status', reason: 'TooLarge' });
+  assert.deepEqual(report.started, [90]);
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'id_already_ran' }]);
+  assert.deepEqual(report.closedRuns, { counts: { id_already_ran: 1 }, notLookedUp: 1 });
+  assert.equal(JSON.stringify(report).includes(CANARY), false);
+});
+
+test('the status read is covered by the tick deadline: a tick still in it at the deadline reports run_status and what it started', async () => {
+  world = new World();
+  world.ready = [11, 90];
+  world.everStarted.add(11);
+  world.delays.set('readRunStatuses', 4_000);
+
+  const report = await fakeTick({ ...RUN, tickDeadlineMs: 1_500 });
+
+  assert.equal(report.outcome, 'failed');
+  assert.deepEqual(report.failure, { step: 'run_status', reason: TICK_DEADLINE_REASON });
+  assert.deepEqual(report.started, [90]);
+});
+
+test('a tick that read a closed run schedules the status read with the same bounded options as every other activity', async () => {
+  world = new World();
+  world.ready = [11];
+  world.everStarted.add(11);
+  await fakeTick();
+
+  const history = await client.workflow.getHandle(lastTickId()).fetchHistory();
+  const scheduled = (history.events ?? []).flatMap((event) => (event.activityTaskScheduledEventAttributes === undefined || event.activityTaskScheduledEventAttributes === null ? [] : [event.activityTaskScheduledEventAttributes]));
+  assert.deepEqual(scheduled.map((attributes) => attributes.activityType?.name), ['listReadyIssues', 'listTakenIssues', 'listRunningIssues', 'checkTrustedIssues', 'startQueuedRun', 'readRunStatuses']);
+  for (const attributes of scheduled) {
+    assert.equal(Number(attributes.startToCloseTimeout?.seconds), 120, String(attributes.activityType?.name));
+    assert.equal(attributes.retryPolicy?.maximumAttempts, 3, String(attributes.activityType?.name));
+  }
+  assert.equal(world.statusReads.length, 1, 'one read for the tick, not one per issue');
 });
 
 test('a second tick right after the first starts nothing new for the same issues', async () => {
@@ -602,7 +841,7 @@ async function release(workflowId: string): Promise<IssueWorkflowInput> {
   return (await handle.result()) as IssueWorkflowInput;
 }
 
-test('real runs: held runs count toward the cap, a second tick starts nothing new, and a closed run is skipped as id_already_ran', async () => {
+test('real runs: held runs count toward the cap, a second tick starts nothing new, and a closed run is skipped without a slot (#724: read as completed_but_open, not id_already_ran)', async () => {
   world = new World();
   world.ready = [501, 502, 503, 504, 505];
   const input = { ...RUN, cap: 3, hostIntegration: 'auto' };
@@ -640,13 +879,14 @@ test('real runs: held runs count toward the cap, a second tick starts nothing ne
     hostIntegration: 'auto',
   });
 
-  // 501 closed and its slot is free: 504 starts. 501 is still Ready here and its ID ran, so it is skipped without a slot.
+  // 501 closed and its slot is free: 504 starts. 501 is still Ready here and its ID ran, so it is skipped without a slot. Its run
+  // completed, so since #724 the report says `completed_but_open` (the merge did not close the issue) where #723 said `id_already_ran`.
   await until('the closed run to leave the list', async () => (await openIssueRuns()).length === 2);
   const third = await tick(REAL_QUEUE, input);
   assert.equal(third.inFlight, 2);
   assert.deepEqual(third.started, [504]);
   assert.deepEqual(third.skipped, [
-    { number: 501, reason: 'id_already_ran' },
+    { number: 501, reason: 'completed_but_open' },
     { number: 502, reason: 'taken' },
     { number: 503, reason: 'taken' },
     { number: 505, reason: 'over_cap' },
@@ -685,6 +925,94 @@ test('the in-flight list holds every open issue run, one with another ID too, an
   await until('the closed runs to leave the list', async () => (await openIssueRuns()).length === 1);
   assert.deepEqual(await activities.listRunningIssues(), { running: [702], otherRuns: 0 });
   await release(issueWorkflowId(702));
+});
+
+// ---- closed runs, read from real executions (#724) --------------------------------------------------------------------
+
+/** Starts the stand-in run of `issue` and ends it the way `how` names (queue-stub.ts), waiting until it has closed. */
+async function startAndFinish(activities: ReturnType<typeof createQueueActivities>, issue: number, how: string): Promise<void> {
+  assert.deepEqual(await activities.startQueuedRun({ issue, run: RUN }), { status: 'started' });
+  const handle = client.workflow.getHandle(issueWorkflowId(issue));
+  await handle.signal(stubFinishSignal, how);
+  await handle.result().catch(() => undefined);
+}
+
+test('the status read tells each way a real run closed, in fixed words, and never reads a failure message', async () => {
+  const activities = createQueueActivities({ client, taskQueue: REAL_QUEUE });
+  await startAndFinish(activities, 801, 'complete');
+  await startAndFinish(activities, 802, 'stop:review_loop:MaxRoundsReached');
+  await startAndFinish(activities, 803, 'stop:park:NeedsInputTimeout');
+  await startAndFinish(activities, 804, 'stop:session:NeedsInput');
+  await startAndFinish(activities, 805, 'crash');
+  await startAndFinish(activities, 806, 'stop:review_loop:a sentence with spaces');
+  await startAndFinish(activities, 807, 'stop:review_loop:SomeNewWord');
+  await startAndFinish(activities, 808, 'stop:guard:ProtectedPath');
+
+  assert.deepEqual(await activities.startQueuedRun({ issue: 809, run: RUN }), { status: 'started' });
+  await client.workflow.getHandle(issueWorkflowId(809)).terminate(STUB_FAILURE_MESSAGE);
+  assert.deepEqual(await activities.startQueuedRun({ issue: 810, run: RUN }), { status: 'started' });
+  const cancelled = client.workflow.getHandle(issueWorkflowId(810));
+  await cancelled.cancel();
+  await cancelled.result().catch(() => undefined);
+  // A run that hits its execution timeout: started by hand with a short one, as the activity's own start has 50 days.
+  await client.workflow.start(ISSUE_WORKFLOW_NAME, { taskQueue: REAL_QUEUE, workflowId: issueWorkflowId(811), args: [{ issueNumber: 811 }], workflowExecutionTimeout: '1 second' });
+  await until('the short run to time out', async () => (await client.workflow.getHandle(issueWorkflowId(811)).describe()).status.name === 'TIMED_OUT');
+  // Still open: not a closed run, so no answer. Never started: gone, so no answer.
+  assert.deepEqual(await activities.startQueuedRun({ issue: 812, run: RUN }), { status: 'started' });
+
+  const found = await activities.readRunStatuses({ issues: [812, 813, 811, 810, 809, 808, 807, 806, 805, 804, 803, 802, 801] });
+
+  assert.deepEqual(found, {
+    runs: [
+      { issue: 801, status: 'completed' },
+      { issue: 802, status: 'failed', stopReason: 'MaxRoundsReached' },
+      { issue: 803, status: 'parked', stopReason: 'NeedsInputTimeout' },
+      { issue: 804, status: 'parked', stopReason: 'NeedsInput' },
+      { issue: 805, status: 'failed' },
+      { issue: 806, status: 'failed' },
+      { issue: 807, status: 'failed' },
+      { issue: 808, status: 'failed', stopReason: 'ProtectedPath' },
+      { issue: 809, status: 'terminated' },
+      { issue: 810, status: 'cancelled' },
+      { issue: 811, status: 'timed_out' },
+    ],
+  });
+  assert.equal(JSON.stringify(found).includes(STUB_FAILURE_MESSAGE), false, 'no message of a failure reaches the answer');
+
+  await assert.rejects(activities.readRunStatuses({ issues: [] }), (error: unknown) => error instanceof ApplicationFailure && error.type === 'InvalidInput');
+  await assert.rejects(activities.readRunStatuses({ issues: Array.from({ length: MAX_RUN_STATUS_LOOKUPS + 1 }, (_, index) => index + 1) }), (error: unknown) => error instanceof ApplicationFailure && error.type === 'InvalidInput');
+
+  await release(issueWorkflowId(812));
+});
+
+test('real runs: a tick names a failed, a parked and a completed run by how they ended, restarts none of them, and keeps the history to numbers and fixed words', async () => {
+  const activities = createQueueActivities({ client, taskQueue: REAL_QUEUE });
+  await startAndFinish(activities, 901, 'complete');
+  await startAndFinish(activities, 902, 'stop:review_loop:MaxRoundsReached');
+  await startAndFinish(activities, 903, 'stop:park:NeedsInputTimeout');
+  world = new World();
+  world.ready = [901, 902, 903, 904];
+
+  const report = await tick(REAL_QUEUE, { ...RUN, cap: 3 });
+
+  assert.equal(report.outcome, 'ok');
+  assert.deepEqual(report.started, [904]);
+  assert.deepEqual(report.skipped, [
+    { number: 901, reason: 'completed_but_open' },
+    { number: 902, reason: 'failed', stopReason: 'MaxRoundsReached', restart: 'temporal workflow delete --workflow-id issue-902, then npm run run-issue -- --issue 902' },
+    { number: 903, reason: 'parked', stopReason: 'NeedsInputTimeout', restart: 'temporal workflow delete --workflow-id issue-903, then npm run run-issue -- --issue 903 --attempt <k>' },
+  ]);
+  assert.deepEqual(report.closedRuns, { counts: { failed: 1, parked: 1, completed_but_open: 1 }, notLookedUp: 0 });
+  for (const [issue, status] of [[901, 'COMPLETED'], [902, 'FAILED'], [903, 'FAILED']] as const) {
+    assert.equal((await client.workflow.getHandle(issueWorkflowId(issue)).describe()).status.name, status, `issue ${issue} was not started again`);
+  }
+  assert.deepEqual(await openIssueRuns(), [904]);
+
+  const history = await client.workflow.getHandle(lastTickId()).fetchHistory();
+  assert.equal(JSON.stringify(history).includes(STUB_FAILURE_MESSAGE), false, 'no failure message in the tick history');
+  assert.equal(JSON.stringify(report).includes(STUB_FAILURE_MESSAGE), false);
+
+  await release(issueWorkflowId(904));
 });
 
 // ---- the Schedule and the script ----------------------------------------------------------------------------------
@@ -796,4 +1124,31 @@ test('the watcher and its script never merge, approve, label, resolve a thread o
   assert.match(workflow, /Pick<GithubActivities, 'listReadyIssues' \| 'checkTrustedIssues' \| 'listTakenIssues'>/);
   // The watcher's activities are registered by the worker.
   assert.match(sources.find((file) => file.name === 'workflows/index.ts')?.text ?? '', /queueWatcher/);
+});
+
+test('every reason a workflow stops with by name is a word the status read may report, so a new one cannot be dropped from a report unseen (#724)', async () => {
+  const sources = (await sourceFiles(SRC_DIR)).filter((file) => file.name.startsWith('workflows/'));
+  const found = new Set<string>();
+  for (const file of sources) {
+    for (const match of file.text.matchAll(/\bstop\(\s*'[a-z_]+',\s*'([A-Z][A-Za-z0-9]+)'/g)) {
+      found.add(match[1] ?? '');
+    }
+  }
+  for (const match of (sources.find((file) => file.name === 'workflows/failure-reason.ts')?.text ?? '').matchAll(/return '([A-Z][A-Za-z0-9]+)'/g)) {
+    found.add(match[1] ?? '');
+  }
+  assert.ok(found.size >= 10, `expected the stop reasons of the workflows, found ${found.size}`);
+  assert.deepEqual([...found].filter((reason) => !KNOWN_STOP_REASONS.has(reason)), []);
+  for (const word of KNOWN_STOP_REASONS) {
+    assert.match(word, /^[A-Za-z][A-Za-z0-9]{0,63}$/, 'a reason is a plain type word');
+  }
+});
+
+test('the status read goes on the same activity proxy and options as the other tick activities, and reads no history, query, update or memo', async () => {
+  const sources = await sourceFiles(SRC_DIR);
+  const workflow = sources.find((file) => file.name === 'workflows/queue-watcher.ts')?.text ?? '';
+  assert.match(workflow, /queue\.readRunStatuses\(/);
+  assert.match(workflow, /const queue = proxyActivities<QueueActivities>\(QUEUE_ACTIVITY_OPTIONS\)/);
+  const activity = (sources.find((file) => file.name === 'activities/queue.ts')?.text ?? '').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(activity, /\.fetchHistory\(|\.query\(|\.executeUpdate\(|\.startUpdate\(|memo/i);
 });

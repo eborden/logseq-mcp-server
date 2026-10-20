@@ -9,21 +9,28 @@
 //   with the input `buildRunInput` makes from the same flags. The start is idempotent by workflow ID: a second start of
 //   an ID that exists is refused by the server and answered here as `already_running` (open) or `already_finished` (closed),
 //   so the watcher can count an open run against the cap and skip a closed one.
+// - `readRunStatuses` (#724): how each of a few closed runs ended, as a fixed word and, for a stopped run, its stop reason when
+//   that is one of the orchestrator's own words (src/run-status.ts). The watcher asks about the closed runs it skipped, at most
+//   MAX_RUN_STATUS_LOOKUPS a tick, so the read is bounded: it describes each run and reads the failure of a Failed one, nothing else.
 //
-// No title, memo, input or other text from a workflow is read or returned. Numbers and one flag come out.
+// No title, memo, input or other text from a workflow is read or returned. Numbers, fixed words and one flag come out. A Failed
+// run's message is never put in a result, and the details of its failure only through `stopDetails`, which keeps fixed words.
 
 import { ApplicationFailure } from '@temporalio/activity';
+import { WorkflowFailedError, WorkflowNotFoundError } from '@temporalio/client';
 import type { Client } from '@temporalio/client';
-import { InvalidIssueInputError, ISSUE_WORKFLOW_NAME } from '../issue-types.ts';
+import { InvalidIssueInputError, ISSUE_STOPPED_FAILURE, ISSUE_WORKFLOW_NAME, issueWorkflowId } from '../issue-types.ts';
 import { startIssueRun } from '../issue-client.ts';
 import {
   InvalidQueueInputError,
   MAX_RUNNING_READ,
   QUEUE_TOO_MANY_RUNS,
+  parseRunStatusesInput,
   parseStartQueuedRunInput,
 } from '../queue-types.ts';
-import type { RunningIssues, StartQueuedRunResult } from '../queue-types.ts';
+import type { RunStatusEntry, RunStatuses, RunningIssues, StartQueuedRunResult } from '../queue-types.ts';
 import { buildRunInput } from '../run-issue-input.ts';
+import { closedStatusOfName, isParkedStop, stopDetails } from '../run-status.ts';
 
 /** `issue-<n>` as `issueWorkflowId` builds it. */
 const ISSUE_WORKFLOW_ID = /^issue-([1-9]\d{0,8})$/;
@@ -78,7 +85,64 @@ export function createQueueActivities(deps: QueueActivityDeps) {
     return { status: outcome.status };
   }
 
-  return { listRunningIssues, startQueuedRun };
+  /** One closed run's status, or undefined when it is not closed (it started again), is gone (deleted since the start) or has no closed end. */
+  async function readRunStatus(issue: number): Promise<RunStatusEntry | undefined> {
+    const workflowId = issueWorkflowId(issue);
+    let description;
+    try {
+      description = await deps.client.workflow.getHandle(workflowId).describe();
+    } catch (error) {
+      if (error instanceof WorkflowNotFoundError) {
+        return undefined;
+      }
+      throw error;
+    }
+    const status = closedStatusOfName(description.status.name);
+    if (status === undefined) {
+      return undefined;
+    }
+    if (status !== 'failed') {
+      return { issue, status };
+    }
+    // A Failed run's result is its failure. Only `IssueStopped` (the orchestrator's own stop) is read for details, and only
+    // fixed words come out of them. Any other failure is `failed` with no reason. An error that is not a workflow failure is
+    // an infrastructure error: it is thrown, never read as a status (BR-0003).
+    try {
+      await deps.client.workflow.getHandle(workflowId, description.runId).result();
+    } catch (error) {
+      if (!(error instanceof WorkflowFailedError)) {
+        throw error;
+      }
+      const cause = error.cause;
+      if (cause instanceof ApplicationFailure && cause.type === ISSUE_STOPPED_FAILURE) {
+        const details = stopDetails(cause.details);
+        return { issue, status: isParkedStop(details) ? 'parked' : 'failed', ...(details.reason === undefined ? {} : { stopReason: details.reason }) };
+      }
+    }
+    return { issue, status: 'failed' };
+  }
+
+  async function readRunStatuses(raw: unknown): Promise<RunStatuses> {
+    let issues: readonly number[];
+    try {
+      issues = parseRunStatusesInput(raw).issues;
+    } catch (error) {
+      if (error instanceof InvalidQueueInputError) {
+        throw ApplicationFailure.nonRetryable(error.message, 'InvalidInput');
+      }
+      throw error;
+    }
+    const runs: RunStatusEntry[] = [];
+    for (const issue of issues) {
+      const entry = await readRunStatus(issue);
+      if (entry !== undefined) {
+        runs.push(entry);
+      }
+    }
+    return { runs };
+  }
+
+  return { listRunningIssues, startQueuedRun, readRunStatuses };
 }
 
 export type QueueActivities = ReturnType<typeof createQueueActivities>;

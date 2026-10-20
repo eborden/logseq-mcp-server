@@ -191,21 +191,107 @@ export function parseStartQueuedRunInput(raw: unknown): StartQueuedRunInput {
   return { issue, run: parseRunTemplate(run) };
 }
 
-// ---- the tick report ----------------------------------------------------------------------------------------
+// ---- closed runs (#724) ----------------------------------------------------------------------------------------
+
+/**
+ * How a closed `issueWorkflow` run ended, as a fixed word. `parked` is a run that stopped to wait for a person's answer and
+ * got none (a Failed run at the step `park`, or at `session` with `NeedsInput`); a parked run that is still waiting is open and
+ * holds a slot. `completed` is the run's own end, whatever its outcome.
+ */
+export type ClosedRunStatus = 'failed' | 'parked' | 'terminated' | 'timed_out' | 'cancelled' | 'completed';
+
+/**
+ * What a skipped Ready issue with a closed run reports: the status words, except that `completed` becomes `completed_but_open`.
+ * The issue is in the Ready list, so it is still open and still Ready: the run finished and the merge did not close the issue.
+ * `id_already_ran` is a closed run the tick did not read.
+ */
+export type ClosedRunReason = 'id_already_ran' | 'failed' | 'parked' | 'terminated' | 'timed_out' | 'cancelled' | 'completed_but_open';
+
+/** Every closed-run reason, in the order a report lists its counts. */
+export const CLOSED_RUN_REASONS: readonly ClosedRunReason[] = ['failed', 'parked', 'terminated', 'timed_out', 'cancelled', 'completed_but_open', 'id_already_ran'];
+
+/**
+ * Most closed runs one tick reads the status of. Each read is a call to the Temporal server, so a tick makes at most this
+ * many, and the skips that carry a status name at most this many issues. The rest keep `id_already_ran` and are counted in
+ * `closedRuns.notLookedUp` (BR-0006: a cap reports what it cut). The lowest numbers are read first.
+ */
+export const MAX_RUN_STATUS_LOOKUPS = 20;
+
+export function closedRunReason(status: ClosedRunStatus): ClosedRunReason {
+  return status === 'completed' ? 'completed_but_open' : status;
+}
+
+/**
+ * The command a person uses for a closed run, from fixed text and the issue number, or undefined when there is nothing to
+ * restart. A closed run holds its ID (`REJECT_DUPLICATE`), so `run-issue` alone is refused: the run is deleted first (README,
+ * "Recovering a stuck run"). `--attempt` does not get round that. It sets the remote implementer's first attempt number, so a
+ * parked run is started again with the next one (`<k>`: one more than the attempt it stopped at, which the report does not hold).
+ * The watcher never runs either command.
+ */
+export function restartCommand(issue: number, reason: ClosedRunReason): string | undefined {
+  if (reason === 'id_already_ran' || reason === 'completed_but_open') {
+    return undefined;
+  }
+  const run = `npm run run-issue -- --issue ${issue}${reason === 'parked' ? ' --attempt <k>' : ''}`;
+  return `temporal workflow delete --workflow-id issue-${issue}, then ${run}`;
+}
+
+/** What `readRunStatuses` is asked: closed runs' issue numbers, at most MAX_RUN_STATUS_LOOKUPS. */
+export interface RunStatusesInput {
+  readonly issues: readonly number[];
+}
+
+/** One closed run's status, as numbers and fixed words (BR-0001). `stopReason` is only ever one of the orchestrator's own words. */
+export interface RunStatusEntry {
+  readonly issue: number;
+  readonly status: ClosedRunStatus;
+  readonly stopReason?: string;
+}
+
+/** The statuses `readRunStatuses` found. An issue whose run is open again, gone or unreadable has no entry. */
+export interface RunStatuses {
+  readonly runs: readonly RunStatusEntry[];
+}
+
+/** Parses a status request at the activity's boundary. */
+export function parseRunStatusesInput(raw: unknown): RunStatusesInput {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new InvalidQueueInputError('input must be an object');
+  }
+  const issues: unknown = 'issues' in raw ? raw.issues : undefined;
+  if (!Array.isArray(issues) || issues.length < 1 || issues.length > MAX_RUN_STATUS_LOOKUPS) {
+    throw new InvalidQueueInputError(`issues must be a list of 1 to ${MAX_RUN_STATUS_LOOKUPS} numbers`);
+  }
+  const numbers: number[] = [];
+  for (const issue of issues as unknown[]) {
+    if (typeof issue !== 'number' || !Number.isSafeInteger(issue) || issue < 1 || issue > 999_999_999) {
+      throw new InvalidQueueInputError('every issue must be a positive whole number');
+    }
+    numbers.push(issue);
+  }
+  return { issues: [...new Set(numbers)].sort((a, b) => a - b) };
+}
+
+// ---- the tick report----------------------------------------------------------------------------------------
 
 /**
  * Why a listed Ready issue did not start: the eligibility reasons, then the cap, an open run the start found (`already_running`:
- * it holds a slot) and a closed one (`id_already_ran`: it holds none).
+ * it holds a slot) and a closed one. A closed run holds no slot. It is `id_already_ran` when the tick did not read how it closed
+ * (more than MAX_RUN_STATUS_LOOKUPS of them, or the read answered nothing), and otherwise one of the other `ClosedRunReason` words (#724).
  */
-export type TickSkipReason = SkipReason | 'over_cap' | 'already_running' | 'id_already_ran';
+export type TickSkipReason = SkipReason | 'over_cap' | 'already_running' | ClosedRunReason;
 
 export interface TickSkip {
   readonly number: number;
   readonly reason: TickSkipReason;
+  /** The stop reason the closed run recorded, when it is one of the orchestrator's own fixed words (src/run-status.ts). Never a message. */
+  readonly stopReason?: string;
+  /** What a person runs for a closed run that needs one: fixed text and the issue number (`restartCommand`). */
+  readonly restart?: string;
 }
 
 /** Where a failed tick stopped. Nothing is started after a failed read. */
-export type TickFailureStep = 'list_ready' | 'list_taken' | 'list_running' | 'check_trusted' | 'start';
+export type TickFailureStep = 'list_ready' | 'list_taken' | 'list_running' | 'check_trusted' | 'start' | 'run_status';
 
 /** Most skipped issues one report names. The rest are counted in `skippedNotReported`, never dropped silently (BR-0006). */
 export const MAX_TICK_SKIPS_REPORTED = 100;
@@ -224,5 +310,15 @@ export interface TickReport {
   readonly skippedNotReported: number;
   /** Ready issues whose author the tick did not read (the page cap of `checkTrustedIssues`). They are treated as untrusted. */
   readonly trustNotRead: number;
+  /** The closed runs the start found (#724). Absent when there were none. */
+  readonly closedRuns?: ClosedRunsReport;
   readonly failure?: { readonly step: TickFailureStep; readonly reason: string };
+}
+
+/** Counts per reason of the Ready issues whose `issue-<n>` run is closed, and how many the tick did not read. The skips name the issues. */
+export interface ClosedRunsReport {
+  /** Only the reasons that occurred, in the order of CLOSED_RUN_REASONS. `id_already_ran` counts the ones whose status was not read. */
+  readonly counts: Readonly<Partial<Record<ClosedRunReason, number>>>;
+  /** Closed runs the tick did not ask about: over MAX_RUN_STATUS_LOOKUPS, or after a failure that came before the read. */
+  readonly notLookedUp: number;
 }
