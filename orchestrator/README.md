@@ -7,7 +7,7 @@ The first slice (#626) proved the engine runs here and survives a crash (`helloW
 ## What v1 does not do
 
 - No webhook and no UI for the maintainer's decision: it is a signal sent by a CLI (`npm run signal`, #631). The merge is always the maintainer's.
-- No scheduler unless you create one: a person starts each run (`npm run run-issue`), or creates the queue watcher's schedule (`npm run queue -- create`, #723, "The queue watcher" below), which starts runs for eligible Ready issues up to a cap. Nothing creates that schedule by itself.
+- No scheduler unless you create one: a person starts each run (`npm run run-issue`), or creates the queue watcher's schedule (`npm run queue -- create`, #723, "The queue watcher" and "Running the queue" below), which starts runs for eligible Ready issues up to a cap. Nothing creates that schedule by itself.
 - No Postgres, Docker or extra task queues. One task queue, `orchestrator`.
 - It never merges, never applies `golden-change`, never resolves a review thread and never moves a board item to Ready or Backlog. The one board move into In review that skips a step is a PR's own first one (Backlog to In review, #635).
 
@@ -523,18 +523,7 @@ A closed run does not use a slot, so these skips never hold back a start. `--att
 
 `closedRuns` is `{ counts, notLookedUp }`: the count per reason (only the reasons that occurred, in the order above) and how many closed runs the tick did not ask about. It is absent when there are none. The report stays bounded: at most 20 issue numbers carry a status, the whole `skipped` list is still capped at 100, and the counts do not depend on either. A status read that fails after its retries fails the tick at `run_status` (BR-0003), after the starts, so the runs it started stay in `started`, and the closed runs stay `id_already_ran`. The read is on the same options as every tick activity (2 minutes, 3 attempts) and inside the tick deadline. What the read returns is the status as a fixed word and a stop reason checked against the list; a failure's message, the run's input and result, and any comment or issue text are never read into the report or the history (BR-0001).
 
-**Run it.** The watcher needs the worker (`npm run worker`) and the dev server, and it does nothing until a schedule exists:
-
-```bash
-npm run queue -- create                        # every 5m, cap 3, base main, repo dir = ..
-npm run queue -- create --cap 2 --every 10m    # cap 1 to 10 (default 3), interval 1m to 1h
-npm run queue -- create --base feature/x --host-integration --executor remote   # the same flags as run-issue, for every run it starts
-npm run queue -- pause                         # stops new ticks, keeps the schedule
-npm run queue -- resume
-npm run queue -- delete                        # a tick already running finishes; runs it started are not touched
-```
-
-Each prints one JSON line (`created`, `already_exists`, `paused`, `resumed`, `deleted` or `not_found`). A second `create` changes nothing: delete the schedule first to change its cap or interval. The schedule is `queue-watcher` with **overlap policy skip**: a tick still running when the next is due is skipped, never queued, and a tick has a 10 minute execution timeout (above its own 8 minute deadline, see above) so a stuck one cannot hold the skip for long. After an outage the schedule takes only a tick at most a minute late. The 5 minute default is a proposal: the board read is GraphQL through `gh`, so a shorter interval costs rate limit.
+**Run it.** "Running the queue" below has the commands, every flag, how to read a tick and what each skip means. The watcher needs the worker (`npm run worker`) and the server, and it does nothing until a schedule exists (`npm run queue -- create`). The schedule is `queue-watcher` with **overlap policy skip**: a tick still running when the next is due is skipped, never queued, and a tick has a 10 minute execution timeout (above its own 8 minute deadline, see above) so a stuck one cannot hold the skip for long. After an outage the schedule takes only a tick at most a minute late. The 5 minute default is a proposal: the board read is GraphQL through `gh`, so a shorter interval costs rate limit.
 
 **Never.** The watcher and its script do not merge, approve, apply a label, resolve a thread, move a board item or send the maintainer's decision signal. They read GitHub and start runs. `test/queue-watcher.test.ts` scans their source for those forms (the invariant scan of `test/invariants.ts`), and drills the cap, the held runs, the second tick and the script against a dev server.
 
