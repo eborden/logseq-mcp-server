@@ -16,6 +16,7 @@
 //
 // Nothing here resolves a thread, approves, requests changes, merges or labels.
 
+import { createHash } from 'node:crypto';
 import { appendFile, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { ApplicationFailure, CancelledFailure, Context } from '@temporalio/activity';
@@ -38,6 +39,9 @@ import {
   REVIEWER_OUTPUT_FILE,
   advisorySection,
   changedLines,
+  fileThreadBody,
+  nearestChangedLine,
+  nearestThreadBody,
   openThreadRefs,
   parseFixerOutput,
   parseReviewStepInput,
@@ -45,6 +49,8 @@ import {
   splitFindings,
 } from '../review-types.ts';
 import type {
+  AdvisoryFinding,
+  Finding,
   FixerOutput,
   FixerSessionResult,
   OpenThreads,
@@ -58,7 +64,7 @@ import type {
 } from '../review-types.ts';
 import type { ChangedLines } from '../review-types.ts';
 import { MalformedSessionOutputError, parseClaudeOutput } from '../types.ts';
-import type { IssueView, PostReviewInput, PostReviewResult, ReplyToThreadInput, ReplyToThreadResult, ReviewThread } from '../types.ts';
+import type { AddReviewThreadInput, AddReviewThreadResult, IssueView, PostReviewInput, PostReviewResult, ReplyToThreadInput, ReplyToThreadResult, ReviewThread } from '../types.ts';
 
 /** What the remote reviewer path needs (#674). The worker builds it from `runRemoteSession` and the GitHub activities. */
 export interface RemoteReviewDeps {
@@ -75,6 +81,8 @@ export interface ReviewDeps {
   readonly listReviewThreads: (pr: number) => Promise<ReviewThread[]>;
   readonly replyToThread: (input: ReplyToThreadInput) => Promise<ReplyToThreadResult>;
   readonly postReview: (input: PostReviewInput) => Promise<PostReviewResult>;
+  /** Opens a review thread of its own, on a line or on a file, once per key (#714). */
+  readonly addReviewThread: (input: AddReviewThreadInput) => Promise<AddReviewThreadResult>;
   /** `owner/name`, named in the briefs. */
   readonly repo: string;
   readonly claude: ClaudeConfig;
@@ -155,6 +163,34 @@ function minimizeInput(raw: unknown): { nodeId: string } {
     throw failure('nodeId must be a comment node id', 'InvalidInput');
   }
   return { nodeId };
+}
+
+/**
+ * Names one finding of one round and head, so a retry finds the thread the first attempt opened (#714). The finding's own
+ * text is hashed, so the same finding is the same key and no text is in the key.
+ */
+export function findingKey(input: ReviewStepInput, finding: Finding): string {
+  const digest = createHash('sha256').update(JSON.stringify([finding.path, finding.line, finding.body])).digest('hex').slice(0, 16);
+  return `finding-${input.pr}-r${input.round}-${input.headSha.slice(0, SHORT)}-${digest}`;
+}
+
+/** A cancelled activity must stop, not fall back to another way of placing a finding. Any other failure is the caller's to handle. */
+function rethrowCancellation(error: unknown): void {
+  if (error instanceof CancelledFailure) {
+    throw error;
+  }
+}
+
+/** The review body's line of counts: what became of each finding. Fixed words and numbers. */
+function findingCounts(inline: number, file: number, nearest: number, advisory: number): string {
+  const total = inline + file + nearest + advisory;
+  const parts = [
+    `${inline} as inline comment${inline === 1 ? '' : 's'}`,
+    `${file} as file-level thread${file === 1 ? '' : 's'}`,
+    `${nearest} as thread${nearest === 1 ? '' : 's'} on the nearest changed line`,
+    `${advisory} advisory (no thread)`,
+  ];
+  return `${total} finding${total === 1 ? '' : 's'}: ${parts.join(', ')}.`;
 }
 
 export function reviewerDir(input: ReviewStepInput): string {
@@ -365,14 +401,19 @@ export function createReviewActivities(deps: ReviewDeps) {
       // Posting every finding as advisory would open no thread, and the gate would clear on a review that raised problems.
       throw failure(`the diff could not be read, so ${output.findings.length} finding${output.findings.length === 1 ? ' cannot' : 's cannot'} be placed`, 'DiffUnreadable');
     }
-    const { inline, advisory } = splitFindings(output.findings, changed);
+    const split = splitFindings(output.findings, changed);
+    const { inline } = split;
+    // The threads come first, so the review body can say what became of every finding, including a thread GitHub refused.
+    // Both steps are idempotent by key, so a retry after either one places and posts nothing twice.
+    const placed = await placeFileFindings(input, split.fileLevel, changed);
+    const advisory: readonly AdvisoryFinding[] = [...split.advisory, ...placed.failed];
     const section = advisorySection(advisory);
     const body = [
       `Review of commit \`${input.headSha.slice(0, SHORT)}\` (round ${input.round}), by a fresh reviewer session of the orchestrator. Its text is model output, checked for size and shape and cleaned before it was posted.`,
       '',
       output.summary,
       '',
-      output.findings.length === 0 ? 'No findings.' : `${inline.length} finding${inline.length === 1 ? '' : 's'}, as inline comments.`,
+      output.findings.length === 0 ? 'No findings.' : findingCounts(inline.length, placed.file, placed.nearest, advisory.length),
       ...(section.text === '' ? [] : ['', section.text]),
     ].join('\n');
     const posted = await deps.postReview({
@@ -382,7 +423,51 @@ export function createReviewActivities(deps: ReviewDeps) {
       body,
       comments: inline.map((finding) => ({ path: finding.path, line: finding.line, side: 'RIGHT', body: finding.body })),
     });
-    return { reviewId: posted.reviewId, posted: posted.posted, comments: inline.length, advisory: section.listed, omitted: section.omitted };
+    return { reviewId: posted.reviewId, posted: posted.posted, comments: inline.length, fileLevel: placed.file, nearest: placed.nearest, advisory: section.listed, omitted: section.omitted };
+  }
+
+  /**
+   * Opens a thread for each finding on an unchanged line of a changed file (#714). The thread is on the file, with the path
+   * and the original line in its first comment. When GitHub does not take that (the call fails or is refused), the finding is
+   * anchored on the nearest changed line of its file instead, and its text says so. A file with no changed line, or a second
+   * refusal, makes the finding advisory (`thread_failed`), listed in the review body: never dropped. Only the finding's
+   * path, already a file of the diff, and fixed words go in a thread. A cancelled activity stops here.
+   */
+  async function placeFileFindings(
+    input: ReviewStepInput,
+    findings: readonly Finding[],
+    changed: ChangedLines | undefined,
+  ): Promise<{ readonly file: number; readonly nearest: number; readonly failed: readonly AdvisoryFinding[] }> {
+    let file = 0;
+    let nearest = 0;
+    const failed: AdvisoryFinding[] = [];
+    for (const finding of findings) {
+      const base = { pr: input.pr, commitId: input.headSha, path: finding.path, key: findingKey(input, finding) };
+      let result: AddReviewThreadResult | undefined;
+      try {
+        result = await deps.addReviewThread({ ...base, body: fileThreadBody(finding) });
+      } catch (error) {
+        rethrowCancellation(error);
+      }
+      if (result === undefined) {
+        const line = nearestChangedLine(changed?.get(finding.path) ?? [], finding.line);
+        if (line !== undefined) {
+          try {
+            result = await deps.addReviewThread({ ...base, line, body: nearestThreadBody(finding, line) });
+          } catch (error) {
+            rethrowCancellation(error);
+          }
+        }
+      }
+      if (result === undefined) {
+        failed.push({ ...finding, reason: 'thread_failed' });
+      } else if (result.level === 'file') {
+        file += 1;
+      } else {
+        nearest += 1;
+      }
+    }
+    return { file, nearest, failed };
   }
 
   // ---- the remote reviewer (#674) --------------------------------------------------------------------------------

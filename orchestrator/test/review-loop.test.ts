@@ -938,6 +938,7 @@ async function realStack(name: string, issue: number, scripts: Record<number, st
     listReviewThreads: github.listReviewThreads,
     replyToThread: github.replyToThread,
     postReview: github.postReview,
+    addReviewThread: github.addReviewThread,
     repo: fake.config.repo,
     claude: claudeConfig,
   });

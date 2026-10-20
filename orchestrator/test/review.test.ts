@@ -25,16 +25,21 @@ import {
   MalformedFindingsError,
   MAX_FINDINGS,
   MAX_OUTPUT_FILE_BYTES,
+  MAX_FILE_THREADS,
   advisorySection,
   changedLines,
+  fileThreadBody,
+  nearestChangedLine,
+  nearestThreadBody,
   parseFixerOutput,
   parseReviewStepInput,
   parseReviewerOutput,
   sanitiseText,
   splitFindings,
 } from '../src/review-types.ts';
-import type { IssueView, ReviewThread } from '../src/types.ts';
-import { createFake, emptyState, rawIssue, rawOpenPr, rawThread, recordedSleep } from './github-support.ts';
+import type { OpenThreads } from '../src/review-types.ts';
+import type { GateStatus, IssueView, ReviewThread } from '../src/types.ts';
+import { createFake, emptyState, httpAnswer, rawIssue, rawOpenPr, rawThread, recordedSleep } from './github-support.ts';
 import type { FakeState } from './github-support.ts';
 import { commandAllowed } from './tool-rules.ts';
 
@@ -152,9 +157,49 @@ test('changedLines reads the new side of a -U0 diff, follows hunk counts and ski
   const finding = (path: string, line: number) => ({ path, line, body: `at ${path}:${line}` });
   const split = splitFindings([finding('a.ts', 4), finding('a.ts', 5), finding('a.ts', 6), finding('a.ts', 21), finding('b.ts', 1), finding('c.ts', 1), finding('d.ts', 1)], changed);
   assert.deepEqual(split.inline.map((f) => `${f.path}:${f.line}`), ['a.ts:4', 'a.ts:5', 'c.ts:1']);
-  assert.deepEqual(split.advisory.map((f) => `${f.path}:${f.line}`), ['a.ts:6', 'a.ts:21', 'b.ts:1', 'd.ts:1']);
-  assert.equal(splitFindings([finding('a.ts', 4)], undefined).inline.length, 0, 'an unreadable diff puts nothing inline');
+  assert.deepEqual(split.fileLevel.map((f) => `${f.path}:${f.line}`), ['a.ts:6', 'a.ts:21'], 'an unchanged line of a changed file gets a file-level thread');
+  assert.deepEqual(split.advisory.map((f) => `${f.path}:${f.line}:${f.reason}`), ['b.ts:1:file_not_in_diff', 'd.ts:1:file_not_in_diff'], 'a removed file and an untouched file have no diff to hang a thread on');
+  const unreadable = splitFindings([finding('a.ts', 4)], undefined);
+  assert.deepEqual([unreadable.inline.length, unreadable.fileLevel.length, unreadable.advisory.length], [0, 0, 1], 'an unreadable diff places nothing');
   assert.deepEqual(changedLines(''), new Map());
+});
+
+test('a file that only lost lines is in the diff: it takes a file-level thread, and has no changed line to anchor on', () => {
+  const changed = changedLines(['--- g.ts', '+++ g.ts', '@@ -3,2 +2,0 @@', '-x', '-y'].join('\n'));
+  assert.deepEqual(changed.get('g.ts'), []);
+  const split = splitFindings([{ path: 'g.ts', line: 3, body: 'x' }], changed);
+  assert.deepEqual([split.inline.length, split.fileLevel.length, split.advisory.length], [0, 1, 0]);
+  assert.equal(nearestChangedLine(changed.get('g.ts') ?? [], 3), undefined);
+});
+
+test('the file-level threads of one review are capped, and the rest is advisory with its reason, never dropped', () => {
+  const changed = changedLines(['--- a.ts', '+++ a.ts', '@@ -0,0 +1 @@', '+x'].join('\n'));
+  const findings = Array.from({ length: MAX_FILE_THREADS + 3 }, (_, index) => ({ path: 'a.ts', line: 100 + index, body: 'x' }));
+  const split = splitFindings(findings, changed);
+  assert.equal(split.fileLevel.length, MAX_FILE_THREADS);
+  assert.deepEqual(split.advisory.map((f) => f.reason), ['thread_cap', 'thread_cap', 'thread_cap']);
+  assert.deepEqual(split.advisory.map((f) => f.line), [100 + MAX_FILE_THREADS, 101 + MAX_FILE_THREADS, 102 + MAX_FILE_THREADS]);
+  assert.ok(advisorySection(split.advisory).text.includes(`cap of ${MAX_FILE_THREADS} file-level threads`));
+});
+
+test('the nearest changed line: the smallest distance, ties to the earlier line', () => {
+  const ranges: [number, number][] = [[5, 6], [30, 31]];
+  assert.equal(nearestChangedLine(ranges, 1), 5);
+  assert.equal(nearestChangedLine(ranges, 7), 6);
+  assert.equal(nearestChangedLine(ranges, 20), 30, 'closer to the later range');
+  assert.equal(nearestChangedLine(ranges, 40), 31);
+  assert.equal(nearestChangedLine([[5, 6], [10, 11]], 8), 6, 'two lines away from both: the earlier one');
+  assert.equal(nearestChangedLine([[10, 11], [5, 6]], 8), 6, 'the order of the ranges does not matter');
+  assert.equal(nearestChangedLine([[5, 9]], 7), 7, 'a line inside a range is its own nearest');
+  assert.equal(nearestChangedLine([], 7), undefined);
+});
+
+test('a file-level thread says where the finding is, and a placed one says it is placed and where it belongs', () => {
+  const finding = { path: 'src/atlas.ts', line: 40, body: 'Handle an empty file.' };
+  const onFile = fileThreadBody(finding);
+  assert.ok(onFile.includes('`src/atlas.ts:40`') && onFile.includes('does not change') && onFile.endsWith('Handle an empty file.'));
+  const placed = nearestThreadBody(finding, 6);
+  assert.ok(placed.includes('`src/atlas.ts:40`') && placed.includes('placed on line 6') && placed.includes('belongs on line 40') && placed.endsWith('Handle an empty file.'));
 });
 
 test('the advisory section lists what fits, says it is advisory, and counts what it leaves out', () => {
@@ -306,7 +351,7 @@ interface Scenario {
 }
 
 /** `committed` are files (or links, when the value starts with `->`) the implementer's commit already holds. */
-async function scenario(configure: (state: FakeState) => void = () => undefined, committed: Record<string, string> = {}): Promise<Scenario> {
+async function scenario(configure: (state: FakeState) => void = () => undefined, committed: Record<string, string> = {}, baseFiles: Record<string, string> = {}): Promise<Scenario> {
   counter += 1;
   const bare = join(scenarioDir, `origin-${counter}.git`);
   const repo = join(scenarioDir, `repo-${counter}`);
@@ -314,6 +359,12 @@ async function scenario(configure: (state: FakeState) => void = () => undefined,
   await execFileAsync('git', ['clone', '-q', bare, repo]);
   await git(repo, 'checkout', '-q', '-b', 'main');
   await git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
+  // `baseFiles` are on the base branch already, so a commit can change them (an empty `committed` entry removes every line).
+  for (const [name, content] of Object.entries(baseFiles)) {
+    await writeFile(join(repo, name), content);
+    await git(repo, 'add', name);
+    await git(repo, 'commit', '-q', '-m', `base ${name}`);
+  }
   await git(repo, 'push', '-q', 'origin', 'main');
   const worktree = join(scenarioDir, `wt-${counter}`);
   await git(repo, 'worktree', 'add', '-q', '-b', 'claude/123', worktree, 'origin/main');
@@ -349,6 +400,7 @@ async function scenario(configure: (state: FakeState) => void = () => undefined,
     listReviewThreads: github.listReviewThreads,
     replyToThread: github.replyToThread,
     postReview: github.postReview,
+    addReviewThread: github.addReviewThread,
     repo: fake.config.repo,
     claude: { ...loadClaudeConfig({}), claudeBin: FAKE_CLAUDE },
     limits: FAST,
@@ -424,11 +476,11 @@ test('the reviewer: one session, one COMMENT review with its inline comments, an
   assert.equal(await git(`${s.worktree}-review-0`, 'rev-parse', 'HEAD'), s.head);
 
   const posted = await s.run(s.activities.postSessionReview);
-  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 1, advisory: 0, omitted: 0 });
+  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 1, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 });
   // A retry of either step changes nothing: no second session, no second review.
   assert.deepEqual(await s.run(s.activities.runReviewerSession), session);
   assert.equal(await s.invocations(), 1, 'a finished session is not run again');
-  assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: false, comments: 1, advisory: 0, omitted: 0 });
+  assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: false, comments: 1, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 });
 
   const reviews = await s.fake.callsMatching('/pulls/77/reviews');
   const sent = reviews.filter((call) => call.argv.includes('POST'));
@@ -450,25 +502,148 @@ async function postedReviewBody(s: Scenario): Promise<{ body: string; comments: 
   return { body: parsed.body, comments: parsed.comments };
 }
 
-test('the reviewer: a finding on a line the commit does not change goes in the body, not into an inline comment GitHub would reject', async () => {
-  const s = await scenario();
-  await s.script(
-    1,
-    `cat > review-findings.json <<'JSON'
-{"summary":"Checked.","findings":[{"path":"atlas.txt","line":1,"body":"ON-DIFF finding"},{"path":"atlas.txt","line":40,"body":"OFF-DIFF-LINE finding"},{"path":"untouched.txt","line":2,"body":"OFF-DIFF-FILE finding"}],"acceptedThreadIds":[]}
-JSON
-`,
-  );
+/** A script for the fake reviewer session that writes these findings. */
+function findingsScript(findings: { path: string; line: number; body: string }[]): string {
+  return `cat > review-findings.json <<'JSON'\n${JSON.stringify({ summary: 'Checked.', findings, acceptedThreadIds: [] })}\nJSON\n`;
+}
+
+/** The review comments of their own (a thread on a line or on a file) the activities sent, in order. Refused ones are in it too. */
+async function threadPosts(s: Scenario): Promise<{ subject_type: string; path: string; line?: number; body: string }[]> {
+  const sent = (await s.fake.calls()).filter((call) => call.argv.includes('POST') && call.argv.some((arg) => arg.endsWith('/pulls/77/comments')));
+  return sent.map((call) => JSON.parse(call.stdin ?? '{}'));
+}
+
+/** `wide.txt` has 50 lines on the base; the commit changes lines 5 and 30. */
+const WIDE_BASE = Array.from({ length: 50 }, (_, index) => `line ${index + 1}\n`).join('');
+const WIDE_COMMITTED = WIDE_BASE.replace('line 5\n', 'line five\n').replace('line 30\n', 'line thirty\n');
+
+const FILE_THREAD = { path: 'atlas.txt', line: 40, body: 'FILE-LEVEL finding: handle an empty file.' };
+
+test('the reviewer: a finding on an unchanged line of a changed file becomes a file-level thread that holds the gate and is the fixer\'s', async () => {
+  const s = await scenario((state) => {
+    state.dynamicGate = true;
+  });
+  await s.script(1, findingsScript([{ path: 'atlas.txt', line: 1, body: 'ON-DIFF finding' }, FILE_THREAD, { path: 'untouched.txt', line: 2, body: 'OFF-FILE finding' }]));
   const session = await s.run(s.activities.runReviewerSession);
   const posted = await s.run(s.activities.postSessionReview);
-  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 1, advisory: 2, omitted: 0 });
+  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 1, fileLevel: 1, nearest: 0, advisory: 1, omitted: 0 });
+
+  // The thread is the worker's call: a file-level REST comment, with the path, the original line and the finding in its text.
+  const [thread, ...others] = await threadPosts(s);
+  assert.equal(others.length, 0);
+  assert.equal(thread?.subject_type, 'file');
+  assert.equal(thread?.path, 'atlas.txt');
+  assert.ok(!('line' in (thread ?? {})), 'a file-level thread has no line');
+  assert.ok(thread?.body.includes('`atlas.txt:40`') && thread.body.includes('FILE-LEVEL finding') && thread.body.includes('<!-- orchestrator-finding:finding-77-r0-'));
+
+  // The review lists what is advisory, and says what became of the rest.
   const review = await postedReviewBody(s);
   assert.deepEqual(review.comments.map((comment) => `${comment.path}:${comment.line}`), ['atlas.txt:1'], 'only the finding on a changed line is inline');
-  assert.ok(review.body.includes('OFF-DIFF-LINE finding') && review.body.includes('OFF-DIFF-FILE finding') && !review.body.includes('ON-DIFF'));
-  assert.ok(review.body.includes('advisory') && review.body.includes('open no thread'));
+  assert.ok(review.body.includes('OFF-FILE finding') && !review.body.includes('FILE-LEVEL') && !review.body.includes('ON-DIFF'));
+  assert.ok(review.body.includes('3 findings: 1 as inline comment, 1 as file-level thread, 0 as threads on the nearest changed line, 1 advisory (no thread).'));
+  assert.ok(review.body.includes('the file is not changed by this commit') && review.body.includes('open no thread'));
   // No finding text reaches what the workflow records.
-  assert.ok(!/DIFF/.test(JSON.stringify([session, posted])));
-  assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: false, comments: 1, advisory: 2, omitted: 0 }, 'a retry changes nothing');
+  assert.ok(!/OFF-FILE|FILE-LEVEL|ON-DIFF/.test(JSON.stringify([session, posted])));
+
+  // The existing machinery applies: the thread is open and trusted, the gate holds, and the fixer's brief is handed it.
+  const open: OpenThreads = await new MockActivityEnvironment().run(s.activities.listOpenThreads, 77);
+  assert.equal(open.threads.length, 2, 'the inline thread and the file-level thread');
+  assert.ok(open.threads.every((candidate) => candidate.trusted));
+  assert.deepEqual(await new MockActivityEnvironment().run(s.github.getGateStatus, 77), { headSha: s.head, reviewsOnHead: 1, unresolvedThreads: 2, clear: false });
+  const threads: ReviewThread[] = await new MockActivityEnvironment().run(s.github.listReviewThreads, 77);
+  const handed: unknown = JSON.parse(threadData(threads).json);
+  assert.ok(Array.isArray(handed));
+  const fileThread = handed.find((candidate: { line: number | null }) => candidate.line === null);
+  assert.equal(fileThread?.path, 'atlas.txt');
+  assert.ok(fileThread.comments[0].body.includes('FILE-LEVEL finding'));
+  // The fixer's reply route works on the thread's first comment.
+  assert.deepEqual(await new MockActivityEnvironment().run(s.github.replyToThread, { pr: 77, threadId: fileThread.id, key: 'reply-r0-file', body: 'Handled.' }), { posted: true });
+
+  // A retry opens no second thread and counts the same.
+  assert.deepEqual(await s.run(s.activities.postSessionReview), { ...posted, posted: false }, 'a retry changes nothing');
+  assert.equal((await threadPosts(s)).length, 1);
+});
+
+test('the reviewer: a finding on a file the commit does not change stays advisory, listed in the review body, and opens no thread', async () => {
+  const s = await scenario();
+  await s.script(1, findingsScript([{ path: 'untouched.txt', line: 2, body: 'OFF-FILE finding' }]));
+  await s.run(s.activities.runReviewerSession);
+  const posted = await s.run(s.activities.postSessionReview);
+  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 0, fileLevel: 0, nearest: 0, advisory: 1, omitted: 0 });
+  assert.equal((await threadPosts(s)).length, 0, 'no call to open a thread');
+  const review = await postedReviewBody(s);
+  assert.ok(review.body.includes('`untouched.txt:2` (the file is not changed by this commit)') && review.body.includes('OFF-FILE finding'));
+});
+
+test('the reviewer: when GitHub refuses the file-level thread, the finding goes on the nearest changed line of its file and says so', async () => {
+  const s = await scenario(
+    (state) => {
+      state.refuseThreads = 'file';
+      state.dynamicGate = true;
+    },
+    { 'wide.txt': WIDE_COMMITTED },
+    { 'wide.txt': WIDE_BASE },
+  );
+  await s.script(1, findingsScript([{ path: 'wide.txt', line: 20, body: 'PLACED finding' }]));
+  await s.run(s.activities.runReviewerSession);
+  const posted = await s.run(s.activities.postSessionReview);
+  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 0, fileLevel: 0, nearest: 1, advisory: 0, omitted: 0 });
+  const sent = await threadPosts(s);
+  assert.deepEqual(sent.map((thread) => [thread.subject_type, thread.line]), [['file', undefined], ['line', 30]], 'the file-level call, then line 30: 10 away, where line 5 is 15 away');
+  const placed = sent[1];
+  assert.ok(placed?.body.includes('placed on line 30') && placed.body.includes('belongs on line 20') && placed.body.includes('`wide.txt:20`') && placed.body.includes('PLACED finding'));
+  const review = await postedReviewBody(s);
+  assert.ok(review.body.includes('1 as thread on the nearest changed line'));
+  assert.equal(((await new MockActivityEnvironment().run(s.github.getGateStatus, 77)) as GateStatus).unresolvedThreads, 1, 'it holds the gate');
+
+  // A retry finds the thread by its key, whichever call made it, and opens nothing.
+  assert.deepEqual(await s.run(s.activities.postSessionReview), { ...posted, posted: false });
+  assert.equal((await threadPosts(s)).length, 2);
+});
+
+test('the reviewer: a file with no changed line, or a refused fallback, makes the finding advisory with its reason, never a silent drop', async () => {
+  // A file that only lost lines is in the diff, so it takes a file-level thread, but has no line to fall back to.
+  const gone = await scenario((state) => { state.refuseThreads = 'file'; }, { 'gone.txt': '' }, { 'gone.txt': 'a\nb\n' });
+  await gone.script(1, findingsScript([{ path: 'gone.txt', line: 1, body: 'NO-LINE finding' }]));
+  await gone.run(gone.activities.runReviewerSession);
+  assert.deepEqual(await gone.run(gone.activities.postSessionReview), { reviewId: 5001, posted: true, comments: 0, fileLevel: 0, nearest: 0, advisory: 1, omitted: 0 });
+  assert.equal((await threadPosts(gone)).length, 1, 'the file-level call only: there is no line to try');
+  const goneReview = await postedReviewBody(gone);
+  assert.ok(goneReview.body.includes('`gone.txt:1` (GitHub did not accept a thread for it)') && goneReview.body.includes('NO-LINE finding'));
+
+  // Both calls refused.
+  const refused = await scenario((state) => { state.refuseThreads = 'all'; });
+  await refused.script(1, findingsScript([FILE_THREAD]));
+  await refused.run(refused.activities.runReviewerSession);
+  assert.deepEqual(await refused.run(refused.activities.postSessionReview), { reviewId: 5001, posted: true, comments: 0, fileLevel: 0, nearest: 0, advisory: 1, omitted: 0 });
+  assert.equal((await threadPosts(refused)).length, 2);
+  assert.ok((await postedReviewBody(refused)).body.includes('FILE-LEVEL finding'));
+  assert.equal(((await new MockActivityEnvironment().run(refused.github.listReviewThreads, 77)) as ReviewThread[]).length, 0, 'no thread exists');
+});
+
+test('the reviewer: more file-level findings than the cap open the cap and list the rest as advisory', async () => {
+  const s = await scenario();
+  await s.script(1, findingsScript(Array.from({ length: MAX_FILE_THREADS + 2 }, (_, index) => ({ path: 'atlas.txt', line: 40 + index, body: `OVER finding ${index}` }))));
+  await s.run(s.activities.runReviewerSession);
+  const posted = await s.run(s.activities.postSessionReview);
+  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 0, fileLevel: MAX_FILE_THREADS, nearest: 0, advisory: 2, omitted: 0 });
+  assert.equal((await threadPosts(s)).length, MAX_FILE_THREADS);
+  const review = await postedReviewBody(s);
+  assert.ok(review.body.includes(`(the review is at its cap of ${MAX_FILE_THREADS} file-level threads)`) && review.body.includes(`OVER finding ${MAX_FILE_THREADS + 1}`));
+});
+
+test('the reviewer: a posting that fails after the threads is retried without opening a second thread', async () => {
+  const s = await scenario((state) => {
+    // The listing of reviews goes through, then the POST of the review fails once.
+    state.faults.push({ match: 'pulls/77/reviews', skip: 1, times: 1, stdout: httpAnswer(502, { message: 'Bad Gateway' }), exit: 1 });
+  });
+  await s.script(1, findingsScript([FILE_THREAD]));
+  await s.run(s.activities.runReviewerSession);
+  await assert.rejects(s.run(s.activities.postSessionReview));
+  assert.equal((await threadPosts(s)).length, 1, 'the thread was opened before the review failed');
+  assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: true, comments: 0, fileLevel: 1, nearest: 0, advisory: 0, omitted: 0 });
+  assert.equal((await threadPosts(s)).length, 1, 'the retry found the thread by its key');
+  assert.equal(((await new MockActivityEnvironment().run(s.github.listReviewThreads, 77)) as ReviewThread[]).length, 1);
 });
 
 test('the reviewer: when the diff cannot be read, findings that cannot be placed stop the run (DiffUnreadable), and no finding means the review is still posted', async () => {
@@ -484,7 +659,7 @@ test('the reviewer: when the diff cannot be read, findings that cannot be placed
   const clean = await scenario();
   await clean.script(1, `printf '{"summary":"Nothing found.","findings":[],"acceptedThreadIds":[]}' > review-findings.json`);
   await clean.run(clean.activities.runReviewerSession);
-  assert.deepEqual(await clean.run(clean.activities.postSessionReview, { base: 'no-such-branch' }), { reviewId: 5001, posted: true, comments: 0, advisory: 0, omitted: 0 });
+  assert.deepEqual(await clean.run(clean.activities.postSessionReview, { base: 'no-such-branch' }), { reviewId: 5001, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 });
 });
 
 test('a committed directory named like the fixer replies file is a classified stop too', async () => {

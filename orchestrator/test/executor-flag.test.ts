@@ -160,7 +160,7 @@ function fakeActivities() {
       worldOf(input.issue).hit('runReviewerSession');
       return { findings: 0, acceptedThreadIds: [] };
     },
-    postSessionReview: async () => ({ reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0 }),
+    postSessionReview: async () => ({ reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 }),
     getGateStatus: async (pr: number) => {
       const open = worldOf(pr - PR_OFFSET).openThread;
       return { headSha: HEAD, reviewsOnHead: 1, unresolvedThreads: open ? 1 : 0, clear: !open, pr };
@@ -169,7 +169,7 @@ function fakeActivities() {
       worldOf(input.issue).hit('runRemoteReviewerSession');
       return { findings: 1, acceptedThreadIds: [], commentNodeId: 'IC_raw1' };
     },
-    postRemoteSessionReview: async () => ({ reviewId: 2, posted: true, comments: 1, advisory: 0, omitted: 0 }),
+    postRemoteSessionReview: async () => ({ reviewId: 2, posted: true, comments: 1, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 }),
     // The remote fixer (#675) has its own tests (test/remote-fixer.test.ts); here it only has to be reached, and it stops the run.
     runRemoteFixerSession: async (input: { issue: number }) => {
       worldOf(input.issue).hit('runRemoteFixerSession');

@@ -289,7 +289,7 @@ function fakeActivities() {
     postRemoteSessionReview: async (input: { headSha: string }) => {
       world.reviewed.add(input.headSha);
       world.reviews.push(input.headSha);
-      return { reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0 };
+      return { reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 };
     },
     minimizeFindingsComment: async () => ({ minimized: true }),
     listOpenThreads: async () => ({ threads: [] }),

@@ -106,9 +106,13 @@ export interface PostedReviewResult {
   readonly posted: boolean;
   /** Findings posted as inline comments, on lines the commit changes. */
   readonly comments: number;
-  /** Findings on lines the commit does not change, listed in the review body (advisory: they open no thread). */
+  /** Findings on an unchanged line of a changed file, opened as file-level review threads (#714). They hold the gate. */
+  readonly fileLevel: number;
+  /** Findings that wanted a file-level thread, could not get one, and were placed on the nearest changed line of their file (#714). They hold the gate. */
+  readonly nearest: number;
+  /** Findings that open no thread (a file the commit does not change, the cap of file-level threads, a thread GitHub refused), listed in the review body. */
   readonly advisory: number;
-  /** Findings on unchanged lines left out of the body because it is at its size bound. Counted, never silent. */
+  /** Advisory findings left out of the body because it is at its size bound. Counted, never silent. */
   readonly omitted: number;
 }
 
@@ -225,42 +229,99 @@ export function changedLines(diff: string): ChangedLines {
   return files;
 }
 
+/** Why a finding opened no thread: it is listed in the review body instead. */
+export type AdvisoryReason = 'file_not_in_diff' | 'thread_cap' | 'thread_failed';
+
+export interface AdvisoryFinding extends Finding {
+  readonly reason: AdvisoryReason;
+}
+
+/** The most file-level threads one review opens (#714). A finding past it is advisory, with its reason, never dropped. */
+export const MAX_FILE_THREADS = 10;
+
 export interface SplitFindings {
   /** On a line the commit changes: an inline comment GitHub accepts. */
   readonly inline: readonly Finding[];
-  /** Anywhere else: GitHub would reject the whole review (422), so these go in the review body. */
-  readonly advisory: readonly Finding[];
+  /** On an unchanged line of a file the commit changes: a file-level thread (#714), at most `MAX_FILE_THREADS`. */
+  readonly fileLevel: readonly Finding[];
+  /** Anywhere else. An inline comment on such a line makes GitHub reject the whole review (422), and a file the commit does not change has no diff to hang a thread on. */
+  readonly advisory: readonly AdvisoryFinding[];
 }
 
-/** `undefined` for `changed` means the diff could not be read: nothing can be shown to sit on a changed line. */
+/**
+ * `undefined` for `changed` means the diff could not be read: nothing can be shown to sit on a changed line, and no file is
+ * known to be in the diff. A file is in the diff when it has an entry in `changed`, even one with no added line (a file that
+ * only lost lines): a thread can hang on it, a comment on a line cannot.
+ */
 export function splitFindings(findings: readonly Finding[], changed: ChangedLines | undefined): SplitFindings {
   const inline: Finding[] = [];
-  const advisory: Finding[] = [];
+  const fileLevel: Finding[] = [];
+  const advisory: AdvisoryFinding[] = [];
   for (const finding of findings) {
-    const ranges = changed?.get(finding.path) ?? [];
-    (ranges.some(([from, to]) => finding.line >= from && finding.line <= to) ? inline : advisory).push(finding);
+    const ranges = changed?.get(finding.path);
+    if (ranges === undefined) {
+      advisory.push({ ...finding, reason: 'file_not_in_diff' });
+    } else if (ranges.some(([from, to]) => finding.line >= from && finding.line <= to)) {
+      inline.push(finding);
+    } else if (fileLevel.length < MAX_FILE_THREADS) {
+      fileLevel.push(finding);
+    } else {
+      advisory.push({ ...finding, reason: 'thread_cap' });
+    }
   }
-  return { inline, advisory };
+  return { inline, fileLevel, advisory };
+}
+
+/**
+ * The changed line of a file that is nearest to `line`: the smallest distance, and on a tie the earlier line. `undefined`
+ * when the file has no changed line on its new side (a file that only lost lines).
+ */
+export function nearestChangedLine(ranges: readonly (readonly [number, number])[], line: number): number | undefined {
+  let best: number | undefined;
+  for (const [from, to] of ranges) {
+    const candidate = Math.min(Math.max(line, from), to);
+    if (best === undefined || Math.abs(candidate - line) < Math.abs(best - line) || (Math.abs(candidate - line) === Math.abs(best - line) && candidate < best)) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+/** The first comment of a file-level thread: the path and the original line are in the text, because the thread has no line (#714). */
+export function fileThreadBody(finding: Finding): string {
+  return `Finding on \`${finding.path}:${finding.line}\`, a line this commit does not change, so it is raised on the file.\n\n${finding.body}`;
+}
+
+/** The first comment of a thread placed on the nearest changed line: it says that it is placed there and where it belongs (#714). */
+export function nearestThreadBody(finding: Finding, placedAt: number): string {
+  return `Finding on \`${finding.path}:${finding.line}\`, a line this commit does not change. A file-level thread could not be created, so it is placed on line ${placedAt}, the nearest changed line of this file. It belongs on line ${finding.line}.\n\n${finding.body}`;
 }
 
 /** The most the advisory findings add to a review body, so the body stays far under GitHub's limit. */
 export const MAX_ADVISORY_CHARS = 20_000;
 
+const REASON_TEXT: Readonly<Record<AdvisoryReason, string>> = {
+  file_not_in_diff: 'the file is not changed by this commit',
+  thread_cap: `the review is at its cap of ${MAX_FILE_THREADS} file-level threads`,
+  thread_failed: 'GitHub did not accept a thread for it',
+};
+
 /**
  * The advisory findings as a section of the review body: what fits, then a count of the rest. The text of a finding
- * is already sanitised. Returns the section and how many were left out.
+ * is already sanitised. Each entry says why it opened no thread. Returns the section and how many were left out.
  */
-export function advisorySection(advisory: readonly Finding[]): { readonly text: string; readonly listed: number; readonly omitted: number } {
+export function advisorySection(advisory: readonly (Finding & { readonly reason?: AdvisoryReason })[]): { readonly text: string; readonly listed: number; readonly omitted: number } {
   if (advisory.length === 0) {
     return { text: '', listed: 0, omitted: 0 };
   }
   const lines = [
-    `${advisory.length} finding${advisory.length === 1 ? ' is' : 's are'} on lines this commit does not change, so GitHub cannot attach ${advisory.length === 1 ? 'it' : 'them'} to the diff. ${advisory.length === 1 ? 'It is' : 'They are'} listed here, are **advisory** and open no thread, so ${advisory.length === 1 ? 'it does' : 'they do'} not hold the gate.`,
+    `${advisory.length} finding${advisory.length === 1 ? '' : 's'} could not be attached to the diff or opened as a thread. ${advisory.length === 1 ? 'It is' : 'They are'} listed here, ${advisory.length === 1 ? 'is' : 'are'} **advisory** and open no thread, so ${advisory.length === 1 ? 'it does' : 'they do'} not hold the gate.`,
   ];
   let size = lines[0]?.length ?? 0;
   let listed = 0;
   for (const finding of advisory) {
-    const entry = `\n- \`${finding.path}:${finding.line}\`\n${finding.body.split('\n').map((row) => `  > ${row}`).join('\n')}`;
+    const why = finding.reason === undefined ? '' : ` (${REASON_TEXT[finding.reason]})`;
+    const entry = `\n- \`${finding.path}:${finding.line}\`${why}\n${finding.body.split('\n').map((row) => `  > ${row}`).join('\n')}`;
     if (size + entry.length > MAX_ADVISORY_CHARS) {
       break;
     }

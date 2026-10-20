@@ -230,7 +230,7 @@ function fakeActivities() {
       return { changed: true, status };
     },
     runReviewerSession: async () => ({ findings: 0, acceptedThreadIds: [] }),
-    postSessionReview: async () => ({ reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0 }),
+    postSessionReview: async () => ({ reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 }),
     // Every head the PR shows has one review and no thread: the gate's own half is clear, so the host check is what decides.
     getGateStatus: async (pr: number) => {
       const w = worldOfIssue(pr - PR_OFFSET);

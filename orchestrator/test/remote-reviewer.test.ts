@@ -206,6 +206,7 @@ async function remoteScenario(
     listReviewThreads: github.listReviewThreads,
     replyToThread: github.replyToThread,
     postReview: github.postReview,
+    addReviewThread: github.addReviewThread,
     repo: fake.config.repo,
     claude: { ...loadClaudeConfig({}), claudeBin: '/nonexistent/claude' },
     ...(withRemote
@@ -256,7 +257,7 @@ test('the remote reviewer: one session, the findings comment parsed, ONE sanitis
   assert.equal(r.sessions[0]?.['findingsMarker'], findingsMarker(77, r.head, 0), 'the wait is told the same key (#687)');
 
   const posted = await r.run(r.activities.postRemoteSessionReview);
-  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 1, advisory: 0, omitted: 0 });
+  assert.deepEqual(posted, { reviewId: 5001, posted: true, comments: 1, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 });
   assert.equal(await reviewPosts(r), 1);
   const sent = (await r.fake.callsMatching('/pulls/77/reviews')).filter((call) => call.argv.includes('POST'))[0];
   const body = JSON.parse(sent?.stdin ?? '{}') as { event: string; commit_id: string; body: string; comments: { body: string; path: string; line: number }[] };
@@ -270,7 +271,7 @@ test('the remote reviewer: one session, the findings comment parsed, ONE sanitis
   // A retry of either step is a no-op: no second session, no second review.
   assert.deepEqual(await r.run(r.activities.runRemoteReviewerSession), round);
   assert.equal(r.sessions.length, 1, 'a finished round is not run again');
-  assert.deepEqual(await r.run(r.activities.postRemoteSessionReview), { reviewId: 5001, posted: false, comments: 1, advisory: 0, omitted: 0 });
+  assert.deepEqual(await r.run(r.activities.postRemoteSessionReview), { reviewId: 5001, posted: false, comments: 1, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 });
   assert.equal(await reviewPosts(r), 1);
 
   // Hiding is idempotent and records the node id once.
@@ -282,7 +283,7 @@ test('the remote reviewer: one session, the findings comment parsed, ONE sanitis
 test('the remote reviewer: a reviewer that finds nothing writes an empty list, and the review says so', async () => {
   const r = await remoteScenario((head) => [rawFindings(head, { summary: 'Nothing to fix.', findings: [], acceptedThreadIds: [] })]);
   assert.deepEqual(await r.run(r.activities.runRemoteReviewerSession), { findings: 0, acceptedThreadIds: [], commentNodeId: 'IC_801' });
-  assert.deepEqual(await r.run(r.activities.postRemoteSessionReview), { reviewId: 5001, posted: true, comments: 0, advisory: 0, omitted: 0 });
+  assert.deepEqual(await r.run(r.activities.postRemoteSessionReview), { reviewId: 5001, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 });
 });
 
 test('the remote reviewer: a forged findings comment from an untrusted author is ignored, and nothing is posted from it', async () => {

@@ -469,7 +469,7 @@ function fakeActivities() {
       worldOf(input.issue).hit('runRemoteReviewerSession');
       return { findings: 1, acceptedThreadIds: [], commentNodeId: 'IC_raw1' };
     },
-    postRemoteSessionReview: async () => ({ reviewId: 2, posted: true, comments: 1, advisory: 0, omitted: 0 }),
+    postRemoteSessionReview: async () => ({ reviewId: 2, posted: true, comments: 1, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 }),
     minimizeFindingsComment: async () => ({ minimized: true as const }),
     getGateStatus: async (pr: number) => ({
       headSha: await remoteTip(worldOf(pr - PR_OFFSET).repos, `claude/${pr - PR_OFFSET}`),
