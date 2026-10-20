@@ -275,8 +275,8 @@ test('the tick bounds itself below its execution timeout, and the timeout is the
   assert.ok(4 * oneActivityWorstMs > QUEUE_TICK_TIMEOUT_MS, 'four failing reads alone outlast the execution timeout');
 });
 
-test('the tick interval takes minutes or hours, from 1 minute to 1 hour, and defaults to 5 minutes', () => {
-  assert.equal(parseEvery(undefined), 5 * 60_000);
+test('the tick interval takes minutes or hours, from 1 minute to 1 hour, and defaults to 1 minute', () => {
+  assert.equal(parseEvery(undefined), 60_000);
   assert.equal(parseEvery('1m'), 60_000);
   assert.equal(parseEvery('15m'), 15 * 60_000);
   assert.equal(parseEvery('1h'), 60 * 60_000);
@@ -289,7 +289,7 @@ const FLAGS: QueueFlags = { cap: undefined, every: undefined, base: undefined, r
 
 test('the script arguments: create takes the flags, the other commands take none, nothing else is a command', () => {
   const created = parseQueueArgs(['create'], { ...FLAGS, repoDir: '/work/repo' });
-  assert.deepEqual(created, { command: 'create', input: { repoDir: '/work/repo', base: 'main' }, everyMs: 300_000 });
+  assert.deepEqual(created, { command: 'create', input: { repoDir: '/work/repo', base: 'main' }, everyMs: 60_000 });
   assert.deepEqual(parseQueueArgs(['create'], { ...FLAGS, repoDir: '/work/repo', cap: '2', every: '10m', base: 'feature/atlas', hostIntegration: true, executor: 'local' }), {
     command: 'create',
     input: { cap: 2, repoDir: '/work/repo', base: 'feature/atlas', hostIntegration: 'auto', executor: 'local' },
