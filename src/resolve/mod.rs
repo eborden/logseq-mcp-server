@@ -228,18 +228,15 @@ pub async fn resolve_page(client: &LogseqClient, input: &str) -> Result<Resoluti
     Ok(Resolution::NotFound)
 }
 
-/// Closest page names for a missing page, best first. Best-effort: when the page list can't be
-/// fetched the suggestions are just empty, but connection, timeout and auth errors propagate, and
-/// so does an answer this server can't read (#202). Costs one `getAllPages` call.
+/// Closest page names for a missing page, best first. Every failure of the page list propagates
+/// (BR-0003, #656): a connection, timeout or auth error, an HTTP status, an API error body and an
+/// answer this server can't read (#202). Only a page list that is read and matches nothing gives
+/// empty suggestions. Costs one `getAllPages` call.
 pub async fn suggest_pages(client: &LogseqClient, input: &str) -> Result<Vec<String>, ToolError> {
     if iso_date_to_journal_day(input).is_some() {
         return Ok(Vec::new()); // fuzzy-matching a date finds nothing useful
     }
-    let answer = match client.call_api(GET_ALL_PAGES, &[]).await {
-        Ok(answer) => answer,
-        Err(error) if error.is_infrastructure() => return Err(error.into()),
-        Err(_) => return Ok(Vec::new()),
-    };
+    let answer = client.call_api(GET_ALL_PAGES, &[]).await?;
     // A page with no original name has nothing to match against
     let names: Vec<String> = wire::page_names(&answer, GET_ALL_PAGES)?.unwrap_or_default().into_iter().flatten().collect();
     let targets: Vec<&str> = names.iter().map(String::as_str).collect();
