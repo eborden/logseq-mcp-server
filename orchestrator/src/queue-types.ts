@@ -29,11 +29,23 @@ export const MIN_TICK_MS = 60_000;
 export const MAX_TICK_MS = 60 * 60_000;
 
 /**
- * The longest one tick may run, as the schedule's workflow execution timeout. A tick is a handful of reads and starts,
- * each bounded by QUEUE_ACTIVITY_OPTIONS, so ten minutes is generous; the bound keeps a stuck tick from holding the
- * overlap policy (skip) against every later one.
+ * The longest one tick may run, as the schedule's workflow execution timeout. The overlap policy (skip) holds every later
+ * tick back while one runs, so this is also the longest a stuck tick can hold the schedule.
+ *
+ * The sum of the activity retry bounds is far longer than this: one failing read can take 3 attempts of 2 minutes plus
+ * backoff (about 6 minutes 15 seconds), a tick makes 4 reads, and then one start attempt per eligible issue (up to 50).
+ * Sizing the execution timeout to that would hold the schedule for hours, so the tick bounds itself instead: the workflow
+ * gives up at QUEUE_TICK_DEADLINE_MS and returns a failed report (`TickDeadline`, the step it was in), and the execution
+ * timeout sits a margin above that deadline, so Temporal never kills a tick before it has answered. A start cut off by the
+ * deadline may still have happened; the next tick finds the run open and counts it (`already_running`).
  */
+export const QUEUE_TICK_TIMEOUT_MS = 10 * 60_000;
 export const QUEUE_TICK_TIMEOUT = '10 minutes';
+export const QUEUE_TICK_DEADLINE_MS = 8 * 60_000;
+/** The deadline of a tick may be set shorter in the input, for tests; it is never longer than QUEUE_TICK_DEADLINE_MS. */
+export const MIN_TICK_DEADLINE_MS = 1_000;
+/** The failure type word of a tick that hit its deadline. */
+export const TICK_DEADLINE_REASON = 'TickDeadline';
 
 // ---- the activities ------------------------------------------------------------------------------------------
 
@@ -85,10 +97,13 @@ export interface QueueRunTemplate {
 export interface QueueWatcherInput extends QueueRunTemplate {
   /** The most runs in flight. Absent means DEFAULT_QUEUE_CAP. */
   readonly cap?: number;
+  /** The tick's own deadline in milliseconds, from MIN_TICK_DEADLINE_MS to QUEUE_TICK_DEADLINE_MS. Absent means the latter. Short values are for tests. */
+  readonly tickDeadlineMs?: number;
 }
 
 export interface ParsedQueueInput {
   readonly cap: number;
+  readonly deadlineMs: number;
   readonly run: QueueRunTemplate;
 }
 
@@ -102,7 +117,12 @@ export function parseQueueWatcherInput(raw: unknown): ParsedQueueInput {
   if (typeof cap !== 'number' || !Number.isSafeInteger(cap) || cap < MIN_QUEUE_CAP || cap > MAX_QUEUE_CAP) {
     throw new InvalidQueueInputError(`cap must be a whole number from ${MIN_QUEUE_CAP} to ${MAX_QUEUE_CAP}`);
   }
-  return { cap, run: parseRunTemplate(raw) };
+  const deadlineRaw: unknown = 'tickDeadlineMs' in raw ? raw.tickDeadlineMs : undefined;
+  const deadlineMs = deadlineRaw === undefined ? QUEUE_TICK_DEADLINE_MS : deadlineRaw;
+  if (typeof deadlineMs !== 'number' || !Number.isSafeInteger(deadlineMs) || deadlineMs < MIN_TICK_DEADLINE_MS || deadlineMs > QUEUE_TICK_DEADLINE_MS) {
+    throw new InvalidQueueInputError(`tickDeadlineMs must be a whole number from ${MIN_TICK_DEADLINE_MS} to ${QUEUE_TICK_DEADLINE_MS}`);
+  }
+  return { cap, deadlineMs, run: parseRunTemplate(raw) };
 }
 
 /**
@@ -146,9 +166,13 @@ export interface StartQueuedRunInput {
   readonly run: QueueRunTemplate;
 }
 
+/**
+ * What `startQueuedRun` found, as `startIssueRun` tells it. The watcher needs the three apart: an `already_running` run is open
+ * and holds a slot (a start whose result was lost and is retried lands here too, as does a run the list had not shown yet), and an
+ * `already_finished` one is closed and holds none.
+ */
 export interface StartQueuedRunResult {
-  /** True when this call started the run. False means the ID `issue-<n>` already exists (open or closed): nothing was started. */
-  readonly started: boolean;
+  readonly status: 'started' | 'already_running' | 'already_finished';
 }
 
 /** Parses a start request at the activity's boundary. */
@@ -169,8 +193,11 @@ export function parseStartQueuedRunInput(raw: unknown): StartQueuedRunInput {
 
 // ---- the tick report ----------------------------------------------------------------------------------------
 
-/** Why a listed Ready issue did not start: the eligibility reasons, then the cap and a run that already used the ID. */
-export type TickSkipReason = SkipReason | 'over_cap' | 'id_already_ran';
+/**
+ * Why a listed Ready issue did not start: the eligibility reasons, then the cap, an open run the start found (`already_running`:
+ * it holds a slot) and a closed one (`id_already_ran`: it holds none).
+ */
+export type TickSkipReason = SkipReason | 'over_cap' | 'already_running' | 'id_already_ran';
 
 export interface TickSkip {
   readonly number: number;
