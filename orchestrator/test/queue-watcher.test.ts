@@ -38,9 +38,14 @@ import {
   InvalidQueueInputError,
   MAX_QUEUE_CAP,
   MAX_TICK_SKIPS_REPORTED,
+  MIN_TICK_DEADLINE_MS,
   QUEUE_ACTIVITY_OPTIONS,
+  QUEUE_TICK_DEADLINE_MS,
+  QUEUE_TICK_TIMEOUT,
+  QUEUE_TICK_TIMEOUT_MS,
   QUEUE_SCHEDULE_ID,
   QUEUE_WATCHER_WORKFLOW_NAME,
+  TICK_DEADLINE_REASON,
   parseQueueWatcherInput,
   parseStartQueuedRunInput,
 } from '../src/queue-types.ts';
@@ -63,7 +68,11 @@ const CANARY = 'canary text that must never reach a report';
 
 test('the watcher input defaults the cap to 3, bounds it from 1 to 10 and keeps only the run template', () => {
   assert.equal(DEFAULT_QUEUE_CAP, 3);
-  assert.deepEqual(parseQueueWatcherInput(RUN), { cap: 3, run: RUN });
+  assert.deepEqual(parseQueueWatcherInput(RUN), { cap: 3, deadlineMs: QUEUE_TICK_DEADLINE_MS, run: RUN });
+  assert.equal(parseQueueWatcherInput({ ...RUN, tickDeadlineMs: MIN_TICK_DEADLINE_MS }).deadlineMs, MIN_TICK_DEADLINE_MS);
+  for (const bad of [0, 999, QUEUE_TICK_DEADLINE_MS + 1, 1.5, '1000']) {
+    assert.throws(() => parseQueueWatcherInput({ ...RUN, tickDeadlineMs: bad }), /tickDeadlineMs must be a whole number/, String(bad));
+  }
   assert.deepEqual(parseQueueWatcherInput({ ...RUN, cap: 1 }).cap, 1);
   assert.deepEqual(parseQueueWatcherInput({ ...RUN, cap: MAX_QUEUE_CAP }).cap, 10);
   assert.deepEqual(parseQueueWatcherInput({ ...RUN, hostIntegration: 'auto', executor: 'remote', extra: 'dropped' }).run, { ...RUN, hostIntegration: 'auto', executor: 'remote' });
@@ -91,6 +100,17 @@ test('every activity of a tick has a start-to-close timeout of about two minutes
   assert.equal(QUEUE_ACTIVITY_OPTIONS.retry?.maximumAttempts, 3);
   assert.ok(QUEUE_ACTIVITY_OPTIONS.retry?.nonRetryableErrorTypes?.includes('TooLarge'));
   assert.ok(QUEUE_ACTIVITY_OPTIONS.retry?.nonRetryableErrorTypes?.includes('TooManyRuns'));
+});
+
+test('the tick bounds itself below its execution timeout, and the timeout is the one the schedule sets', () => {
+  assert.equal(QUEUE_TICK_TIMEOUT_MS, 10 * 60_000);
+  assert.equal(QUEUE_TICK_TIMEOUT, '10 minutes');
+  // The execution timeout sits a margin above the deadline, so Temporal never kills a tick before it has answered with a report.
+  assert.ok(QUEUE_TICK_DEADLINE_MS + 60_000 <= QUEUE_TICK_TIMEOUT_MS, 'a margin of at least a minute above the deadline');
+  // Why the tick needs its own deadline: the retry bounds of its activities add up to far more than the execution timeout.
+  const attempts = QUEUE_ACTIVITY_OPTIONS.retry?.maximumAttempts ?? 0;
+  const oneActivityWorstMs = attempts * 2 * 60_000 + 5_000 + 10_000;
+  assert.ok(4 * oneActivityWorstMs > QUEUE_TICK_TIMEOUT_MS, 'four failing reads alone outlast the execution timeout');
 });
 
 test('the tick interval takes minutes or hours, from 1 minute to 1 hour, and defaults to 5 minutes', () => {
@@ -150,10 +170,14 @@ class World {
   trustLimit = 50;
   running: number[] = [];
   otherRuns = 0;
-  /** Issue numbers whose `issue-<n>` ID exists, open or closed (the server rejects a second start). */
+  /** Issue numbers whose `issue-<n>` ID exists (the server rejects a second start): open when also in `running`, closed otherwise. */
   everStarted = new Set<number>();
   /** The list of running runs answers empty, as a visibility store that has not caught up. */
   hideRunning = false;
+  /** Issue numbers whose first start does its side effect and then fails, as a worker that dies before the result is recorded. */
+  loseResultOnce = new Set<number>();
+  /** Activity name to a delay in milliseconds before it answers. */
+  delays = new Map<string, number>();
   /** Activity name (or `startQueuedRun:<n>`) to the failure it throws. */
   failures = new Map<string, ApplicationFailure>();
   readonly trustReads: number[][] = [];
@@ -176,6 +200,10 @@ function fakeGithubReads() {
       return { ready: [...world.ready], blocked: world.blocked };
     },
     listTakenIssues: async (): Promise<TakenIssues> => {
+      const delay = world.delays.get('listTakenIssues');
+      if (delay !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
       failIf('listTakenIssues');
       return { taken: [...world.taken], untrustedPullRequests: 0 };
     },
@@ -199,12 +227,18 @@ function fakeQueueActivities() {
       world.startCalls.push(input);
       failIf('startQueuedRun');
       failIf(`startQueuedRun:${input.issue}`);
+      if (world.running.includes(input.issue)) {
+        return { status: 'already_running' };
+      }
       if (world.everStarted.has(input.issue)) {
-        return { started: false };
+        return { status: 'already_finished' };
       }
       world.everStarted.add(input.issue);
       world.running.push(input.issue);
-      return { started: true };
+      if (world.loseResultOnce.delete(input.issue)) {
+        throw new Error('simulated: the worker died after the start, before its result was recorded');
+      }
+      return { status: 'started' };
     },
   };
 }
@@ -245,6 +279,7 @@ after(async () => {
 });
 
 let ticks = 0;
+const lastTickId = (): string => `queue-tick-${ticks}`;
 
 async function tick(queue: string, input: object = { ...RUN, cap: 3 }): Promise<TickReport> {
   ticks += 1;
@@ -368,25 +403,90 @@ test('an issue whose ID already ran is skipped with that reason and does not use
   ]);
 });
 
-test('a second tick right after the first starts nothing new for the same issues, even if the run list is stale', async () => {
+test('a second tick right after the first starts nothing new for the same issues', async () => {
   world = new World();
-  world.ready = [11, 12, 13];
+  world.ready = [11, 12, 13, 14];
   const first = await fakeTick();
   assert.deepEqual(first.started, [11, 12, 13]);
 
   const second = await fakeTick();
   assert.deepEqual(second.started, []);
-  assert.deepEqual(second.skipped.map((skip) => skip.reason), ['taken', 'taken', 'taken']);
+  assert.deepEqual(second.skipped, [
+    { number: 11, reason: 'taken' },
+    { number: 12, reason: 'taken' },
+    { number: 13, reason: 'taken' },
+    { number: 14, reason: 'over_cap' },
+  ]);
+  assert.equal(world.running.length, 3);
+});
 
-  // The visibility store has not caught up: the server's refusal of the ID is what keeps the issues from starting twice.
+test('a run list that lags still cannot push the open runs past the cap: an open run the start finds holds a slot', async () => {
+  world = new World();
+  world.ready = [11, 12, 13, 14];
+  const first = await fakeTick();
+  assert.deepEqual(first.started, [11, 12, 13]);
+
+  // The visibility store has not caught up, so the list shows no run and the tick sees 3 free slots. The server's refusal of
+  // each ID answers `already_running`, and the three refused starts use the three slots, so the fourth issue does not start.
   world.hideRunning = true;
   const stale = await fakeTick();
+  assert.equal(stale.inFlight, 0);
   assert.deepEqual(stale.started, []);
   assert.deepEqual(stale.skipped, [
-    { number: 11, reason: 'id_already_ran' },
-    { number: 12, reason: 'id_already_ran' },
-    { number: 13, reason: 'id_already_ran' },
+    { number: 11, reason: 'already_running' },
+    { number: 12, reason: 'already_running' },
+    { number: 13, reason: 'already_running' },
+    { number: 14, reason: 'over_cap' },
   ]);
+  assert.deepEqual(world.running.sort((a, b) => a - b), [11, 12, 13], 'never more open runs than the cap');
+});
+
+test('a start whose result was lost and is retried finds its own run open, and the cap still holds', async () => {
+  world = new World();
+  world.ready = [11, 12, 13, 14];
+  // The first start of 11 creates the run, then its result is lost; the activity is retried and the server refuses the ID.
+  world.loseResultOnce.add(11);
+
+  const report = await fakeTick();
+
+  assert.equal(report.outcome, 'ok');
+  assert.deepEqual(report.started, [12, 13]);
+  assert.deepEqual(report.skipped, [
+    { number: 11, reason: 'already_running' },
+    { number: 14, reason: 'over_cap' },
+  ]);
+  assert.deepEqual(world.running.sort((a, b) => a - b), [11, 12, 13], 'three open runs at cap 3, not four');
+  assert.deepEqual(world.startCalls.map((call) => call.issue), [11, 11, 12, 13], 'the lost start was retried once');
+});
+
+test('every activity of a tick runs with the bounded options: a start-to-close of 2 minutes and 3 attempts (the history shows it)', async () => {
+  world = new World();
+  world.ready = [11];
+  await fakeTick();
+
+  const history = await client.workflow.getHandle(lastTickId()).fetchHistory();
+  const scheduled = (history.events ?? []).flatMap((event) => (event.activityTaskScheduledEventAttributes === undefined || event.activityTaskScheduledEventAttributes === null ? [] : [event.activityTaskScheduledEventAttributes]));
+  assert.deepEqual(scheduled.map((attributes) => attributes.activityType?.name), ['listReadyIssues', 'listTakenIssues', 'listRunningIssues', 'checkTrustedIssues', 'startQueuedRun']);
+  for (const attributes of scheduled) {
+    assert.equal(Number(attributes.startToCloseTimeout?.seconds), 120, String(attributes.activityType?.name));
+    assert.equal(attributes.retryPolicy?.maximumAttempts, 3, String(attributes.activityType?.name));
+  }
+  // And the source passes the options to both proxies, so a change that drops them cannot hide behind the constant.
+  const source = await readFile(join(SRC_DIR, 'workflows/queue-watcher.ts'), 'utf8');
+  assert.equal((source.match(/proxyActivities<[^\n]*>\(QUEUE_ACTIVITY_OPTIONS\)/g) ?? []).length, 2);
+});
+
+test('a tick that is still working at its deadline returns a failed report with the step it was in, and starts nothing', async () => {
+  world = new World();
+  world.ready = [11, 12];
+  world.delays.set('listTakenIssues', 4_000);
+
+  const report = await fakeTick({ ...RUN, tickDeadlineMs: 1_000 });
+
+  assert.equal(report.outcome, 'failed');
+  assert.deepEqual(report.failure, { step: 'list_taken', reason: TICK_DEADLINE_REASON });
+  assert.deepEqual(report.started, []);
+  assert.equal(world.startCalls.length, 0);
 });
 
 test('a failed read fails the tick, names the step and the failure type, and starts nothing', async () => {
@@ -560,12 +660,12 @@ test('real runs: held runs count toward the cap, a second tick starts nothing ne
 test('the start activity is idempotent by workflow ID, and a bad request is refused as InvalidInput', async () => {
   const activities = createQueueActivities({ client, taskQueue: REAL_QUEUE });
 
-  assert.deepEqual(await activities.startQueuedRun({ issue: 601, run: RUN }), { started: true });
-  assert.deepEqual(await activities.startQueuedRun({ issue: 601, run: RUN }), { started: false }, 'open: a second start is refused');
+  assert.deepEqual(await activities.startQueuedRun({ issue: 601, run: RUN }), { status: 'started' });
+  assert.deepEqual(await activities.startQueuedRun({ issue: 601, run: RUN }), { status: 'already_running' }, 'open: a second start is refused and says the run is open');
   const startedWith = await release(issueWorkflowId(601));
   assert.equal(startedWith.issueNumber, 601);
   assert.equal('hostIntegration' in startedWith, false, 'no host integration unless the template asks');
-  assert.deepEqual(await activities.startQueuedRun({ issue: 601, run: RUN }), { started: false }, 'closed: the ID still cannot start again');
+  assert.deepEqual(await activities.startQueuedRun({ issue: 601, run: RUN }), { status: 'already_finished' }, 'closed: the ID still cannot start again, and says it is closed');
 
   await assert.rejects(activities.startQueuedRun({ issue: 0, run: RUN }), (error: unknown) => error instanceof ApplicationFailure && error.type === 'InvalidInput');
   await assert.rejects(activities.startQueuedRun({ issue: 602, run: { ...RUN, base: 'a..b' } }), (error: unknown) => error instanceof ApplicationFailure && error.type === 'InvalidInput');

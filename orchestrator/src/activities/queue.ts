@@ -7,7 +7,8 @@
 //   a Needs Input answer) is Running to Temporal, so it counts.
 // - `startQueuedRun`: starts `issue-<n>` through `startIssueRun` (src/issue-client.ts), the call `npm run run-issue` makes,
 //   with the input `buildRunInput` makes from the same flags. The start is idempotent by workflow ID: a second start of
-//   an ID that exists, open or closed, is refused by the server and answered here as `started: false`.
+//   an ID that exists is refused by the server and answered here as `already_running` (open) or `already_finished` (closed),
+//   so the watcher can count an open run against the cap and skip a closed one.
 //
 // No title, memo, input or other text from a workflow is read or returned. Numbers and one flag come out.
 
@@ -74,7 +75,7 @@ export function createQueueActivities(deps: QueueActivityDeps) {
       throw error;
     }
     const outcome = await startIssueRun(deps.client, deps.taskQueue, input);
-    return { started: outcome.status === 'started' };
+    return { status: outcome.status };
   }
 
   return { listRunningIssues, startQueuedRun };
