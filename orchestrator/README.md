@@ -538,6 +538,146 @@ Each prints one JSON line (`created`, `already_exists`, `paused`, `resumed`, `de
 
 **Never.** The watcher and its script do not merge, approve, apply a label, resolve a thread, move a board item or send the maintainer's decision signal. They read GitHub and start runs. `test/queue-watcher.test.ts` scans their source for those forms (the invariant scan of `test/invariants.ts`), and drills the cap, the held runs, the second tick and the script against a dev server.
 
+## Running the queue (#725)
+
+How a person runs the watcher. "The queue watcher" above says what one tick does; this says how to create, steer and read it. The script outputs quoted here were printed against a throwaway dev server. Every issue number in an example is made up.
+
+### The schedule
+
+```bash
+cd orchestrator
+npm run queue -- create [--cap N] [--every 5m] [--base <branch>] [--repo-dir <path>] [--host-integration] [--executor local|remote]
+npm run queue -- pause
+npm run queue -- resume
+npm run queue -- delete
+```
+
+Run it from `orchestrator/`. It reads `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE` and `TASK_QUEUE` like the worker does, so give both the same values ("Configuration"). Nothing creates the schedule for you, and there is only ever one, `queue-watcher`.
+
+| Command | Prints (one JSON line) | Notes |
+|---|---|---|
+| `create` | `{"status":"created","scheduleId":"queue-watcher","everyMs":300000,"cap":3}` | Running, not paused. `everyMs` and `cap` are what you asked for or the defaults |
+| `create` again | `{"status":"already_exists",...}`, and a line on stderr | Nothing changed, exit 0. To change a flag, `delete` and then `create` |
+| `pause` | `{"status":"paused",...}` | Stops new ticks and keeps the schedule and its flags. A tick already running finishes |
+| `resume` | `{"status":"resumed",...}` | Ticks go on from the next one due |
+| `delete` | `{"status":"deleted",...}` | A tick already running finishes, and the runs it started are not touched. The watcher has no way to stop a run |
+| `pause`, `resume` or `delete` with no schedule | `{"status":"not_found",...}`, and a line on stderr | Nothing changed, exit 0. Each command is safe to repeat |
+
+A bad flag prints one line on stderr and exits 1 before it connects (`cap must be a whole number from 1 to 10`, `--every must be a whole number of minutes or hours, like 5m, from 1m to 1h`, `--executor must be local or remote`, `base must be a plain branch name`). `pause`, `resume` and `delete` refuse any flag (`pause takes no flags: create sets them`): the flags belong to `create`. With no server listening the script prints `Failed to connect before the deadline` after 10 seconds and exits 1.
+
+**The flags** (all optional, `create` only). Each run the watcher starts is built from them, as `npm run run-issue` builds one from its own flags.
+
+| Flag | Default | Bounds | What it does |
+|---|---|---|---|
+| `--cap <n>` | `3` | a whole number, 1 to 10 | The most runs in flight ("The cap" below) |
+| `--every <n>m` or `<n>h` | `5m` | 1 minute to 1 hour; a bare number such as `5` is refused, the unit is required | The tick interval. A shorter one costs GitHub rate limit, because the board read is GraphQL through `gh` |
+| `--base <branch>` | `main` | a plain branch name: letters, digits, `.`, `_`, `-` and `/`, at most 100 characters, no `..`, no `//`, no trailing `/` or `.lock` | The branch each run's PR targets. Set it when the work lands on a feature branch |
+| `--repo-dir <path>` | the parent of the directory you run it from, which is the main checkout when you run it from `orchestrator/` | any path; a relative one is made absolute | The checkout the runs' worktrees are made from (`<repo-dir>/.claude/worktrees/issue-<n>`) |
+| `--host-integration` | off | takes no value (`--host-integration=false` is an error) | Every run does the host integration check at the gate ("The host integration check at the gate") |
+| `--executor <local\|remote>` | `local` | those two words | Where the model sessions run ("The executor flag"). `remote` needs the six `REMOTE_ROUTINE_*` variables on the worker, or each run stops at its first remote step as `RemoteExecutorUnavailable` |
+
+`run-issue` has three flags the watcher does not take: `--worktree-dir`, `--wait` and `--attempt`. The flags are stored in the schedule, so a run you start by hand gets only the flags you give `run-issue`. Add them to the commands a skip's `restart` gives you.
+
+**When ticks happen.** Ticks fall on the clock, on multiples of the interval: a `10m` schedule ticks at :00, :10, :20 and so on, so the first tick comes within one interval of `create`, not after a full one. `temporal schedule describe --schedule-id queue-watcher` shows the state, the flags and the next times, and `temporal schedule trigger --schedule-id queue-watcher` runs one tick now. The `temporal` CLI reads `TEMPORAL_ADDRESS` too. A tick with no worker running waits for one, up to its 10 minute execution timeout.
+
+### First time
+
+1. **Look at the Ready column first.** Every eligible Ready issue starts a run within one interval, up to the cap. Moving an item to Ready is the maintainer's, and from now on it is also the step that starts the work.
+2. **Start the server.** `npm run start-server` for the dev server on `127.0.0.1:7233`, or set `TEMPORAL_ADDRESS` (and `TEMPORAL_NAMESPACE`) to a real one, the same for the worker and the script.
+3. **Sign `gh` in on the machine the worker runs on**, with the `project` scope (`gh auth refresh -s project`): a tick reads the board, issues, pull requests and branches through it.
+4. **Start the worker** (`npm run worker`) and leave it running: it runs the watcher and every run it starts. For `--executor remote`, set the six `REMOTE_ROUTINE_*` variables first. For `--host-integration`, the same worker also needs `HOST_TASK_QUEUE=host` (and `HOST_REPO_DIR`) on the Mac that has LogSeq ("Host integration"); without it the check waits and the run stops with `IntegrationTimeout` after 2 hours.
+5. **Create the schedule small:** `npm run queue -- create --cap 1`, with the flags you want every run to have. Raise the cap later with `delete` and `create`.
+6. **Watch the first ticks** ("Reading a tick" below). `temporal schedule trigger --schedule-id queue-watcher` gives one at once.
+7. **Delete the schedule when you are done:** `npm run queue -- delete`. Runs it started go on without it.
+
+### The cap
+
+The cap is the most `issueWorkflow` runs in flight, and it is counted from the server, not from the board. **In flight is every `issueWorkflow` execution that is not closed**: a run you started by hand with `run-issue`, one held for the maintainer's decision, one parked on a Needs Input answer, and one with an unrelated ID all count. A tick starts at most `cap - inFlight` runs, the lowest issue numbers first, and reports the rest as `over_cap`. A run leaves the count only when it closes (merged, stopped for a person, timed out), so a PR waiting for the maintainer keeps its slot: with the cap at 3 and three runs waiting for a decision, nothing new starts until one is decided. The decision wait is at most 7 days, then the merge wait up to 7 days more ("The maintainer's decision"). A closed run holds no slot.
+
+### Reading a tick
+
+Each tick is a workflow named `queue-watcher-<time>`, and its result is the report. The `temporal` CLI prints an empty list as `null`.
+
+```bash
+temporal workflow list --query "WorkflowType='queueWatcher'" --limit 5
+temporal workflow result --workflow-id queue-watcher-2026-01-01T10:00:00Z
+```
+
+A report (made-up numbers: cap 2, one run in flight):
+
+```json
+{
+  "outcome": "ok",
+  "cap": 2,
+  "inFlight": 1,
+  "started": [12],
+  "skipped": [
+    { "number": 11, "reason": "blocked" },
+    { "number": 13, "reason": "over_cap" },
+    { "number": 14, "reason": "taken" },
+    { "number": 15, "reason": "untrusted" },
+    { "number": 16, "reason": "failed", "stopReason": "ProtectedPath",
+      "restart": ["temporal workflow delete --workflow-id issue-16", "npm run run-issue -- --issue 16"] }
+  ],
+  "skippedNotReported": 0,
+  "trustNotRead": 0,
+  "closedRuns": { "counts": { "failed": 1 }, "notLookedUp": 0 }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `outcome` | `ok`, or `failed` when a read or a start failed after its retries (see `failure`; "A failed tick" below) |
+| `cap` | The cap the schedule was created with |
+| `inFlight` | Open runs the tick counted before it started any ("The cap") |
+| `started` | The issues this tick started a run for, ascending. Empty is normal |
+| `skipped` | Each Ready issue that did not start, with a `reason` ("Skip reasons" below). At most 100 are named. Only a closed run's skip has `stopReason`, `restart` or `instead` |
+| `skippedNotReported` | How many skips the list left out because of that bound |
+| `trustNotRead` | Ready issues whose author the tick did not read (more than 50 candidates). They are skipped as `untrusted` and counted here |
+| `closedRuns` | Present when a Ready issue's `issue-<n>` run has closed: `counts` per reason, and `notLookedUp`, the closed runs past the 20 a tick reads. Absent otherwise |
+| `failure` | Present when `outcome` is `failed`: `{ "step", "reason" }` |
+
+The report holds issue numbers, counts and fixed words only. It never holds a title, a label or a line of an issue.
+
+### Skip reasons
+
+| Reason | Why the issue did not start | What a person does |
+|---|---|---|
+| `blocked` | An open blocked-by issue | Nothing. It starts on the first tick after the blocker's issue is closed. A merged PR closes the issue only when it merged into the default branch; for any other base, close the issue |
+| `taken` | An open PR for the issue (its head is `claude/<n>`, or it says `Closes #<n>`), a `claude/<n>` branch, or an open `issue-<n>` run | Nothing while a run or a PR is working on it. If nothing is: a leftover branch keeps the issue out until it is gone ("Recovering from an orphan remote branch", "Recovering a stuck branch") |
+| `untrusted` | The author is not an OWNER, MEMBER or COLLABORATOR, or the tick did not read the author (`trustNotRead`) | The watcher never starts it. Re-file it under a trusted account. A not-read number clears as lower numbers start or leave Ready |
+| `over_cap` | Eligible, but no slot was free | Nothing. The lowest numbers go first on a later tick when a run closes. Or raise the cap (`delete`, then `create`) |
+| `already_running` | The start found the `issue-<n>` run already open (a start whose answer was lost and was retried, or a run the list had not shown yet) | Nothing. It holds a slot |
+| `failed` | The run closed Failed. `stopReason` is the reason it recorded | `restart` is two commands to run in order, or `instead` says the PR is already open and to carry on by hand. Read "Closed runs (#724)" for which, and "Recovering a stuck run" for the reason |
+| `parked` | The run asked a question on the issue and no trusted comment answered in time | Answer on the issue, then run the `restart` commands. `<k>` is one more than the `attempt=` in the question comment's first line |
+| `terminated`, `timed_out`, `cancelled` | A person or the server closed the run, or it passed its 50 day limit | The `restart` commands, or `instead` |
+| `completed_but_open` | The run finished and its issue is still open and Ready | No command. `temporal workflow show --workflow-id issue-<n>`: close the issue if its PR merged, or read the `skipped` row of "Recovering a stuck run" |
+| `id_already_ran` | A closed run the tick did not read (past 20, or the read answered nothing) | `temporal workflow describe --workflow-id issue-<n>`, or wait for the next tick |
+
+The watcher never runs a `restart` command, and `--attempt` alone does not start a closed run: delete it first. A closed run's skip appears only for an issue that is in Ready and otherwise eligible. A run that stopped after it claimed the issue leaves the item In progress, In review or Needs Input, so the report does not mention it. Find those with `temporal workflow list --query "WorkflowType='issueWorkflow' AND ExecutionStatus='Failed'"`.
+
+### A failed tick
+
+A failed tick is a missed tick. A failed read (`list_ready`, `list_taken`, `list_running`, `check_trusted`) starts nothing and the next tick reads again, so one failure in a row needs nothing. A failed `start` keeps the starts before it in `started` and does not try the issues after it. A failed `run_status` comes after the starts, so they stand. The `reason` is the failure's type word, never its message. When the same one repeats, the worker's log has the rest:
+
+| Reason | What it says |
+|---|---|
+| `GitHubRateLimitExhausted`, `GitHubRateLimitTooLong` | `gh` is rate limited. Wait, or use a longer `--every` (`delete`, then `create`) |
+| `TooLarge` | More than 50 Ready items, or a list of PRs or branches past its page bound. Trim the Ready column |
+| `TooManyRuns` (`list_running`) | More than 200 open `issueWorkflow` runs, and a partial count would break the cap |
+| `TickDeadline` | The tick ran 8 minutes without finishing. `step` is where it was. A start it cut off may still have happened, and the next tick finds that run open |
+
+The 8 minute deadline sits 2 minutes under the tick's 10 minute execution timeout, so the report arrives instead of the server killing the tick with none.
+
+### With held runs, Needs Input and the board
+
+- **A run held for a decision** (the gate is clear and the run waits for `npm run signal`, or waits for the merge): open, so it keeps its slot. Its issue is In review, so the report does not name it. Deciding it, or the merge, frees the slot.
+- **A run parked on Needs Input**: open, so it keeps its slot for as long as it waits (7 days by default). Its board item is in Needs Input, not Ready, so the watcher does not name it. An answer on the issue lets the run go on. With no answer the run closes as `parked`, and the issue is in the report only once a person moves the item back to Ready.
+- **Backlog to Ready** is still the maintainer's. The watcher reads Ready and nothing else, so an issue enters the queue only when someone moves it there. The watcher never moves a board item.
+- **Putting an issue back in Ready after a run** starts nothing while its `issue-<n>` run exists, open or closed. The report says why ("Skip reasons").
+
+The watcher and the script never merge, approve, apply a label, resolve a thread or move a board item. They read GitHub and start runs, and a run stops at "gate clear" for the maintainer as one started by hand does.
+
 ## GitHub activities (#628)
 
 `src/activities/github.ts` holds the activities the workflow calls, built by `createGithubActivities(config)`: `listReadyIssues`, `readIssue`, `checkIssue`, `commentIssue`, `claimIssue`, `addToBoard`, `getBoardStatus`, `setStatus`, `openPr`, `postReview`, `getGateStatus` and, for the maintainer's decision (#631), `getPrState` (open, closed, merged: flags and the head SHA), `getPrChanges` (counts of golden, ceiling, ADR and business-rule files a PR changes, no paths) and `closeIssue` (closes an open issue of a trusted author as completed and reads it back). `checkIssue` is `readIssue` answered as numbers and flags (`{ number, open, trustedComments, droppedUntrustedComments }`), so the workflow can gate on an issue without the issue's text entering the stored history. `commentIssue({ issue, key, body })` posts one comment and a retry finds it by a hidden `<!-- orchestrator-comment:<key> -->` marker, looking only at comments of trusted authors (the same rule as `postReview`; it assumes this account's own comments count as trusted). Each is a thin wrapper over `gh` (`src/gh.ts`): one process per call, an argv array and never a shell string, a timeout (30 s) and an output cap, and an answer parsed at the boundary (`src/github-parse.ts`). A malformed answer fails with the path of the first mismatch, never a value and never a partial result.
