@@ -293,8 +293,10 @@ export function parseDiffHeaderName(text: string): string {
  * Parses `git diff -U0 --no-prefix --no-renames` into the lines each file changes on its new side. GitHub accepts an
  * inline comment only on a line the diff shows; with no context lines that is exactly these. The hunk's counts are
  * followed, so a changed line that reads `++ x` (shown as `+++ x`) is not taken for a file header. A file name git writes
- * C-quoted in a header is decoded to the raw path (#746), so a finding on it matches; a quoted name that is not what git writes
- * throws `MalformedDiffHeaderError`. Pure, no I/O.
+ * C-quoted in a header is decoded to the raw path (#746), so a finding on it matches. A quoted name that is not what git writes
+ * throws `MalformedDiffHeaderError` instead of the file being skipped or its name guessed: a skipped file would turn its
+ * findings into `file_not_in_diff` advisories that open no thread and hold no gate, while the caller treats a throw as an
+ * unreadable diff and stops (`DiffUnreadable`) when the review has findings. Do not make this lenient. Pure, no I/O.
  */
 export function changedLines(diff: string): ChangedLines {
   const files = new Map<string, [number, number][]>();
