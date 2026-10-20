@@ -39,6 +39,7 @@ import {
   MIN_DECISION_POLL_MS,
   MIN_DECISION_TIMEOUT_MS,
 } from './approval-types.ts';
+import type { HostIntegrationState } from './integration-policy.ts';
 import { MAX_FIX_ROUNDS_LIMIT, MAX_REVIEW_LOOP_TIMEOUT_MS, MIN_REVIEW_LOOP_TIMEOUT_MS } from './review-policy.ts';
 
 export interface IssueWorkflowInput {
@@ -426,4 +427,104 @@ export function waitingForThreadsComment(
   ]
     .filter((paragraph) => paragraph !== '')
     .join('\n\n');
+}
+
+// ---- the exit statements on the PR (#715) ---------------------------------------------------------------------------
+//
+// A reader of the PR cannot tell from the PR alone whether it is ready to merge, so the run says so on the PR where its
+// state changes: the gate is clear for a head, the gate is held by open threads, or the run stopped. Every statement is
+// built from counts, SHAs and ids and fixed words (no review, thread or model text), says it is a gate result and not an
+// approval, and is keyed so a replay or a retry posts it once. The workflow never decides anything: the maintainer does.
+
+/** What the `host/integration` status showed for the head when the gate cleared. */
+export type GateHostLine =
+  /** The run did not ask for the check (`hostIntegration` is `off` or absent). */
+  | { readonly kind: 'off' }
+  /** The run asked for it and the change does not need it. */
+  | { readonly kind: 'not_required' }
+  /** The check is required and its status was read. */
+  | { readonly kind: 'checked'; readonly state: HostIntegrationState; readonly counts?: { readonly passed: number; readonly failed: number } };
+
+export interface GateClearFacts {
+  readonly workflowId: string;
+  readonly issue: number;
+  readonly pr: number;
+  readonly headSha: string;
+  readonly fixRounds: number;
+  readonly reviewsOnHead: number;
+  readonly unresolvedThreads: number;
+  readonly host: GateHostLine;
+  /** Findings of the last review that sit in its body, not in a thread. */
+  readonly advisory: number;
+  /** Advisory findings that did not fit the review body. */
+  readonly advisoryOmitted: number;
+}
+
+/** The key of the gate-clear statement: the PR and the head, so a push gets its own and a retry posts once. */
+export function gateClearCommentKey(pr: number, headSha: string): string {
+  return `gate-clear-${pr}-${headSha}`;
+}
+
+function countOf(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+function hostLine(host: GateHostLine): string {
+  switch (host.kind) {
+    case 'off':
+      return 'host/integration: not asked for in this run.';
+    case 'not_required':
+      return 'host/integration: not required for this change.';
+    case 'checked':
+      return host.counts === undefined
+        ? `host/integration: ${host.state}.`
+        : `host/integration: ${host.state} (${host.counts.passed} passed, ${host.counts.failed} failed).`;
+  }
+}
+
+/**
+ * The gate-clear statement (#715). Counts, ids and fixed words only. It says this is a gate result and not an approval,
+ * and how the maintainer decides. It carries the head, so a statement for an older commit is visibly stale.
+ */
+export function gateClearComment(facts: GateClearFacts): string {
+  const advisory = facts.advisory + facts.advisoryOmitted;
+  return [
+    `**Gate clear** for head \`${facts.headSha}\` of #${facts.pr}, recorded by the orchestrator (workflow \`${facts.workflowId}\`). This is a gate result and not an approval: the orchestrator never approves, merges, labels or resolves anything.`,
+    [
+      `At this head: ${countOf(facts.reviewsOnHead, 'review')} on the head, ${countOf(facts.unresolvedThreads, 'unresolved review thread')}, ${countOf(facts.fixRounds, 'fix round')} used.`,
+      hostLine(facts.host),
+      advisory === 0
+        ? 'Advisory findings in the last review: none.'
+        : `Advisory findings in the last review: ${advisory} (${facts.advisoryOmitted} not listed in its body). They are in the body of the last review on this head, not in a thread, and they do not hold the gate: read that review.`,
+    ].join('\n'),
+    `The maintainer decides. From the orchestrator directory, \`npm run signal -- ${facts.issue} approved\` records an approval, and \`npm run signal -- ${facts.issue} changes_requested --message "..."\` asks for changes. The run reads the gate again before it uses a decision.`,
+    'A push moves the head and makes this statement stale. The next time the gate is clear on a new head, a new statement is posted for that commit.',
+  ].join('\n\n');
+}
+
+/** The key of the statement for a gate held by open threads: one per PR and head. */
+export function gateHeldCommentKey(pr: number, headSha: string): string {
+  return `gate-held-${pr}-${headSha}`;
+}
+
+/**
+ * The statement for `waiting_for_threads` on the PR (#715): what holds the gate, as counts and thread ids. The issue keeps its
+ * own, longer comment. Only a person resolves a thread.
+ */
+export function gateHeldComment(workflowId: string, pr: number, headSha: string, openThreads: number, acceptedThreadIds: readonly string[]): string {
+  return [
+    `**Gate not clear** for head \`${headSha}\` of #${pr}, recorded by the orchestrator (workflow \`${workflowId}\`). This is a gate result and not an approval.`,
+    `What holds it: ${countOf(openThreads, 'open review thread')}, ${acceptedThreadIds.length} of them with a reply the reviewer accepted${acceptedThreadIds.length === 0 ? '' : ` (thread ids: ${acceptedThreadIds.map((id) => `\`${id}\``).join(', ')})`}. The loop cannot act on the rest.`,
+    'Only a person resolves a review thread. The run keeps reading the gate, and when it is clear on a head it posts a gate-clear statement for that head.',
+  ].join('\n\n');
+}
+
+/** The key of the stop line on the PR: the step and the reason, as for the issue's stop comment. */
+export function stopPrCommentKey(step: IssueStep, reason: StopReason): string {
+  return `stopped-pr-${step}-${reason}`;
+}
+
+/** One line on the PR for a stop (#715): the reason and the step. The issue holds the detail. */
+export function stopPrComment(workflowId: string, step: IssueStep, reason: StopReason, issue: number): string {
+  return `The orchestrator stopped this run (workflow \`${workflowId}\`) at the step \`${step}\` with the reason \`${reason}\`. This is not an approval and the gate is not decided. A person needs to look: the detail is on issue #${issue}.`;
 }
