@@ -134,6 +134,18 @@ export function parseIssueHead(raw: unknown, expectedNumber: number): IssueHead 
   };
 }
 
+/**
+ * Whether an issue's author is trusted, and nothing else (#722): no text of the issue is read. The number is checked
+ * even for an untrusted issue, so an answer for another issue is a mismatch, not a verdict.
+ */
+export function parseIssueTrust(raw: unknown, expectedNumber: number): boolean {
+  const issue = obj(raw, WHAT_ISSUE, '$');
+  if (int(issue, 'number', WHAT_ISSUE, '$') !== expectedNumber) {
+    return mismatch(WHAT_ISSUE, '$.number');
+  }
+  return isTrustedAssociation(issue.get('author_association'));
+}
+
 /** One comment of a listing, or `undefined` when its author is not trusted (the text is never read). */
 export function parseComment(raw: unknown, path: string): IssueComment | undefined {
   const comment = obj(raw, 'issue comments', path);

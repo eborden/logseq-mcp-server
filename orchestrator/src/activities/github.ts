@@ -39,6 +39,7 @@ import {
   parseIssueHead,
   parseItemAuthor,
   parseIssueClosed,
+  parseIssueTrust,
   parseItemBoardStatus,
   parseList,
   parseMinimized,
@@ -101,6 +102,8 @@ import type {
   ReviewThread,
   SetStatusResult,
   SettableStatus,
+  TakenIssues,
+  TrustedIssues,
 } from '../types.ts';
 
 const PAGE_SIZE = 100;
@@ -108,6 +111,13 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 10;
 /** Most Ready items one call looks at. Each costs one request for its blockers. */
 const MAX_READY_ITEMS = 50;
+/** Most issue numbers `checkTrustedIssues` accepts, and most of them it reads in one call (one request each). */
+const MAX_TRUST_INPUT = 200;
+const MAX_TRUST_READS = 50;
+/** Most pages `listTakenIssues` reads of each list (open PRs, `claude/` branches). A longer list is reported as not read. */
+const MAX_TAKEN_PAGES = 5;
+/** The issue a `claude/<n>` or `claude/<n>-<slug>` branch name belongs to. */
+const CLAUDE_BRANCH_ISSUE = /^claude\/([1-9]\d{0,8})(?:-|$)/;
 const MAX_TEXT_CHARS = 60_000;
 const MAX_REVIEW_COMMENTS = 100;
 const HEARTBEAT_SLICE_MS = 5_000;
@@ -423,18 +433,32 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     what: string,
     parse: (element: unknown, path: string) => T | undefined,
   ): Promise<{ items: T[]; dropped: number }> {
+    const { items, dropped, complete } = await listPages(route, what, parse, MAX_PAGES);
+    if (!complete) {
+      throw new GhError(`${what}: more than ${MAX_PAGES * PAGE_SIZE} entries, which is more than one call reads`, 'output_too_large');
+    }
+    return { items, dropped };
+  }
+
+  /** Up to `maxPages` pages of a list. `complete` is false when the last page read was full, so more may follow and was not read. */
+  async function listPages<T>(
+    route: string,
+    what: string,
+    parse: (element: unknown, path: string) => T | undefined,
+    maxPages: number,
+  ): Promise<{ items: T[]; dropped: number; complete: boolean }> {
     const items: T[] = [];
     let dropped = 0;
-    for (let page = 1; page <= MAX_PAGES; page += 1) {
+    for (let page = 1; page <= maxPages; page += 1) {
       const separator = route.includes('?') ? '&' : '?';
       const parsed = parseList(await gh.api(`${route}${separator}per_page=${PAGE_SIZE}&page=${page}`), what, parse);
       items.push(...parsed.items);
       dropped += parsed.length - parsed.items.length;
       if (parsed.length < PAGE_SIZE) {
-        return { items, dropped };
+        return { items, dropped, complete: true };
       }
     }
-    throw new GhError(`${what}: more than ${MAX_PAGES * PAGE_SIZE} entries, which is more than one call reads`, 'output_too_large');
+    return { items, dropped, complete: false };
   }
 
   async function boardLookup(item: BoardItemRef): Promise<BoardLookup> {
@@ -543,6 +567,51 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
       }
     }
     return { ready, blocked };
+  }
+
+  /**
+   * Which of these issues were written by an OWNER, MEMBER or COLLABORATOR (#722), as numbers only: no text of any issue
+   * and not the association itself is returned. An untrusted author is an answer here, not a failure, so a list with one
+   * outsider's issue still answers for the rest. A failed read of any issue fails the call (BR-0003): it is never an
+   * untrusted verdict. At most MAX_TRUST_READS issues are read per call, one request each; the rest are in `notRead`.
+   */
+  async function checkTrustedIssues(raw: unknown): Promise<TrustedIssues> {
+    if (!Array.isArray(raw) || raw.length > MAX_TRUST_INPUT) {
+      return refuse(`issues must be a list of at most ${MAX_TRUST_INPUT} issue numbers`);
+    }
+    const elements: unknown[] = raw;
+    const numbers = [...new Set(elements.map((element) => parseIssueNumber(element, 'issues[]')))].sort((a, b) => a - b);
+    const trusted: number[] = [];
+    const untrusted: number[] = [];
+    // Sequential on purpose: at most MAX_TRUST_READS requests, one after another.
+    for (const number of numbers.slice(0, MAX_TRUST_READS)) {
+      (parseIssueTrust(await gh.api(`${repoRoute}/issues/${number}`), number) ? trusted : untrusted).push(number);
+    }
+    return { trusted, untrusted, notRead: numbers.slice(MAX_TRUST_READS) };
+  }
+
+  /**
+   * The issues that already have work under way on GitHub (#722): an open PR whose head branch is `claude/<n>` (or
+   * `claude/<n>-<slug>`), or a remote branch of that name. Only numbers come out. A PR from an author who is not trusted
+   * is counted and its branch name is not read, as `openPrsFor` does. Each list is bounded at MAX_TAKEN_PAGES pages and
+   * says when it was longer (`notRead`). A failed read fails the call, so a broken read is never an empty list.
+   * Running Temporal workflows are not read here (#723).
+   */
+  async function listTakenIssues(): Promise<TakenIssues> {
+    const prs = await listPages(`${repoRoute}/pulls?state=open`, 'pull requests', parseOpenPr, MAX_TAKEN_PAGES);
+    const branches = await listPages(`${repoRoute}/git/matching-refs/heads/claude`, 'branches', parseRefName, MAX_TAKEN_PAGES);
+    const taken = new Set<number>();
+    for (const name of [...prs.items.map((pr) => pr.headRef), ...branches.items]) {
+      const match = CLAUDE_BRANCH_ISSUE.exec(name);
+      if (match !== null) {
+        taken.add(Number(match[1]));
+      }
+    }
+    return {
+      taken: [...taken].sort((a, b) => a - b),
+      notRead: { pullRequests: !prs.complete, branches: !branches.complete },
+      untrustedPullRequests: prs.dropped,
+    };
   }
 
   async function readIssue(raw: unknown): Promise<IssueView> {
@@ -1035,6 +1104,8 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
 
   return {
     listReadyIssues,
+    checkTrustedIssues,
+    listTakenIssues,
     readIssue,
     checkIssue,
     commentIssue,
@@ -1084,6 +1155,8 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
 
   return {
     listReadyIssues: activity((ops) => ops.listReadyIssues()),
+    checkTrustedIssues: activity((ops, issues: readonly number[]) => ops.checkTrustedIssues(issues)),
+    listTakenIssues: activity((ops) => ops.listTakenIssues()),
     readIssue: activity((ops, issue: number) => ops.readIssue(issue)),
     checkIssue: activity((ops, issue: number) => ops.checkIssue(issue)),
     commentIssue: activity((ops, input: CommentIssueInput) => ops.commentIssue(input)),
