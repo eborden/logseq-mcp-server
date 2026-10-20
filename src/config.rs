@@ -152,8 +152,17 @@ pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
 /// An `apiUrl` as the base the client appends `/api` to: an absolute `http` or `https` URL with a host,
 /// minus any trailing slashes (which would make `//api`). `None` when it is not one.
 fn api_url(text: &str) -> Option<String> {
+    // The URL parser drops leading and trailing whitespace and removes tabs and newlines inside, so
+    // a value it accepts could still be stored with them. Refuse them in the raw text instead.
+    if text.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return None;
+    }
     let url = reqwest::Url::parse(text).ok()?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return None;
+    }
+    // A query or fragment would sit in front of the `/api` the client appends.
+    if url.query().is_some() || url.fragment().is_some() || text.contains(['?', '#']) {
         return None;
     }
     Some(text.trim_end_matches('/').to_owned())
@@ -219,7 +228,7 @@ mod tests {
 
     #[test]
     fn an_api_url_that_is_not_an_absolute_http_url_is_refused() {
-        for url in ["127.0.0.1:12315", "localhost:12315", "ftp://127.0.0.1", "http://", "not a url", "/api"] {
+        for url in ["127.0.0.1:12315", "localhost:12315", "ftp://127.0.0.1", "http://", "not a url", "/api", " http://127.0.0.1:12315", "http://127.0.0.1:12315\\n", "http://127.0.0.1:12\\n315", "http://h:1/?x=1", "http://h:1/#f", "http://h:1?"] {
             let (field, problem) = validation(&format!(r#"{{"apiUrl":"{url}","authToken":"x"}}"#));
             assert_eq!((field.as_str(), problem.as_str()), ("apiUrl", API_URL_INVALID), "apiUrl {url}");
         }
