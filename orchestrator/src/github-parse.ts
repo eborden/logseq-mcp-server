@@ -519,6 +519,16 @@ export function parsePrState(raw: unknown, expectedNumber: number): PrState {
   return { state, merged: bool(pr, 'merged', what, '$'), headSha };
 }
 
+/** The branch a PR targets (#747), read from the same answer `parsePrState` reads. A name only: no title or body is read. */
+export function parsePrBaseRef(raw: unknown, expectedNumber: number): string {
+  const what = 'pull request';
+  const pr = obj(raw, what, '$');
+  if (int(pr, 'number', what, '$') !== expectedNumber) {
+    return mismatch(what, '$.number');
+  }
+  return str(obj(pr.get('base'), what, '$.base'), 'ref', what, '$.base');
+}
+
 /** The paths of one changed file of a PR's listing: its name and, for a rename, the name it had. Repository paths only. */
 export function parsePrFilePaths(raw: unknown, path: string): string[] {
   const file = obj(raw, 'pull request files', path);

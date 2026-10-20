@@ -57,6 +57,7 @@ import {
   parseClosedRunsInput,
   parseRunStatusesInput,
   PR_BY_HAND_TEXT,
+  resumeAdvice,
   STOP_STEP_RECOVERY,
   isStopStep,
   restartAdvice,
@@ -157,11 +158,15 @@ test('the commands for a closed run are fixed text and the issue number, as two 
   assert.deepEqual(restartAdvice(12, 'id_already_ran'), {});
 });
 
+/** The steps whose stop the resume entry point re-gates (#747): the host check, the fix round, and the resume run's own read. The rest of the loop stays by hand. */
+const RESUMABLE_STEPS: readonly string[] = ['resume', 'fix_session', 'fix_guard', 'fix_push', 'fix_reply', 'host_integration'];
+
 /**
  * Stops the workflows really make at a step once the PR is open and the issue is In review (the `by_hand` steps), as
  * [step, reason]: every combination is one a workflow produces (see the stop sites in src/workflows/). A restart ends `skipped` at the claim.
  */
 const STOPS_WITH_THE_PR_OPEN: readonly (readonly [string, string])[] = [
+  ['resume', 'ActivityFailed'],
   ['review_session', 'SessionError'],
   ['review_session', 'SessionInterrupted'],
   ['review_session', 'SessionTimeout'],
@@ -213,8 +218,9 @@ const STOPS_A_RESTART_RECOVERS: readonly (readonly [string, string])[] = [
 test('a stop at a step after the PR is open gets the by-hand sentence and no command, whatever the reason; any earlier step gets the commands', () => {
   for (const [step, reason] of STOPS_WITH_THE_PR_OPEN) {
     assert.ok(KNOWN_STOP_REASONS.has(reason), `${reason} is a word the report may name`);
-    assert.equal(STOP_STEP_RECOVERY[step as keyof typeof STOP_STEP_RECOVERY], 'by_hand', step);
-    assert.deepEqual(restartAdvice(12, 'failed', step), { instead: PR_BY_HAND_TEXT }, `${step} ${reason}`);
+    const recovery = STOP_STEP_RECOVERY[step as keyof typeof STOP_STEP_RECOVERY];
+    assert.equal(recovery, RESUMABLE_STEPS.includes(step) ? 'resume' : 'by_hand', step);
+    assert.deepEqual(restartAdvice(12, 'failed', step), { instead: recovery === 'resume' ? resumeAdvice(12) : PR_BY_HAND_TEXT }, `${step} ${reason}`);
   }
   for (const [step, reason] of STOPS_A_RESTART_RECOVERS) {
     assert.ok(KNOWN_STOP_REASONS.has(reason), `${reason} is a word the report may name`);
@@ -229,6 +235,9 @@ test('a stop at a step after the PR is open gets the by-hand sentence and no com
   // A reason alone never decides: the same word is a restart at one step and by hand at another.
   assert.deepEqual(restartAdvice(12, 'failed', 'session'), { restart: restartOf(12) });
   assert.deepEqual(restartAdvice(12, 'failed', 'review_session'), { instead: PR_BY_HAND_TEXT });
+  assert.deepEqual(restartAdvice(12, 'failed', 'host_integration'), { instead: resumeAdvice(12) });
+  assert.match(resumeAdvice(12), /^the PR is already open, so a restart would end skipped: .*"npm run run-issue -- --issue 12 --resume"/);
+  assert.notEqual(resumeAdvice(12), resumeAdvice(13), 'the issue number is in the text');
   // A run with no step (a failure that is not a stop) or a word that is no step gets the commands.
   assert.deepEqual(restartAdvice(12, 'failed'), { restart: restartOf(12) });
   assert.deepEqual(restartAdvice(12, 'failed', 'not_a_step'), { restart: restartOf(12) });
@@ -698,15 +707,18 @@ test('the step decides restart or by hand, not the reason: SessionError at the i
   const restarted = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError', step: 'session' });
   assert.deepEqual(restarted.skipped, [{ number: 11, reason: 'failed', stopReason: 'SessionError', restart: restartOf(11) }]);
 
-  for (const step of ['review_session', 'fix_session']) {
-    const byHand = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError', step });
-    assert.deepEqual(byHand.skipped, [{ number: 11, reason: 'failed', stopReason: 'SessionError', instead: PR_BY_HAND_TEXT }], step);
-  }
+  const byHandReviewer = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError', step: 'review_session' });
+  assert.deepEqual(byHandReviewer.skipped, [{ number: 11, reason: 'failed', stopReason: 'SessionError', instead: PR_BY_HAND_TEXT }]);
+  // A stop in a fixer round is one the resume entry point re-gates (#747): the same report fields, the advice names the command.
+  const resumable = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError', step: 'fix_session' });
+  assert.deepEqual(resumable.skipped, [{ number: 11, reason: 'failed', stopReason: 'SessionError', instead: resumeAdvice(11) }]);
   // Steps after the PR is open whose reasons a list of reasons could not tell from the earlier steps.
-  for (const [step, stopReason] of [['threads', 'ActivityFailed'], ['merge_wait', 'PrClosedUnmerged'], ['host_integration', 'IntegrationConflict'], ['issue_close', 'IssueStillOpen']] as const) {
+  for (const [step, stopReason] of [['threads', 'ActivityFailed'], ['merge_wait', 'PrClosedUnmerged'], ['issue_close', 'IssueStillOpen']] as const) {
     const byHand = await closedRunTick(11, { issue: 11, status: 'failed', stopReason, step });
     assert.deepEqual(byHand.skipped, [{ number: 11, reason: 'failed', stopReason, instead: PR_BY_HAND_TEXT }], `${step} ${stopReason}`);
   }
+  const resumableHost = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'IntegrationConflict', step: 'host_integration' });
+  assert.deepEqual(resumableHost.skipped, [{ number: 11, reason: 'failed', stopReason: 'IntegrationConflict', instead: resumeAdvice(11) }]);
   // A step the workflow cannot stop at (a word an activity made up) is dropped: the run gets the commands, and the step is not reported.
   const unknown = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError', step: `${CANARY} not a step` });
   assert.deepEqual(unknown.skipped, [{ number: 11, reason: 'failed', stopReason: 'SessionError', restart: restartOf(11) }]);
@@ -1826,7 +1838,9 @@ test('every step a workflow stops or fails at has a place in the restart-or-by-h
   const lastRestartable = declared.indexOf('board_issue');
   assert.ok(lastRestartable > 0);
   assert.deepEqual(declared.slice(0, lastRestartable + 1).filter((step) => STOP_STEP_RECOVERY[step as keyof typeof STOP_STEP_RECOVERY] !== 'restart'), []);
-  assert.deepEqual(declared.slice(lastRestartable + 1).filter((step) => STOP_STEP_RECOVERY[step as keyof typeof STOP_STEP_RECOVERY] !== 'by_hand'), []);
+  // After it, by hand, or `resume` for exactly the steps the resume entry point re-gates (#747).
+  assert.deepEqual(declared.slice(lastRestartable + 1).filter((step) => STOP_STEP_RECOVERY[step as keyof typeof STOP_STEP_RECOVERY] === 'restart'), []);
+  assert.deepEqual(declared.filter((step) => STOP_STEP_RECOVERY[step as keyof typeof STOP_STEP_RECOVERY] === 'resume').sort(), [...RESUMABLE_STEPS].sort());
 });
 
 test('the status read goes on the same activity proxy and options as the other tick activities, and reads no history, query, update or memo', async () => {

@@ -44,6 +44,7 @@ import {
   parseList,
   parseMinimized,
   parseOpenPr,
+  parsePrBaseRef,
   parsePrFilePaths,
   parsePrState,
   parseRefName,
@@ -105,6 +106,7 @@ import type {
   TakenIssues,
   TrustedIssues,
 } from '../types.ts';
+import type { ResumeResolution } from '../issue-types.ts';
 
 const PAGE_SIZE = 100;
 /** Most pages of one list. A longer list fails instead of being cut (BR-0006's rule, applied here). */
@@ -925,6 +927,38 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
   }
 
   /**
+   * The one PR a resume run gates (#747), read with no write: the issue is open and In review on the board, exactly one open PR
+   * of a trusted author is for it (by its `claude/<n>` branch or a `Closes #<n>`, as the claim finds them), and that PR is open.
+   * Anything else is a fixed word, never an error, so the entry point can refuse before it starts a run. A failed read is an
+   * error and is never read as a refusal (BR-0003). The head and the base are the PR's as GitHub shows them now.
+   */
+  async function resolveResume(raw: unknown): Promise<ResumeResolution> {
+    const issue = parseIssueNumber(raw, 'issue');
+    // The same trusted-author read the run starts with: an issue of anyone else is data and is refused as an error.
+    if (!(await checkIssue(issue)).open) {
+      return { ok: false, reason: 'issue_closed' };
+    }
+    const lookup = await boardLookup({ kind: 'issue', number: issue });
+    if (!lookup.onBoard || lookup.status !== 'In review') {
+      return { ok: false, reason: 'issue_not_in_review' };
+    }
+    const open = await openPrsFor(issue);
+    if (open.length === 0) {
+      return { ok: false, reason: 'no_open_pr' };
+    }
+    const only = open[0];
+    if (open.length > 1 || only === undefined) {
+      return { ok: false, reason: 'several_open_prs' };
+    }
+    const answer = await gh.api(`${repoRoute}/pulls/${only.number}`);
+    const state = parsePrState(answer, only.number);
+    if (state.state !== 'open') {
+      return { ok: false, reason: 'no_open_pr' };
+    }
+    return { ok: true, pr: only.number, headSha: state.headSha, base: parsePrBaseRef(answer, only.number) };
+  }
+
+  /**
    * The files a PR changes that the maintainer alone decides on (golden results, call ceilings, ADRs, business
    * rules), as counts. A rename counts by both names. Paths stay in this activity (#631): the workflow records numbers only.
    */
@@ -1135,6 +1169,7 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     postReview,
     getGateStatus,
     getPrState,
+    resolveResume,
     getPrChanges,
     readPrTemplate,
     getHostIntegrationNeed,
@@ -1186,6 +1221,7 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     postReview: activity((ops, input: PostReviewInput) => ops.postReview(input)),
     getGateStatus: activity((ops, pr: number) => ops.getGateStatus(pr)),
     getPrState: activity((ops, pr: number) => ops.getPrState(pr)),
+    resolveResume: activity((ops, issue: number) => ops.resolveResume(issue)),
     getPrChanges: activity((ops, pr: number) => ops.getPrChanges(pr)),
     readPrTemplate: activity((ops, baseRef: string) => ops.readPrTemplate(baseRef)),
     getHostIntegrationNeed: activity((ops, pr: number) => ops.getHostIntegrationNeed(pr)),

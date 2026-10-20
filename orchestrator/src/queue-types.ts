@@ -242,8 +242,11 @@ export function closedRunReason(status: ClosedRunStatus): ClosedRunReason {
   return status === 'completed' ? 'completed_but_open' : status;
 }
 
-/** What a person does about a run that stopped at a step: start it again, or carry on by hand because a restart cannot recover it. */
-export type StopRecovery = 'restart' | 'by_hand';
+/**
+ * What a person does about a run that stopped at a step: start it again, carry on by hand because a restart cannot recover it,
+ * or fix the PR by hand and re-gate its new head with the resume entry point (#747).
+ */
+export type StopRecovery = 'restart' | 'by_hand' | 'resume';
 
 /**
  * Where each step a run can stop at leaves the run, and so whether a restart recovers it. The step decides, not the reason:
@@ -258,6 +261,12 @@ export type StopRecovery = 'restart' | 'by_hand';
  * `by_hand`: the steps of the review loop and the maintainer's decision. The PR is open and the issue is In review, so a
  * restart ends `skipped` at the claim (`already_past_in_progress`) and never reaches them (README, "Recovering: a stopped
  * review loop is finished by hand"). A `Record` over `IssueStep`, so a new step does not compile until it is placed here.
+ *
+ * `resume` (#747): the steps whose stop a person mends on the PR and then re-gates with `npm run run-issue -- --issue <n> --resume`
+ * (README, "Resuming a stopped gate"): the host integration check, the fix round that comes with it, and the resume run's own
+ * read. A restart still ends `skipped`, so the advice is the sentence `resumeAdvice` builds, not the restart commands. A stop
+ * at the other `by_hand` steps (a reviewer that never posted, the loop's own bounds, the maintainer's decision) is not one the resume
+ * enters at: the resume starts at the gate and runs no reviewer or fixer of its own, so those stay by hand.
  */
 export const STOP_STEP_RECOVERY: Readonly<Record<IssueStep, StopRecovery>> = {
   check: 'restart',
@@ -270,15 +279,16 @@ export const STOP_STEP_RECOVERY: Readonly<Record<IssueStep, StopRecovery>> = {
   open_pr: 'restart',
   board_pr: 'restart',
   board_issue: 'restart',
+  resume: 'resume',
   review_session: 'by_hand',
   review_post: 'by_hand',
   gate: 'by_hand',
   threads: 'by_hand',
-  fix_session: 'by_hand',
-  fix_guard: 'by_hand',
-  fix_push: 'by_hand',
-  fix_reply: 'by_hand',
-  host_integration: 'by_hand',
+  fix_session: 'resume',
+  fix_guard: 'resume',
+  fix_push: 'resume',
+  fix_reply: 'resume',
+  host_integration: 'resume',
   review_loop: 'by_hand',
   decision_gate: 'by_hand',
   decision_comment: 'by_hand',
@@ -295,6 +305,14 @@ export function isStopStep(step: string): step is IssueStep {
 /** The fixed text a report gives for a stop at a `by_hand` step of STOP_STEP_RECOVERY. */
 export const PR_BY_HAND_TEXT =
   'the PR is already open, so a restart would end skipped: carry on by hand (README, "Recovering a stuck run" and "Recovering: a stopped review loop is finished by hand")';
+
+/**
+ * The fixed text a report gives for a stop at a `resume` step of STOP_STEP_RECOVERY (#747): the number of the issue and fixed words.
+ * The PR is open and the issue is In review, so a restart would end skipped; the resume entry point re-gates the PR's current head.
+ */
+export function resumeAdvice(issue: number): string {
+  return `the PR is already open, so a restart would end skipped: fix the PR by hand and have its new head reviewed, then re-gate it with "npm run run-issue -- --issue ${issue} --resume" (add --host-integration if the stopped run had it; README, "Resuming a stopped gate")`;
+}
 
 /** What a person does about a closed run: two commands to run in order, or a fixed sentence, or nothing to say. */
 export interface RestartAdvice {
@@ -315,6 +333,9 @@ export interface RestartAdvice {
 export function restartAdvice(issue: number, reason: ClosedRunReason, stopStep?: string): RestartAdvice {
   if (reason === 'id_already_ran' || reason === 'completed_but_open') {
     return {};
+  }
+  if (stopStep !== undefined && isStopStep(stopStep) && STOP_STEP_RECOVERY[stopStep] === 'resume') {
+    return { instead: resumeAdvice(issue) };
   }
   if (stopStep !== undefined && isStopStep(stopStep) && STOP_STEP_RECOVERY[stopStep] === 'by_hand') {
     return { instead: PR_BY_HAND_TEXT };
@@ -415,7 +436,7 @@ export interface TickSkip {
   readonly stopReason?: string;
   /** The two commands a person runs, in order, for a closed run a restart recovers: fixed text and the issue number (`restartAdvice`). */
   readonly restart?: readonly string[];
-  /** What a person does instead when a restart would not recover the run (`PR_BY_HAND_TEXT`). */
+  /** What a person does instead when a restart would not recover the run (`PR_BY_HAND_TEXT`, or `resumeAdvice` for a stop the resume entry point re-gates). */
   readonly instead?: string;
 }
 
@@ -462,7 +483,7 @@ export interface ClosedRunNote {
   readonly stopReason?: string;
   /** The two commands a person runs, in order, when a restart recovers the run (`restartAdvice`). */
   readonly restart?: readonly string[];
-  /** What a person does instead when a restart would not recover it (`PR_BY_HAND_TEXT`). */
+  /** What a person does instead when a restart would not recover it (`PR_BY_HAND_TEXT`, or `resumeAdvice` for a stop the resume entry point re-gates). */
   readonly instead?: string;
 }
 
