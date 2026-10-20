@@ -292,13 +292,11 @@ async fn a_refused_connection_at_the_suggestion_lookup_is_the_error_and_not_a_mi
 }
 
 #[tokio::test]
-async fn a_logseq_error_at_the_suggestion_lookup_is_a_missing_page_with_no_suggestions() {
-    // The one place an error is allowed to be empty: suggestions are best effort (`suggest_pages`), and the
-    // page is missing either way. Infrastructure errors, above, are not swallowed.
+async fn a_logseq_error_at_the_suggestion_lookup_is_the_error_and_not_a_missing_page() {
+    // BR-0003 (#656): a failed page list is not "no suggestions", so the error reaches the caller.
     let logseq = mock_logseq(vec![json!([]), json!([]), json!({"error": "getAllPages failed"})]).await;
     let error = get_page_outline(&client(&logseq), "Alce").await.unwrap_err();
-    let ToolError::PageNotFound(missing) = error else { panic!("expected a missing page, got {error}") };
-    assert!(missing.suggestions.is_empty());
+    assert_eq!(error.to_string(), "LogSeq API error: getAllPages failed");
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery", "logseq.Editor.getAllPages"]);
 }
 
