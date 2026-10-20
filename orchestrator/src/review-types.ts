@@ -230,7 +230,7 @@ export function changedLines(diff: string): ChangedLines {
 }
 
 /** Why a finding opened no thread: it is listed in the review body instead. */
-export type AdvisoryReason = 'file_not_in_diff' | 'thread_cap' | 'thread_failed';
+export type AdvisoryReason = 'file_not_in_diff' | 'thread_cap' | 'thread_failed' | 'no_changed_line';
 
 export interface AdvisoryFinding extends Finding {
   readonly reason: AdvisoryReason;
@@ -304,6 +304,7 @@ const REASON_TEXT: Readonly<Record<AdvisoryReason, string>> = {
   file_not_in_diff: 'the file is not changed by this commit',
   thread_cap: `the review is at its cap of ${MAX_FILE_THREADS} file-level threads`,
   thread_failed: 'GitHub refused a thread for it',
+  no_changed_line: 'GitHub refused a file-level thread for it, and its file has no changed line to place it on',
 };
 
 /**
