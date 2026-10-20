@@ -1238,6 +1238,15 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
 }
 
 /**
+ * The same activities for a CLI process (#747, `run-issue --resume`), which has no activity context: the rate-limit wait is a plain
+ * timer, not `activitySleep` (that one calls `Context.current()` and throws outside an activity). A wait over the limit still ends
+ * as a loud, non-retryable failure (`GitHubRateLimitTooLong`), and nothing becomes an empty result (BR-0003).
+ */
+export function createCliGithubActivities(config: GhConfig) {
+  return createGithubActivities(config, defaultGhDeps);
+}
+
+/**
  * The reads `runRemoteSession` makes (#672), bound to one repository. They are plain functions, not activities: the
  * remote session activity polls with them from inside itself. Each call gets a fresh `gh` wrapper, and every failure
  * is mapped to a Temporal failure.

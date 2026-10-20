@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { Client, Connection } from '@temporalio/client';
 import { loadConfig } from './config.ts';
-import { createGithubActivities } from './activities/github.ts';
+import { createCliGithubActivities } from './activities/github.ts';
 import { loadGhConfig } from './gh-config.ts';
 import { startIssueRun, startResumeRun } from './issue-client.ts';
 import { issueWorkflowId } from './issue-types.ts';
@@ -91,7 +91,8 @@ async function resume(config: ReturnType<typeof loadConfig>, values: ParsedValue
     worktreeDir: values['worktree-dir'],
     attempt: values.attempt,
   });
-  const github = createGithubActivities(loadGhConfig(process.env));
+  // Not `createGithubActivities`' default: its rate-limit wait needs an activity context, which this process does not have.
+  const github = createCliGithubActivities(loadGhConfig(process.env));
   const connection = await Connection.connect({ address: config.address, connectTimeout: '10 seconds' });
   try {
     const client = new Client({ connection, namespace: config.namespace });
