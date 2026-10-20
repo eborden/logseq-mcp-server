@@ -8,8 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { ApplicationFailure } from '@temporalio/activity';
-import { createGithubActivities } from '../src/activities/github.ts';
-import { createFake, emptyState, rawIssue, rawOpenPr, recordedSleep } from './github-support.ts';
+import { createCliGithubActivities, createGithubActivities } from '../src/activities/github.ts';
+import { createFake, emptyState, httpAnswer, rawIssue, rawOpenPr, recordedSleep } from './github-support.ts';
 import type { FakeState } from './github-support.ts';
 
 let dir: string;
@@ -153,4 +153,36 @@ test('it only reads: no board edit, no comment, no PR or issue write', async () 
     assert.doesNotMatch(text.replace('-X GET', ''), /--method|-X |--input|mutation/, text);
     assert.equal(call.stdin, undefined, text);
   }
+});
+
+// ---- the CLI's own activities (#747): no activity context ----------------------------------------------------------
+
+function rateLimitedIssue(retryAfterSeconds: number) {
+  return (state: FakeState) => {
+    state.faults = [
+      {
+        match: 'issues/123',
+        times: 1,
+        stdout: httpAnswer(403, { message: 'secondary' }, { 'Retry-After': String(retryAfterSeconds) }),
+        stderr: 'gh: You have exceeded a secondary rate limit (HTTP 403)\n',
+        exit: 1,
+      },
+    ];
+  };
+}
+
+test('the CLI activities wait out a rate limit with a plain timer, outside any activity, and then answer', { timeout: 20_000 }, async () => {
+  // `createGithubActivities`' default sleep calls `Context.current()`, which throws outside an activity: `run-issue --resume` must not use it.
+  const { fake } = await setup(rateLimitedIssue(1));
+  const github = createCliGithubActivities(fake.config);
+
+  assert.deepEqual(await github.resolveResume(123), { ok: true, pr: 40, headSha: HEAD, base: 'feature/atlas' });
+  assert.ok((await fake.callsMatching('issues/123')).length >= 2, 'the limited request and its retry');
+});
+
+test('a rate limit over the wait limit is a loud, non-retryable failure in the CLI too, never an empty result', async () => {
+  const { fake } = await setup(rateLimitedIssue(3600));
+  const github = createCliGithubActivities(fake.config);
+
+  assert.deepEqual(await failureOf(github.resolveResume(123)), { type: 'GitHubRateLimitTooLong', nonRetryable: true });
 });
