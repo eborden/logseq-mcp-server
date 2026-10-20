@@ -135,6 +135,8 @@ class World {
   readonly commentKeys = new Map<string, string>();
   /** Comments on the PR (its number), kept apart from the issue's (#715). */
   readonly prCommentKeys = new Map<string, string>();
+  /** A comment on the PR whose key starts with this fails every attempt. */
+  failPrCommentsWith: string | undefined;
   readonly loseOnce = new Set<LostStep>();
   readonly reviewerRounds = new Map<number, string[]>();
   readonly postedRounds = new Set<number>();
@@ -220,6 +222,9 @@ function fakeActivities() {
       if (input.issue >= PR_OFFSET) {
         // A comment on the PR: counted apart from the issue's (#715), and once per key like the real activity.
         const prWorld = world(input.issue - PR_OFFSET);
+        if (prWorld.failPrCommentsWith !== undefined && input.key.startsWith(prWorld.failPrCommentsWith)) {
+          throw ApplicationFailure.nonRetryable('simulated: the comment cannot be posted');
+        }
         const postedOnPr = !prWorld.prCommentKeys.has(input.key);
         if (postedOnPr) {
           prWorld.prCommentKeys.set(input.key, input.body);
@@ -473,6 +478,52 @@ test('without a person resolving the thread, the run ends waiting for threads to
   assert.match(prComment, /Gate not clear/);
   assert.match(prComment, /not an approval/);
   assert.ok(prComment.includes(fixHead(0)) && prComment.includes('T0_0') && prComment.includes('1 open review thread'));
+});
+
+test('a gate-held statement that cannot be posted stops the run at the threads step: a counted step failure, not a silent skip', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  const { issue, world: w } = newWorld((world) => {
+    oneFindingFirst(world);
+    world.accepts = true;
+    world.humanResolves = false;
+    world.failPrCommentsWith = 'gate-held-';
+  });
+
+  const stopped = await stoppedWith(issue, FAKE_QUEUE);
+
+  assert.equal(stopped.step, 'threads');
+  assert.deepEqual([...w.prCommentKeys.keys()].filter((key) => key.startsWith('gate-held-')), [], 'no statement was posted');
+  assert.ok([...w.prCommentKeys.keys()].some((key) => key.startsWith('stopped-pr-threads-')), 'the stop line for that step is posted');
+});
+
+test('the gate-held statement says the run ends when it will not read the gate again (awaitDecision: false), and that it keeps reading when it will', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  const held = (world: World): void => {
+    oneFindingFirst(world);
+    world.accepts = true;
+    world.humanResolves = false;
+  };
+  const ends = newWorld(held);
+  const waits = newWorld(held);
+
+  const resultEnds = await runIssue(FAKE_QUEUE, ends.issue, { awaitDecision: false });
+  assert.equal(resultEnds.outcome, 'waiting_for_threads');
+  const endsText = [...ends.world.prCommentKeys.entries()].find(([key]) => key.startsWith('gate-held-'))?.[1] ?? '';
+  assert.match(endsText, /This run ends here and does not read the gate again/);
+  assert.match(endsText, /a new run is needed/);
+  assert.doesNotMatch(endsText, /keeps reading the gate/);
+
+  // Without `awaitDecision: false` the decision stage runs: it holds at the gate, so the run is still going. Read the text from the fake, then stop it.
+  await startIssueRun(client, FAKE_QUEUE, inputFor(waits.issue, { awaitDecision: true, decisionTimeoutMs: 60_000, decisionPollMs: 500 }));
+  const deadline = Date.now() + 20_000;
+  while (![...waits.world.prCommentKeys.keys()].some((key) => key.startsWith('gate-held-'))) {
+    assert.ok(Date.now() < deadline, 'timed out waiting for the gate-held statement');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const waitsText = [...waits.world.prCommentKeys.entries()].find(([key]) => key.startsWith('gate-held-'))?.[1] ?? '';
+  assert.match(waitsText, /The run keeps reading the gate/);
+  assert.doesNotMatch(waitsText, /a new run is needed/);
+  await client.workflow.getHandle(issueWorkflowId(waits.issue)).terminate('the test is done');
 });
 
 test('a stop leaves one line on the PR with the reason and the step, besides the issue comment (#715)', { timeout: 120_000 }, async () => {
