@@ -805,7 +805,7 @@ test('the remote config is absent without its variables, complete with them and 
 test('the worker registers the remote activity only when the config is present', async () => {
   const text = await readFile(fileURLToPath(new URL('../src/worker.ts', import.meta.url)), 'utf8');
   assert.match(text, /remoteConfig === undefined\s*\?\s*\{\}/);
-  assert.match(text, /\.\.\.review, \.\.\.remote, \.\.\.remoteImplementer \}/);
+  assert.match(text, /\.\.\.review, \.\.\.remote, \.\.\.remoteImplementer, \.\.\.queue \}/);
   // The tokens are built into the fire client here and read nowhere else.
   assert.equal([...text.matchAll(/\.tokens/g)].length, 1);
 });
