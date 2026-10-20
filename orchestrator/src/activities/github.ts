@@ -191,6 +191,14 @@ function parseIssueNumber(raw: unknown, name: string): number {
     : refuse(`${name} must be a positive whole number`);
 }
 
+/**
+ * A GitHub comment id (#726). Comment ids are not issue numbers: they passed 2^32 (a made-up 6,281,995,388 is typical now), so
+ * the bound is the largest whole number a JSON number holds exactly, not the one for issue and PR numbers.
+ */
+function parseCommentId(raw: unknown, name: string): number {
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 1 ? raw : refuse(`${name} must be a positive whole number`);
+}
+
 function inputObject(raw: unknown, name: string): ReadonlyMap<string, unknown> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     return refuse(`${name} must be an object`);
@@ -289,7 +297,7 @@ function parseCommentIssueInput(raw: unknown): CommentIssueInput {
   };
 }
 
-function parseNeedsInputWaitInput(raw: unknown): NeedsInputWaitInput {
+export function parseNeedsInputWaitInput(raw: unknown): NeedsInputWaitInput {
   const input = inputObject(raw, 'waitForNeedsInputAnswer input');
   const bounded = (key: string, min: number, max: number): number => {
     const value = input.get(key);
@@ -297,7 +305,7 @@ function parseNeedsInputWaitInput(raw: unknown): NeedsInputWaitInput {
   };
   return {
     issue: parseIssueNumber(input.get('issue'), 'issue'),
-    afterCommentId: parseIssueNumber(input.get('afterCommentId'), 'afterCommentId'),
+    afterCommentId: parseCommentId(input.get('afterCommentId'), 'afterCommentId'),
     waitMs: bounded('waitMs', 0, 24 * 60 * 60_000),
     pollMs: bounded('pollMs', 1, 24 * 60 * 60_000),
   };
