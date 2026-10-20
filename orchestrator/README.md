@@ -503,12 +503,13 @@ A Temporal Schedule starts `queueWatcher` (`src/workflows/queue-watcher.ts`) eve
 4. `checkTrustedIssues`, asked about the Ready numbers that are neither blocked nor taken, ascending, so the lowest are read first. A number it did not read (`notRead`, more than 50) is not trusted this tick: it is skipped as `untrusted` and counted in `trustNotRead`.
 5. The pure `eligibleIssues` (`src/queue-policy.ts`) gives the eligible numbers, ascending. For each one while a slot is free, `startQueuedRun` starts `issue-<n>` through `startIssueRun`, the call `npm run run-issue` makes, with the input `buildRunInput` makes from the same flags. It answers what it found: `started` (a new run), `already_running` (the ID is open) or `already_finished` (the ID is closed). A run the tick started and a run the start found already open both use a slot, so the free slots are `cap - inFlight` minus both; a closed one uses none.
 6. `readRunStatuses` (#724), for the closed runs step 5 found, after every start: how each ended, so the report says why the issue did not start ("Closed runs" below). At most 20 are read per tick.
+7. `listClosedRuns` (#733), last: the closed runs whose issue is **not** in Ready, which no step above meets ("Closed runs outside Ready" below). Read-only, bounded, and on by default.
 
 A failed read (steps 1 to 4) fails the tick and starts nothing: the report says `outcome: "failed"` and `failure: { step, reason }`, where `reason` is the failure's type word (`TooLarge`, `GitHubRateLimitExhausted`, ...) and never its message (BR-0003: a read that failed is never an empty or partial queue). A start that fails after its retries ends the tick there: the starts before it stay reported, the issues after it are not attempted, and the next tick reads again.
 
 **The tick bounds itself.** The retry bounds of the activities add up to far more than the tick's 10 minute execution timeout (one failing read can take about 6 minutes 15 seconds, a tick makes 4 reads and then a start per eligible issue), and Temporal kills a workflow at its execution timeout with no report. So the workflow gives up first: at 8 minutes (`QUEUE_TICK_DEADLINE_MS`) it returns `outcome: "failed"` with `failure: { step, reason: "TickDeadline" }`, the step it was in, and the issues it had already started. Two minutes of margin sit between the deadline and the execution timeout (`QUEUE_TICK_TIMEOUT_MS`), and a test pins that relation. A start cut off by the deadline may still have happened; the next tick finds the run open and counts it. The input's `tickDeadlineMs` (1 second to 8 minutes) shortens the deadline, for tests.
 
-**The tick report** is the workflow's result: `{ outcome, cap, inFlight, started, skipped, skippedNotReported, trustNotRead, closedRuns?, failure? }`. `inFlight` is what the tick read before it started anything. `skipped` names each issue that did not start, with a reason: `blocked`, `taken` (an open PR, a `claude/<n>` branch or a running workflow), `untrusted`, `over_cap`, `already_running` (an open run the start found: it holds a slot) and, for a closed run, `failed`, `parked`, `terminated`, `timed_out`, `cancelled`, `completed_but_open` or `id_already_ran` ("Closed runs" below). It names at most 100; the rest are counted in `skippedNotReported`. The history holds issue numbers, counts and fixed words only: no title, label or any text from an issue.
+**The tick report** is the workflow's result: `{ outcome, cap, inFlight, started, skipped, skippedNotReported, trustNotRead, closedRuns?, closedNotReady?, failure? }`. `inFlight` is what the tick read before it started anything. `skipped` names each issue that did not start, with a reason: `blocked`, `taken` (an open PR, a `claude/<n>` branch or a running workflow), `untrusted`, `over_cap`, `already_running` (an open run the start found: it holds a slot) and, for a closed run, `failed`, `parked`, `terminated`, `timed_out`, `cancelled`, `completed_but_open` or `id_already_ran` ("Closed runs" below). It names at most 100; the rest are counted in `skippedNotReported`. The history holds issue numbers, counts and fixed words only: no title, label or any text from an issue.
 
 **The workflow ID is the claim.** `issue-<n>` is started with `REJECT_DUPLICATE` and `FAIL` (`src/issue-client.ts`), so a repeat tick, an overlapping start or a crashed watcher cannot launch an issue twice. A start of an ID that already exists is a skip, not a failure: an open run is `already_running` and uses a slot, a closed one uses none and is reported by how it ended ("Closed runs"). If the visibility list is slow to show a run, or a start's result was lost and the activity retried, the server's refusal answers `already_running` and that run holds a slot, so the open runs do not pass the cap. The run still shows in `inFlight` once the list catches up.
 
@@ -525,6 +526,24 @@ A failed read (steps 1 to 4) fails the tick and starts nothing: the report says 
 A closed run does not use a slot, so these skips never hold back a start. `--attempt` on its own does not start a closed run: the ID is held by `REJECT_DUPLICATE`, so the run is deleted first and `--attempt` only sets the remote implementer's first attempt number ("The remote implementer"). The report only says the commands; nothing in the watcher runs them. A test reads the workflows for every literal `stop('<step>', '<Reason>')` and `failureReason` word and fails if one is not in the list of `src/run-status.ts`; a reason passed as a constant or a variable is not scanned (today's are in the list by import), and a word missing from the list only drops the reason from a report, never leaks text. The advice is keyed on the step by `STOP_STEP_RECOVERY` in `src/queue-types.ts`, a `Record` over `IssueStep`, so a new step does not compile until it is marked `restart` or `by_hand`. A second test reads the workflows for every step they name (`stop`, `step`, `confirmStatus`, `onExecutor`) and fails if one is not in the table, if the table and the `IssueStep` type differ, or if the order of the type no longer puts every `by_hand` step after `board_issue`. The activity reports a step only when it is one of those, and the workflow drops any other.
 
 `closedRuns` is `{ counts, notLookedUp }`: the count per reason (only the reasons that occurred, in the order above) and how many closed runs the tick did not ask about. It is absent when there are none. The report stays bounded: at most 20 issue numbers carry a status, the whole `skipped` list is still capped at 100, and the counts do not depend on either. A status read that fails after its retries fails the tick at `run_status` (BR-0003), after the starts, so the runs it started stay in `started`, and the closed runs stay `id_already_ran`. The read is on the same options as every tick activity (2 minutes, 3 attempts) and inside the tick deadline. What the read returns is the status as a fixed word and a stop reason checked against the list; a failure's message, the run's input and result, and any comment or issue text are never read into the report or the history (BR-0001).
+
+**Closed runs outside Ready (#733).** A run that closed after it claimed its issue leaves the board item In progress, In review or Needs Input, so the Ready column never lists it and "Closed runs (#724)" never meets it. The last step of the tick, `listClosedRuns`, finds those runs. It lists the closed `issueWorkflow` runs that ended Failed, Terminated, TimedOut or Canceled (a Completed run is the normal end and is not looked for), newest first in the server's default order, passes over the IDs of every Ready number the tick read (blocked ones too, which the Ready column already names) and over any ID that is not `issue-<n>`, and reads the status of at most 20 of the rest with the same `readRunStatus` the Ready case uses. It reads at most 200 visibility rows, then asks the server for the count of closed runs of that kind, so what it left unread is counted and never dropped silently (BR-0006). The result is the report's `closedNotReady`:
+
+```json
+"closedNotReady": {
+  "counts": { "failed": 1 },
+  "runs": [
+    { "number": 21, "reason": "failed", "stopReason": "SessionError",
+      "restart": ["temporal workflow delete --workflow-id issue-21", "npm run run-issue -- --issue 21"] }
+  ],
+  "notLookedUp": 0
+}
+```
+
+`runs` holds at most 20 entries, newest first. Each has the same fixed words and advice as the skip of a closed run in the Ready column: `reason` is `failed`, `parked`, `terminated`, `timed_out` or `cancelled` (the table above), `stopReason` is one of the orchestrator's own words, and `restart` (two commands) or `instead` (the PR is open, carry on by hand) come from the same `restartAdvice` and `STOP_STEP_RECOVERY`. `counts` is per reason for the runs in `runs`, in a fixed order. `notLookedUp` is the count of closed runs the tick did not look at: past the 20, or past the 200 rows it reads. It is an upper bound: it can include a run of a Ready issue or an ID that is not `issue-<n>`. The field is absent when there is nothing to name and nothing unread, so a tick with no such runs has the report it had before. The field is information only: the watcher never restarts, deletes or signals a run and never changes the issue's board status. The read is on the same options as every tick activity (2 minutes, 3 attempts), after the starts and inside the tick deadline. A failed read fails the tick at `list_closed` (BR-0003), with the starts and the Ready skips already in the report, and is never an empty list. A tick that already failed at `start` or `run_status` does not make it. The report holds issue numbers and fixed words only (BR-0001).
+
+A run stays in this list until someone deletes it. That includes a run whose issue a person finished by hand (the `instead` case) and whose PR has since merged: it keeps being named, newest first, until `temporal workflow delete --workflow-id issue-<n>` removes it, or it falls past the 20 and is counted in `notLookedUp`. The watcher does not know whether the issue is still open, because that would be a GitHub read for every run.
+
 
 **Run it.** "Running the queue" below has the commands, every flag, how to read a tick and what each skip means. The watcher needs the worker (`npm run worker`) and the server, and it does nothing until a schedule exists (`npm run queue -- create`). The schedule is `queue-watcher` with **overlap policy skip**: a tick still running when the next is due is skipped, never queued, and a tick has a 10 minute execution timeout (above its own 8 minute deadline, see above) so a stuck one cannot hold the skip for long. After an outage the schedule takes only a tick at most a minute late. The default tick is 1 minute, the shortest allowed. The board read is the filtered Ready query, a handful of GraphQL points a tick, but a tick also makes REST calls that grow with the Ready column (blocker and trust reads for up to 50 issues, the taken-issue lists and run-status reads), so a shorter interval costs more GitHub rate limit. In the drill (#725) the hourly GraphQL bucket ran out while full board listings were run by hand alongside one-minute ticks. Pass `--every` for a longer interval.
 
@@ -627,11 +646,27 @@ A report (made-up numbers: cap 2, one run in flight):
 | `skippedNotReported` | How many skips the list left out because of that bound |
 | `trustNotRead` | Ready issues whose author the tick did not read (more than 50 candidates). They are skipped as `untrusted` and counted here |
 | `closedRuns` | Present when a Ready issue's `issue-<n>` run has closed: `counts` per reason, and `notLookedUp`, the closed runs the tick did not read: past the 20 it reads, or all of them when the tick failed at `start` or `run_status`. Absent otherwise |
+| `closedNotReady` | Present when a closed run (Failed, Terminated, TimedOut or Canceled) belongs to an issue that is not in Ready, or the tick left such runs unread: `counts` per reason, `runs` (at most 20, newest first, each with `number`, `reason`, and `stopReason`, `restart` or `instead` as in `skipped`) and `notLookedUp`. Absent otherwise ("What the report shows beyond Ready") |
 | `failure` | Present when `outcome` is `failed`: `{ "step", "reason" }` |
 
 The report holds issue numbers, counts and fixed words only. It never holds a title, a label or a line of an issue.
 
-**What the report cannot show.** It names a closed run only for an issue that is in Ready (and otherwise eligible). A run that closed after it claimed the issue leaves the item In progress, In review or Needs Input, and the watcher does not look at those: a stuck run there is invisible in every report. The example's issue 16 is a run the report can list. A run that stopped after the claim would appear only if someone moved its item back to Ready. To find closed runs wherever their item is, list them from Temporal:
+**What the report shows beyond Ready.** `skipped` names a closed run only for an issue that is in Ready (and otherwise eligible). A run that closed after it claimed the issue leaves the item In progress, In review or Needs Input; those runs are in `closedNotReady` (#733), with the same words and the same `restart` or `instead` as a skip. Example, with made-up numbers: issue 21 failed at the session step and its item is In progress:
+
+```json
+"closedNotReady": {
+  "counts": { "failed": 1, "timed_out": 1 },
+  "runs": [
+    { "number": 30, "reason": "timed_out",
+      "restart": ["temporal workflow delete --workflow-id issue-30", "npm run run-issue -- --issue 30"] },
+    { "number": 21, "reason": "failed", "stopReason": "SessionError",
+      "restart": ["temporal workflow delete --workflow-id issue-21", "npm run run-issue -- --issue 21"] }
+  ],
+  "notLookedUp": 0
+}
+```
+
+It is bounded: at most 20 runs, newest first, and `notLookedUp` counts the closed runs the tick did not look at. It names a run again every tick until the run is deleted, because the watcher does not read the issue's state. It never lists a run that completed. To list closed runs yourself, including completed ones, from Temporal:
 
 ```bash
 temporal workflow list --query "WorkflowType='issueWorkflow' AND ExecutionStatus!='Running'"
@@ -654,11 +689,11 @@ That lists every closed `issueWorkflow` run, old ones included: Completed (most 
 | `completed_but_open` | The run finished and its issue is still open and Ready | No command. `temporal workflow show --workflow-id issue-<n>`: close the issue if its PR merged, or read the `skipped` row of "Recovering a stuck run" |
 | `id_already_ran` | A closed run the tick did not read: past the 20 it reads, the tick failed at `start` or `run_status` before or at the read, or the read answered nothing for it | `temporal workflow describe --workflow-id issue-<n>`, or wait for the next tick |
 
-The watcher never runs a `restart` command, and `--attempt` alone does not start a closed run: delete it first. A closed run's skip appears only for an issue that is in Ready and otherwise eligible. A run that stopped after it claimed the issue leaves the item In progress, In review or Needs Input, so the report does not mention it ("What the report cannot show").
+The watcher never runs a `restart` command, and `--attempt` alone does not start a closed run: delete it first. A closed run's skip appears only for an issue that is in Ready and otherwise eligible. A run that stopped after it claimed the issue leaves the item In progress, In review or Needs Input, so it is not a skip: it is in `closedNotReady`, with the same words ("What the report shows beyond Ready").
 
 ### A failed tick
 
-A failed tick is a missed tick. A failed read (`list_ready`, `list_taken`, `list_running`, `check_trusted`) starts nothing and the next tick reads again, so one failure in a row needs nothing. A failed `start` keeps the starts before it in `started` and does not try the issues after it. A failed `run_status` comes after the starts, so they stand. The `reason` is the failure's type word, never its message. When the same one repeats, the worker's log has the rest:
+A failed tick is a missed tick. A failed read (`list_ready`, `list_taken`, `list_running`, `check_trusted`) starts nothing and the next tick reads again, so one failure in a row needs nothing. A failed `start` keeps the starts before it in `started` and does not try the issues after it. A failed `run_status` or `list_closed` comes after the starts, so they stand. The `reason` is the failure's type word, never its message. When the same one repeats, the worker's log has the rest:
 
 | Reason | What it says |
 |---|---|
@@ -672,7 +707,7 @@ The 8 minute deadline sits 2 minutes under the tick's 10 minute execution timeou
 ### With held runs, Needs Input and the board
 
 - **A run held for a decision** (the gate is clear and the run waits for `npm run signal`, or waits for the merge): open, so it keeps its slot. Its issue is In review, so the report does not name it. A `changes_requested` decision, or the merge (or the end of the merge wait), frees the slot. An `approved` decision does not: the run then waits for the merge and keeps the slot until the PR merges or closes, or that wait ends.
-- **A run parked on Needs Input**: open, so it keeps its slot for as long as it waits (7 days by default). Its board item is in Needs Input, not Ready, so the watcher does not name it. An answer on the issue lets the run go on. With no answer the run closes as `parked`, and the issue is in the report only once a person moves the item back to Ready.
+- **A run parked on Needs Input**: open, so it keeps its slot for as long as it waits (7 days by default). Its board item is in Needs Input, not Ready, so the watcher does not name it. An answer on the issue lets the run go on. With no answer the run closes as `parked`, and the next tick names it in `closedNotReady` (and in `skipped` instead, once a person moves the item back to Ready).
 - **Backlog to Ready** is still the maintainer's. The watcher reads Ready and nothing else, so an issue enters the queue only when someone moves it there. The watcher never moves a board item.
 - **Putting an issue back in Ready after a run** starts nothing while its `issue-<n>` run exists, open or closed. The report says why ("Skip reasons").
 
