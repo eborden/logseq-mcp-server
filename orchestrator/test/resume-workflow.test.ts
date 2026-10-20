@@ -642,3 +642,66 @@ test('the workflow answers the entry point\'s refusals too, when the issue chang
   assert.deepEqual(world.runs, []);
   assert.equal(world.comments.size, 0);
 });
+
+// ---- a run stays on the head it was started for, and a merge ends it without touching anything -----------------------------
+
+test('a push while the run holds ends it refused (pr_changed): it never checks or states the new head', { timeout: 120_000 }, async () => {
+  // Head 1 has no review, so the run holds. A person pushes head 2 and reviews it: the run is named for head 1 and must not gate head 2.
+  const { issue, world } = newWorld((w) => {
+    w.issueStatus = 'In review';
+  });
+  await startResume(issue);
+  await until('the hold to read the gate', () => world.count('getGateStatus') >= 3);
+
+  world.prHead = world.head2;
+  world.reviewed.add(world.head2);
+
+  assert.deepEqual(await resultOf(resumeWorkflowId(issue, world.head1)), { outcome: 'refused', issueNumber: issue, reason: 'pr_changed' });
+  assert.deepEqual(world.runs, [], 'no suite was run for any head by this run');
+  assert.equal(world.count('getHostIntegrationNeed'), 0);
+  assert.equal(world.comments.size, 0, 'no statement, for either head');
+  assert.equal(world.statuses.size, 0);
+});
+
+test('a second resume for a newer head, started while the first still holds, runs the check once: the first run ends itself and never touches the new head', { timeout: 120_000 }, async () => {
+  const { issue, world } = newWorld((w) => {
+    w.issueStatus = 'In review';
+  });
+  const pr = issue + PR_OFFSET;
+  const first = await startResume(issue);
+  assert.equal(first.status, 'started');
+  await until('the first run to hold', () => world.count('getGateStatus') >= 3);
+
+  // The person pushes head 2 and has it reviewed, then resumes it while the run for head 1 is still open.
+  world.prHead = world.head2;
+  world.reviewed.add(world.head2);
+  const second = await startResume(issue);
+  assert.equal(second.status, 'started', 'the open run is the head 1 run, not issue-<n>: it does not refuse the new head');
+
+  assert.deepEqual(await resultOf(resumeWorkflowId(issue, world.head2)), { outcome: 'resumed_gate_clear', issueNumber: issue, pr, headSha: world.head2, reviewsOnHead: 1 });
+  assert.deepEqual(await resultOf(resumeWorkflowId(issue, world.head1)), { outcome: 'refused', issueNumber: issue, reason: 'pr_changed' });
+  assert.deepEqual(world.runs, [world.head2], 'one check, for head 2, from one run');
+  assert.deepEqual([...world.comments.keys()], [`gate-clear-${pr}-${world.head2}`], 'one statement, for head 2');
+  assert.deepEqual(world.statusWrites, ['b:pending:no counts', 'b:success:82 passed, 0 failed']);
+});
+
+test('a merge while the run holds ends it refused (no_open_pr) and writes nothing: no comment, no board write, the issue stays open', { timeout: 120_000 }, async () => {
+  const { issue, world } = newWorld((w) => {
+    w.issueStatus = 'In review';
+    w.prStatus = 'In review';
+  });
+  await startResume(issue);
+  await until('the hold to read the gate', () => world.count('getGateStatus') >= 3);
+  const commentsBefore = world.count('commentIssue');
+
+  world.merged = true;
+
+  assert.deepEqual(await resultOf(resumeWorkflowId(issue, world.head1)), { outcome: 'refused', issueNumber: issue, reason: 'no_open_pr' });
+  assert.equal(world.count('setStatus'), 0, 'no board write');
+  assert.equal(world.issueStatus, 'In review');
+  assert.equal(world.prStatus, 'In review');
+  assert.equal(world.issueOpen, true, 'the issue is not closed');
+  assert.equal(world.count('commentIssue'), commentsBefore, 'no comment of any kind');
+  assert.equal(world.comments.size, 0);
+  assert.deepEqual(world.runs, []);
+});

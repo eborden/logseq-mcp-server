@@ -120,9 +120,15 @@ export interface DecisionContext {
   /**
    * A resume run (#747): the hold loop is the same, but the run ends at the first clear gate, after the gate-clear statement for that
    * head, with `resumed_gate_clear`. It waits for no decision and moves nothing to Done: the run it replaces is closed, so no signal
-   * could reach this one. A merge the maintainer makes while it holds is still seen and finished as for any run. Absent: as before.
+   * could reach this one. A merge the maintainer makes while it holds ends it `refused` / `no_open_pr`, with nothing written: the
+   * board and the issue are the maintainer's after a merge. Absent: as before.
    */
   readonly stopAtGateClear?: boolean;
+  /**
+   * The head a resume run was started for. The run gates this head and no other: if the PR shows another one while it holds, it ends
+   * `refused` / `pr_changed`, so one head has at most one run that can check it and a new head gets its own run (#747).
+   */
+  readonly resumeHead?: string;
   /** The ID of the run, for the statements it posts. Absent: `issue-<n>`. A resume run has its own (#747). */
   readonly workflowId?: string;
   /** Runs one activity call; a failure of it ends the run at `name` (issue.ts). */
@@ -201,12 +207,21 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
     const seen = await step('decision_gate', () => github.getPrState(pr));
     head = seen.headSha;
     if (seen.merged) {
+      if (context.stopAtGateClear === true) {
+        // A resume run ends at the gate and touches nothing after it: no comment, no board write, no issue close (#747).
+        return { outcome: 'refused', issueNumber: issue, reason: 'no_open_pr' };
+      }
       merged = true;
       decision = inbox.decision();
       break;
     }
     if (seen.state === 'closed') {
       return await stop('decision_gate', 'PrClosedUnmerged');
+    }
+    // A resume run is named for one head (#747). A push while it holds moves the PR to a head this run was not started for: end
+    // here, and let `--resume` start the run of the new head, so no head is gated under another head's ID or by two runs at once.
+    if (context.resumeHead !== undefined && (seen.headSha !== context.resumeHead || gate.headSha !== context.resumeHead)) {
+      return { outcome: 'refused', issueNumber: issue, reason: 'pr_changed' };
     }
     const left = decideBy - Date.now();
     // A head that the review settled (a review on it, no open thread) is the one the host check is for, once per head.
