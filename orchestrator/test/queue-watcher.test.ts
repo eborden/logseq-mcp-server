@@ -52,8 +52,9 @@ import {
   MAX_RUN_STATUS_LOOKUPS,
   closedRunReason,
   parseRunStatusesInput,
-  PR_BY_HAND_STOP_REASONS,
   PR_BY_HAND_TEXT,
+  STOP_STEP_RECOVERY,
+  isStopStep,
   restartAdvice,
 } from '../src/queue-types.ts';
 import type {
@@ -141,8 +142,8 @@ test('the commands for a closed run are fixed text and the issue number, as two 
   for (const reason of ['failed', 'terminated', 'timed_out', 'cancelled'] as const) {
     assert.deepEqual(restartAdvice(12, reason), { restart: restartOf(12) }, reason);
   }
-  assert.deepEqual(restartAdvice(12, 'failed', 'SessionError'), { restart: restartOf(12) }, 'a stop that a restart recovers');
-  assert.deepEqual(restartAdvice(12, 'parked', 'NeedsInputTimeout'), { restart: restartOf(12, PARKED_RUN(12)) }, 'a parked run is a remote run: it starts again with --executor remote and the next attempt number');
+  assert.deepEqual(restartAdvice(12, 'failed', 'session'), { restart: restartOf(12) }, 'a stop that a restart recovers');
+  assert.deepEqual(restartAdvice(12, 'parked', 'park'), { restart: restartOf(12, PARKED_RUN(12)) }, 'a parked run is a remote run: it starts again with --executor remote and the next attempt number');
   for (const command of restartOf(12, PARKED_RUN(12))) {
     assert.doesNotMatch(command, /,| then /, 'one command per string, nothing to split before pasting');
   }
@@ -150,13 +151,89 @@ test('the commands for a closed run are fixed text and the issue number, as two 
   assert.deepEqual(restartAdvice(12, 'id_already_ran'), {});
 });
 
-test('a stop with the PR already open gets the by-hand sentence and no command, one case per reason', () => {
-  assert.deepEqual([...PR_BY_HAND_STOP_REASONS], ['MaxRoundsReached', 'ReviewLoopTimeout', 'ReviewNotCounted', 'HeadMismatch', 'MalformedFindings', 'FindingsTooLarge', 'DiffUnreadable', 'FixerPushRejected']);
-  for (const reason of PR_BY_HAND_STOP_REASONS) {
-    assert.deepEqual(restartAdvice(12, 'failed', reason), { instead: PR_BY_HAND_TEXT }, reason);
+/**
+ * Stops the workflows really make at a step once the PR is open and the issue is In review (the `by_hand` steps), as
+ * [step, reason]: every combination is one a workflow produces (see the stop sites in src/workflows/). A restart ends `skipped` at the claim.
+ */
+const STOPS_WITH_THE_PR_OPEN: readonly (readonly [string, string])[] = [
+  ['review_session', 'SessionError'],
+  ['review_session', 'SessionInterrupted'],
+  ['review_session', 'SessionTimeout'],
+  ['review_session', 'MalformedResult'],
+  ['review_session', 'MalformedFindings'],
+  ['review_session', 'RemoteExecutorUnavailable'],
+  ['review_post', 'DiffUnreadable'],
+  ['review_post', 'ActivityFailed'],
+  ['gate', 'HeadMismatch'],
+  ['gate', 'ReviewNotCounted'],
+  ['threads', 'ActivityFailed'],
+  ['fix_session', 'SessionError'],
+  ['fix_session', 'SessionInterrupted'],
+  ['fix_session', 'FindingsTooLarge'],
+  ['fix_guard', 'ProtectedPath'],
+  ['fix_guard', 'FixerPushRejected'],
+  ['fix_push', 'PushRejected'],
+  ['fix_reply', 'ActivityFailed'],
+  ['host_integration', 'IntegrationFailed'],
+  ['host_integration', 'IntegrationConflict'],
+  ['host_integration', 'IntegrationTimeout'],
+  ['review_loop', 'MaxRoundsReached'],
+  ['review_loop', 'ReviewLoopTimeout'],
+  ['decision_gate', 'PrClosedUnmerged'],
+  ['decision_comment', 'ActivityFailed'],
+  ['merge_wait', 'PrClosedUnmerged'],
+  ['merge_wait', 'HeadMovedAfterApproval'],
+  ['board_done', 'BoardDisagrees'],
+  ['issue_close', 'IssueStillOpen'],
+];
+
+/** Stops a restart does recover, as [step, reason]: before the PR is open, or while the issue is still In progress. */
+const STOPS_A_RESTART_RECOVERS: readonly (readonly [string, string])[] = [
+  ['check', 'NotFound'],
+  ['claim', 'UnexpectedClaimAnswer'],
+  ['confirm_claim', 'BoardDisagrees'],
+  ['session', 'SessionError'],
+  ['session', 'SessionInterrupted'],
+  ['session', 'RemoteSessionNoHead'],
+  ['park', 'ActivityFailed'],
+  ['guard', 'ProtectedPath'],
+  ['guard', 'BranchMoved'],
+  ['push', 'PushRejected'],
+  ['open_pr', 'ActivityFailed'],
+  ['board_pr', 'BoardDisagrees'],
+  ['board_issue', 'BoardDisagrees'],
+];
+
+test('a stop at a step after the PR is open gets the by-hand sentence and no command, whatever the reason; any earlier step gets the commands', () => {
+  for (const [step, reason] of STOPS_WITH_THE_PR_OPEN) {
     assert.ok(KNOWN_STOP_REASONS.has(reason), `${reason} is a word the report may name`);
+    assert.equal(STOP_STEP_RECOVERY[step as keyof typeof STOP_STEP_RECOVERY], 'by_hand', step);
+    assert.deepEqual(restartAdvice(12, 'failed', step), { instead: PR_BY_HAND_TEXT }, `${step} ${reason}`);
   }
-  assert.match(PR_BY_HAND_TEXT, /^the PR is open and a restart would end skipped: finish the PR by hand/);
+  for (const [step, reason] of STOPS_A_RESTART_RECOVERS) {
+    assert.ok(KNOWN_STOP_REASONS.has(reason), `${reason} is a word the report may name`);
+    assert.equal(STOP_STEP_RECOVERY[step as keyof typeof STOP_STEP_RECOVERY], 'restart', step);
+    assert.deepEqual(restartAdvice(12, 'failed', step), { restart: restartOf(12) }, `${step} ${reason}`);
+  }
+  // Every step has a realistic case above, and none is in both lists.
+  const covered = [...STOPS_WITH_THE_PR_OPEN, ...STOPS_A_RESTART_RECOVERS].map(([step]) => step);
+  assert.deepEqual([...new Set(covered)].sort(), Object.keys(STOP_STEP_RECOVERY).sort());
+  assert.equal(STOPS_WITH_THE_PR_OPEN.some(([step]) => STOPS_A_RESTART_RECOVERS.some(([other]) => other === step)), false);
+  assert.match(PR_BY_HAND_TEXT, /^the PR is already open, so a restart would end skipped: carry on by hand/);
+  // A reason alone never decides: the same word is a restart at one step and by hand at another.
+  assert.deepEqual(restartAdvice(12, 'failed', 'session'), { restart: restartOf(12) });
+  assert.deepEqual(restartAdvice(12, 'failed', 'review_session'), { instead: PR_BY_HAND_TEXT });
+  // A run with no step (a failure that is not a stop) or a word that is no step gets the commands.
+  assert.deepEqual(restartAdvice(12, 'failed'), { restart: restartOf(12) });
+  assert.deepEqual(restartAdvice(12, 'failed', 'not_a_step'), { restart: restartOf(12) });
+  assert.deepEqual(restartAdvice(12, 'failed', 'constructor'), { restart: restartOf(12) }, 'a name from the prototype is not a step');
+  assert.equal(isStopStep('toString'), false);
+  assert.equal(isStopStep('review_loop'), true);
+});
+
+test('a run that finished, or that the read did not answer for, has neither commands nor the by-hand sentence, whatever step it is given', () => {
+  assert.deepEqual(restartAdvice(12, 'completed_but_open', 'review_loop'), {});
+  assert.deepEqual(restartAdvice(12, 'id_already_ran', 'review_loop'), {});
 });
 
 test('a stop reason is reported only when it is one of the orchestrator words; a step only as a plain lowercase word', () => {
@@ -570,7 +647,7 @@ async function closedRunTick(issue: number, entry: RunStatusEntry | undefined): 
 }
 
 test('a Ready issue with a failed run is skipped as failed, with its stop reason and the commands; the watcher starts nothing for it', async () => {
-  const report = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError' });
+  const report = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError', step: 'session' });
 
   assert.equal(report.outcome, 'ok');
   assert.deepEqual(report.started, [90, 91], 'a closed run holds no slot');
@@ -588,15 +665,34 @@ test('a failed run that recorded no stop reason of the orchestrator is failed wi
 });
 
 test('a failed run that stopped with the PR open is reported with its reason and the by-hand sentence, and no command', async () => {
-  const report = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'MaxRoundsReached' });
+  const report = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'MaxRoundsReached', step: 'review_loop' });
 
   assert.deepEqual(report.started, [90, 91]);
   assert.deepEqual(report.skipped, [{ number: 11, reason: 'failed', stopReason: 'MaxRoundsReached', instead: PR_BY_HAND_TEXT }]);
   assert.equal('restart' in (report.skipped[0] ?? {}), false);
 });
 
+test('the step decides restart or by hand, not the reason: SessionError at the implementer session is restarted, at a reviewer session it is by hand', async () => {
+  const restarted = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError', step: 'session' });
+  assert.deepEqual(restarted.skipped, [{ number: 11, reason: 'failed', stopReason: 'SessionError', restart: restartOf(11) }]);
+
+  for (const step of ['review_session', 'fix_session']) {
+    const byHand = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError', step });
+    assert.deepEqual(byHand.skipped, [{ number: 11, reason: 'failed', stopReason: 'SessionError', instead: PR_BY_HAND_TEXT }], step);
+  }
+  // Steps after the PR is open whose reasons a list of reasons could not tell from the earlier steps.
+  for (const [step, stopReason] of [['threads', 'ActivityFailed'], ['merge_wait', 'PrClosedUnmerged'], ['host_integration', 'IntegrationConflict'], ['issue_close', 'IssueStillOpen']] as const) {
+    const byHand = await closedRunTick(11, { issue: 11, status: 'failed', stopReason, step });
+    assert.deepEqual(byHand.skipped, [{ number: 11, reason: 'failed', stopReason, instead: PR_BY_HAND_TEXT }], `${step} ${stopReason}`);
+  }
+  // A step the workflow cannot stop at (a word an activity made up) is dropped: the run gets the commands, and the step is not reported.
+  const unknown = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError', step: `${CANARY} not a step` });
+  assert.deepEqual(unknown.skipped, [{ number: 11, reason: 'failed', stopReason: 'SessionError', restart: restartOf(11) }]);
+  assert.equal(JSON.stringify(unknown).includes(CANARY), false);
+});
+
 test('a Ready issue with a parked run is reported as parked, with the commands that start it again as a remote run at a next attempt', async () => {
-  const report = await closedRunTick(11, { issue: 11, status: 'parked', stopReason: 'NeedsInputTimeout' });
+  const report = await closedRunTick(11, { issue: 11, status: 'parked', stopReason: 'NeedsInputTimeout', step: 'park' });
 
   assert.deepEqual(report.started, [90, 91]);
   assert.deepEqual(report.skipped, [{ number: 11, reason: 'parked', stopReason: 'NeedsInputTimeout', restart: restartOf(11, PARKED_RUN(11)) }]);
@@ -648,7 +744,7 @@ test('more closed runs than the lookup cap: the lowest are read, the rest keep i
   world.ready = [...closed].reverse();
   for (const issue of closed) {
     world.everStarted.add(issue);
-    world.runStatuses.set(issue, { issue, status: 'failed', stopReason: 'MaxRoundsReached' });
+    world.runStatuses.set(issue, { issue, status: 'failed', stopReason: 'MaxRoundsReached', step: 'review_loop' });
   }
 
   const report = await fakeTick({ ...RUN, cap: 1 });
@@ -697,7 +793,7 @@ test('a start that fails ends the tick before any status read: the first failure
   world = new World();
   world.ready = [11, 12, 13];
   world.everStarted.add(11);
-  world.runStatuses.set(11, { issue: 11, status: 'failed', stopReason: 'SessionError' });
+  world.runStatuses.set(11, { issue: 11, status: 'failed', stopReason: 'SessionError', step: 'session' });
   world.failures.set('startQueuedRun:12', ApplicationFailure.nonRetryable(CANARY, 'ServerUnavailable'));
 
   const report = await fakeTick();
@@ -1044,6 +1140,9 @@ test('the status read tells each way a real run closed, in fixed words, and neve
   await startAndFinish(activities, 807, 'stop:review_loop:SomeNewWord');
   await startAndFinish(activities, 808, 'stop:guard:ProtectedPath');
   await startAndFinish(activities, 814, 'stop:park:ActivityFailed');
+  await startAndFinish(activities, 815, 'stop:unknown_step:SessionError');
+  await startAndFinish(activities, 816, 'stop:review_session:SessionError');
+  await startAndFinish(activities, 817, 'stop:session:SessionError');
 
   assert.deepEqual(await activities.startQueuedRun({ issue: 809, run: RUN }), { status: 'started' });
   await client.workflow.getHandle(issueWorkflowId(809)).terminate(STUB_FAILURE_MESSAGE);
@@ -1057,22 +1156,25 @@ test('the status read tells each way a real run closed, in fixed words, and neve
   // Still open: not a closed run, so no answer. Never started: gone, so no answer.
   assert.deepEqual(await activities.startQueuedRun({ issue: 812, run: RUN }), { status: 'started' });
 
-  const found = await activities.readRunStatuses({ issues: [814, 812, 813, 811, 810, 809, 808, 807, 806, 805, 804, 803, 802, 801] });
+  const found = await activities.readRunStatuses({ issues: [817, 816, 815, 814, 812, 813, 811, 810, 809, 808, 807, 806, 805, 804, 803, 802, 801] });
 
   assert.deepEqual(found, {
     runs: [
       { issue: 801, status: 'completed' },
-      { issue: 802, status: 'failed', stopReason: 'MaxRoundsReached' },
-      { issue: 803, status: 'parked', stopReason: 'NeedsInputTimeout' },
-      { issue: 804, status: 'parked', stopReason: 'NeedsInput' },
+      { issue: 802, status: 'failed', stopReason: 'MaxRoundsReached', step: 'review_loop' },
+      { issue: 803, status: 'parked', stopReason: 'NeedsInputTimeout', step: 'park' },
+      { issue: 804, status: 'parked', stopReason: 'NeedsInput', step: 'session' },
       { issue: 805, status: 'failed' },
-      { issue: 806, status: 'failed' },
-      { issue: 807, status: 'failed' },
-      { issue: 808, status: 'failed', stopReason: 'ProtectedPath' },
+      { issue: 806, status: 'failed', step: 'review_loop' },
+      { issue: 807, status: 'failed', step: 'review_loop' },
+      { issue: 808, status: 'failed', stopReason: 'ProtectedPath', step: 'guard' },
       { issue: 809, status: 'terminated' },
       { issue: 810, status: 'cancelled' },
       { issue: 811, status: 'timed_out' },
-      { issue: 814, status: 'failed', stopReason: 'ActivityFailed' }, // a fault at the park step asked no question: not parked
+      { issue: 814, status: 'failed', stopReason: 'ActivityFailed', step: 'park' }, // a fault at the park step asked no question: not parked
+      { issue: 815, status: 'failed', stopReason: 'SessionError' }, // a step that is no step of the workflow is not read
+      { issue: 816, status: 'failed', stopReason: 'SessionError', step: 'review_session' },
+      { issue: 817, status: 'failed', stopReason: 'SessionError', step: 'session' },
     ],
   });
   assert.equal(JSON.stringify(found).includes(STUB_FAILURE_MESSAGE), false, 'no message of a failure reaches the answer');
@@ -1088,8 +1190,10 @@ test('real runs: a tick names a failed, a parked and a completed run by how they
   await startAndFinish(activities, 901, 'complete');
   await startAndFinish(activities, 902, 'stop:review_loop:MaxRoundsReached');
   await startAndFinish(activities, 903, 'stop:park:NeedsInputTimeout');
+  await startAndFinish(activities, 905, 'stop:review_session:SessionError');
+  await startAndFinish(activities, 906, 'stop:session:SessionError');
   world = new World();
-  world.ready = [901, 902, 903, 904];
+  world.ready = [901, 902, 903, 904, 905, 906];
 
   const report = await tick(REAL_QUEUE, { ...RUN, cap: 3 });
 
@@ -1099,9 +1203,11 @@ test('real runs: a tick names a failed, a parked and a completed run by how they
     { number: 901, reason: 'completed_but_open' },
     { number: 902, reason: 'failed', stopReason: 'MaxRoundsReached', instead: PR_BY_HAND_TEXT },
     { number: 903, reason: 'parked', stopReason: 'NeedsInputTimeout', restart: restartOf(903, PARKED_RUN(903)) },
+    { number: 905, reason: 'failed', stopReason: 'SessionError', instead: PR_BY_HAND_TEXT },
+    { number: 906, reason: 'failed', stopReason: 'SessionError', restart: restartOf(906) },
   ]);
-  assert.deepEqual(report.closedRuns, { counts: { failed: 1, parked: 1, completed_but_open: 1 }, notLookedUp: 0 });
-  for (const [issue, status] of [[901, 'COMPLETED'], [902, 'FAILED'], [903, 'FAILED']] as const) {
+  assert.deepEqual(report.closedRuns, { counts: { failed: 3, parked: 1, completed_but_open: 1 }, notLookedUp: 0 });
+  for (const [issue, status] of [[901, 'COMPLETED'], [902, 'FAILED'], [903, 'FAILED'], [905, 'FAILED'], [906, 'FAILED']] as const) {
     assert.equal((await client.workflow.getHandle(issueWorkflowId(issue)).describe()).status.name, status, `issue ${issue} was not started again`);
   }
   assert.deepEqual(await openIssueRuns(), [904]);
@@ -1128,7 +1234,7 @@ async function withFaults(set: typeof faults, body: () => Promise<void>): Promis
 
 test('a status read that cannot read a run from the server fails the tick at run_status: an infrastructure error is never read as a status (BR-0003)', async () => {
   const activities = createQueueActivities({ client, taskQueue: REAL_QUEUE });
-  await startAndFinish(activities, 1001, 'stop:review_loop:SessionError');
+  await startAndFinish(activities, 1001, 'stop:review_session:SessionError');
   await startAndFinish(activities, 1003, 'stop:session:SessionError');
   const ids = { describe: issueWorkflowId(1001), result: issueWorkflowId(1003) };
   const cases: { what: string; issues: number[]; set: typeof faults; started: number[]; notLookedUp: number; counts: object }[] = [
@@ -1156,8 +1262,8 @@ test('a status read that cannot read a run from the server fails the tick at run
 
 test('a run deleted between the describe and the result is no entry, and the other runs are still read', async () => {
   const activities = createQueueActivities({ client, taskQueue: REAL_QUEUE });
-  await startAndFinish(activities, 1004, 'stop:review_loop:SessionError');
-  await startAndFinish(activities, 1005, 'stop:review_loop:SessionError');
+  await startAndFinish(activities, 1004, 'stop:review_session:SessionError');
+  await startAndFinish(activities, 1005, 'stop:session:SessionError');
   world = new World();
   world.ready = [1004, 1005];
 
@@ -1300,6 +1406,32 @@ test('every reason a workflow stops with by name is a word the status read may r
   for (const word of KNOWN_STOP_REASONS) {
     assert.match(word, /^[A-Za-z][A-Za-z0-9]{0,63}$/, 'a reason is a plain type word');
   }
+});
+
+test('every step a workflow stops or fails at has a place in the restart-or-by-hand table, so a new step cannot be given the wrong advice unseen (#724)', async () => {
+  const sources = (await sourceFiles(SRC_DIR)).filter((file) => file.name.startsWith('workflows/') && !file.name.startsWith('workflows/queue-'));
+  const found = new Set<string>();
+  // The calls that name a step by a literal: `stop('<step>', ...)`, `step('<step>', ...)` (and `ctx.step`), `confirmStatus('<step>', ...)`
+  // and `onExecutor(<executor>, '<step>', ...)`. The workflow's own helper `step(name, ...)` takes a variable, which the calls above supply.
+  for (const file of sources) {
+    for (const match of file.text.matchAll(/\b(?:stop|step|confirmStatus)\(\s*'([a-z_]+)'|\bonExecutor\(\s*[A-Za-z_.]+,\s*'([a-z_]+)'/g)) {
+      found.add(match[1] ?? match[2] ?? '');
+    }
+  }
+  assert.ok(found.size >= 20, `expected the steps of the workflows, found ${found.size}`);
+  assert.deepEqual([...found].filter((step) => !isStopStep(step)), [], 'a step a workflow names is not in STOP_STEP_RECOVERY');
+  // The table is exactly the steps a run can stop at: the `IssueStep` type, and every one of them is named by some workflow.
+  const types = await readFile(join(SRC_DIR, 'issue-types.ts'), 'utf8');
+  const union = /export type IssueStep =([^;]*);/.exec(types)?.[1] ?? '';
+  const declared = [...union.matchAll(/'([a-z_]+)'/g)].map((match) => match[1] ?? '');
+  assert.deepEqual([...Object.keys(STOP_STEP_RECOVERY)].sort(), [...declared].sort());
+  assert.deepEqual(declared.filter((step) => !found.has(step)), [], 'a declared step no workflow names');
+  // The type lists the steps in the order a run reaches them. Once the issue is In review (after `board_issue`) a restart ends
+  // skipped at the claim, so every step after it is by hand and every step up to it is a restart (the README's recovery table).
+  const lastRestartable = declared.indexOf('board_issue');
+  assert.ok(lastRestartable > 0);
+  assert.deepEqual(declared.slice(0, lastRestartable + 1).filter((step) => STOP_STEP_RECOVERY[step as keyof typeof STOP_STEP_RECOVERY] !== 'restart'), []);
+  assert.deepEqual(declared.slice(lastRestartable + 1).filter((step) => STOP_STEP_RECOVERY[step as keyof typeof STOP_STEP_RECOVERY] !== 'by_hand'), []);
 });
 
 test('the status read goes on the same activity proxy and options as the other tick activities, and reads no history, query, update or memo', async () => {

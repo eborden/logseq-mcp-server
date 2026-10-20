@@ -42,6 +42,7 @@ import {
   QUEUE_ACTIVITY_OPTIONS,
   TICK_DEADLINE_REASON,
   closedRunReason,
+  isStopStep,
   parseQueueWatcherInput,
   restartAdvice,
 } from '../queue-types.ts';
@@ -206,7 +207,8 @@ const STOP_REASON_WORD = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 function closedRunSkip(entry: RunStatusEntry): TickSkip {
   const reason = closedRunReason(entry.status);
   const stopReason = entry.stopReason !== undefined && STOP_REASON_WORD.test(entry.stopReason) ? entry.stopReason : undefined;
-  const advice = restartAdvice(entry.issue, reason, stopReason);
+  // Only a step the workflow can stop at decides: an unknown word is dropped, and the run gets the commands.
+  const advice = restartAdvice(entry.issue, reason, entry.step !== undefined && isStopStep(entry.step) ? entry.step : undefined);
   return {
     number: entry.issue,
     reason,

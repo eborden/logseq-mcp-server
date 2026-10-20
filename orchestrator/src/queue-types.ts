@@ -5,7 +5,7 @@
 import type { ActivityOptions } from '@temporalio/workflow';
 import { NON_RETRYABLE_GITHUB_FAILURES } from './github-policy.ts';
 import { InvalidIssueInputError, parseIssueWorkflowInput } from './issue-types.ts';
-import type { Executor, HostIntegrationMode } from './issue-types.ts';
+import type { Executor, HostIntegrationMode, IssueStep } from './issue-types.ts';
 import type { SkipReason } from './queue-policy.ts';
 
 /** The workflow's registered name. The schedule starts it by this name. */
@@ -221,24 +221,59 @@ export function closedRunReason(status: ClosedRunStatus): ClosedRunReason {
   return status === 'completed' ? 'completed_but_open' : status;
 }
 
-/**
- * Stop reasons after which the PR is already open, so a restart is no recovery: the claim finds the PR and the run ends
- * `skipped` (README, "Recovering: a stopped review loop is finished by hand", and the rows of "Recovering a stuck run" that say
- * "by hand" or "a restart skips the loop"). The report says so instead of giving a command.
- */
-export const PR_BY_HAND_STOP_REASONS: ReadonlySet<string> = new Set([
-  'MaxRoundsReached',
-  'ReviewLoopTimeout',
-  'ReviewNotCounted',
-  'HeadMismatch',
-  'MalformedFindings',
-  'FindingsTooLarge',
-  'DiffUnreadable',
-  'FixerPushRejected',
-]);
+/** What a person does about a run that stopped at a step: start it again, or carry on by hand because a restart cannot recover it. */
+export type StopRecovery = 'restart' | 'by_hand';
 
-/** The fixed text a report gives for a stop in PR_BY_HAND_STOP_REASONS. */
-export const PR_BY_HAND_TEXT = 'the PR is open and a restart would end skipped: finish the PR by hand (README, "Recovering: a stopped review loop is finished by hand")';
+/**
+ * Where each step a run can stop at leaves the run, and so whether a restart recovers it. The step decides, not the reason:
+ * reason words are shared across steps (`SessionError` is a stop at `session` and at `review_session`).
+ *
+ * `restart`: the steps up to and including `board_issue`. A restart finds the claim answering `already_in_progress` (the item
+ * is still In progress) and carries on: a finished session is not run again and an open PR is found (README, "Recovering a
+ * stuck run": the `open_pr`, `board_pr` and `board_issue` rows). `guard` is here too, though a remote run can stop at it with
+ * the PR already open (`BranchMoved` after the PR opened): its README rows send the person through "Recovering from an orphan
+ * remote branch" first, and the restart follows that.
+ *
+ * `by_hand`: the steps of the review loop and the maintainer's decision. The PR is open and the issue is In review, so a
+ * restart ends `skipped` at the claim (`already_past_in_progress`) and never reaches them (README, "Recovering: a stopped
+ * review loop is finished by hand"). A `Record` over `IssueStep`, so a new step does not compile until it is placed here.
+ */
+export const STOP_STEP_RECOVERY: Readonly<Record<IssueStep, StopRecovery>> = {
+  check: 'restart',
+  claim: 'restart',
+  confirm_claim: 'restart',
+  session: 'restart',
+  park: 'restart',
+  guard: 'restart',
+  push: 'restart',
+  open_pr: 'restart',
+  board_pr: 'restart',
+  board_issue: 'restart',
+  review_session: 'by_hand',
+  review_post: 'by_hand',
+  gate: 'by_hand',
+  threads: 'by_hand',
+  fix_session: 'by_hand',
+  fix_guard: 'by_hand',
+  fix_push: 'by_hand',
+  fix_reply: 'by_hand',
+  host_integration: 'by_hand',
+  review_loop: 'by_hand',
+  decision_gate: 'by_hand',
+  decision_comment: 'by_hand',
+  merge_wait: 'by_hand',
+  board_done: 'by_hand',
+  issue_close: 'by_hand',
+};
+
+/** True for a step a run can stop at (an `IssueStep`). Any other word a failure's details hold is dropped. */
+export function isStopStep(step: string): step is IssueStep {
+  return Object.hasOwn(STOP_STEP_RECOVERY, step);
+}
+
+/** The fixed text a report gives for a stop at a `by_hand` step of STOP_STEP_RECOVERY. */
+export const PR_BY_HAND_TEXT =
+  'the PR is already open, so a restart would end skipped: carry on by hand (README, "Recovering a stuck run" and "Recovering: a stopped review loop is finished by hand")';
 
 /** What a person does about a closed run: two commands to run in order, or a fixed sentence, or nothing to say. */
 export interface RestartAdvice {
@@ -252,14 +287,15 @@ export interface RestartAdvice {
  * separate strings so each can be pasted as it is. `--attempt` does not get round the held ID. It sets the remote
  * implementer's first attempt number, so a parked run (always a remote run) is started again with `--executor remote` and the
  * next attempt (`<k>`: one more than the attempt in the question comment's marker, which the report does not hold). The
- * schedule's other flags (`--base`, `--repo-dir`, `--host-integration`) are the person's to add. A stop after the PR is open
- * has no command, only the sentence. The watcher never runs any of it.
+ * schedule's other flags (`--base`, `--repo-dir`, `--host-integration`) are the person's to add. A stop at a step after the PR
+ * is open (`by_hand` in STOP_STEP_RECOVERY) has no command, only the sentence. A run with no step (a failure that is not a
+ * stop) gets the commands. The watcher never runs any of it.
  */
-export function restartAdvice(issue: number, reason: ClosedRunReason, stopReason?: string): RestartAdvice {
+export function restartAdvice(issue: number, reason: ClosedRunReason, stopStep?: string): RestartAdvice {
   if (reason === 'id_already_ran' || reason === 'completed_but_open') {
     return {};
   }
-  if (stopReason !== undefined && PR_BY_HAND_STOP_REASONS.has(stopReason)) {
+  if (stopStep !== undefined && isStopStep(stopStep) && STOP_STEP_RECOVERY[stopStep] === 'by_hand') {
     return { instead: PR_BY_HAND_TEXT };
   }
   const remove = `temporal workflow delete --workflow-id issue-${issue}`;
@@ -277,6 +313,8 @@ export interface RunStatusEntry {
   readonly issue: number;
   readonly status: ClosedRunStatus;
   readonly stopReason?: string;
+  /** The step a stopped run ended at, when its failure named one (a plain lowercase word). The report chooses restart or by-hand from it. */
+  readonly step?: string;
 }
 
 /** The statuses `readRunStatuses` found. An issue whose run is open again, gone or unreadable has no entry. */
