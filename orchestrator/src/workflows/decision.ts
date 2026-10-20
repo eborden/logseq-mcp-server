@@ -25,6 +25,8 @@
 // signal command, and the words "not an approval". A push makes it stale (it names its head); the next clear gate on a new head
 // posts a new one. The statement is not a decision and changes nothing the gate requires.
 //
+// A resume run (#747) is the same hold loop with `stopAtGateClear`: it returns right after the statement. See issue.ts.
+//
 // A timeout never approves. At the decision timeout the run comments on the PR and ends `decision_timeout`.
 //
 // The inbox keeps the FIRST well-formed decision. A malformed payload and every later signal change nothing; they are
@@ -115,6 +117,14 @@ export interface DecisionContext {
   readonly advisoryReviewId?: number;
   /** The head the review those counts come from was on (the review loop's `headSha`). The counts are said only for that head. */
   readonly advisoryHead?: string;
+  /**
+   * A resume run (#747): the hold loop is the same, but the run ends at the first clear gate, after the gate-clear statement for that
+   * head, with `resumed_gate_clear`. It waits for no decision and moves nothing to Done: the run it replaces is closed, so no signal
+   * could reach this one. A merge the maintainer makes while it holds is still seen and finished as for any run. Absent: as before.
+   */
+  readonly stopAtGateClear?: boolean;
+  /** The ID of the run, for the statements it posts. Absent: `issue-<n>`. A resume run has its own (#747). */
+  readonly workflowId?: string;
   /** Runs one activity call; a failure of it ends the run at `name` (issue.ts). */
   readonly step: <T>(name: IssueStep, call: () => Promise<T>) => Promise<T>;
   /** Ends the run with one comment on the issue and a Failed workflow (issue.ts). */
@@ -124,7 +134,7 @@ export interface DecisionContext {
 export async function decisionStage(context: DecisionContext): Promise<IssueRunResult> {
   const { input, pr, inbox, step, stop } = context;
   const issue = input.issueNumber;
-  const workflowId = issueWorkflowId(issue);
+  const workflowId = context.workflowId ?? issueWorkflowId(issue);
   const timeoutMs = input.decisionTimeoutMs ?? DEFAULT_DECISION_TIMEOUT_MS;
   const pollMs = Math.min(input.decisionPollMs ?? DEFAULT_DECISION_POLL_MS, timeoutMs);
   const prItem: BoardItemRef = { kind: 'pr', number: pr };
@@ -154,8 +164,9 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
   let advisoryHead = context.advisoryHead;
   let advisoryReviewId = context.advisoryReviewId;
   const maxFixRounds = input.maxFixRounds ?? DEFAULT_MAX_FIX_ROUNDS;
+  // A resume run (#747) never starts a fixer: the fixer works on `claude/<n>`, and the PR being re-gated may be on another branch.
   const fixHostFailure =
-    input.executor === 'remote'
+    input.executor === 'remote' && context.stopAtGateClear !== true
       ? async (failedHead: string, summary: HostFailureSummary): Promise<boolean> => {
           if (fixRoundsUsed >= maxFixRounds) {
             return false;
@@ -223,6 +234,7 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
       // The review link moves with the counts: it is the id of the review they came from, so it is said only for that head too.
       const countsForHead = advisoryHead === head && advisoryReviewId !== undefined;
       const facts = {
+        ...(context.stopAtGateClear === true ? { resumed: true } : {}),
         workflowId,
         issue,
         pr,
@@ -237,6 +249,9 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
       };
       await step('decision_comment', () => github.commentIssue({ issue: pr, key: gateClearCommentKey(pr, head), body: gateClearComment(facts) }));
       statedFor.add(head);
+    }
+    if (context.stopAtGateClear === true) {
+      return { outcome: 'resumed_gate_clear', issueNumber: issue, pr, headSha: head, reviewsOnHead: gate.reviewsOnHead };
     }
     if (heldBefore !== undefined) {
       decision = heldBefore;

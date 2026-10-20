@@ -23,6 +23,9 @@
 //   board_pr     addToBoard, setStatus In review, getBoardStatus: the PR is In review with no manual step
 //   board_issue  setStatus In review for the issue, getBoardStatus
 //   review loop  the second half, in review-loop.ts (#630): reviews, a bounded fix loop and the gate.
+//   resume       (#747) a run started with `input.resume` skips everything above up to the review loop: `resolveResume` reads the
+//                one open PR of the issue (and refuses with a fixed word when there is not exactly one), the run checks it is the PR
+//                and head it was started for, and `decisionStage` holds the gate for that head and ends at the first clear one.
 //   decision     the third part, in decision.ts (#631): the `maintainerDecision` signal, held until the gate is clear,
 //                the decision comment, then the merge the maintainer makes, Done, and the issue's closed check.
 //                `awaitDecision: false` ends the run after the review loop, as #630 did.
@@ -63,6 +66,8 @@ import {
   issueWorkflowId,
   parseIssueWorkflowInput,
   pullRequestTitle,
+  resumeKeySuffix,
+  resumeWorkflowId,
   stopComment,
   stopCommentKey,
   stopPrComment,
@@ -71,7 +76,7 @@ import {
 import type { IssueRunResult, IssueStep, PrBodyReport, SkipReason, StopReason } from '../issue-types.ts';
 import type { BoardItemRef, SessionExitStatus, SettableStatus } from '../types.ts';
 
-const github = proxyActivities<Pick<GithubActivities, 'checkIssue' | 'claimIssue' | 'openPr' | 'commentIssue' | 'getPrState'>>({
+const github = proxyActivities<Pick<GithubActivities, 'checkIssue' | 'claimIssue' | 'openPr' | 'commentIssue' | 'getPrState' | 'resolveResume'>>({
   ...GITHUB_ACTIVITY_OPTIONS,
   scheduleToCloseTimeout: ISSUE_STEP_TIMEOUT,
 });
@@ -117,7 +122,10 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
     throw error;
   }
   const issue = input.issueNumber;
-  const workflowId = issueWorkflowId(issue);
+  // A resume run (#747) has its own ID, so the comments it leaves name the run that left them. Absent `resume`: as it always was.
+  const workflowId = input.resume === undefined ? issueWorkflowId(issue) : resumeWorkflowId(issue, input.resume.headSha);
+  // A resume run's stop comments carry its head in their keys (#747), so a stop it makes after the run it follows stopped the same way still comments.
+  const keySuffix = input.resume === undefined ? '' : resumeKeySuffix(input.resume.headSha);
   const branch = issueBranch(issue);
   let pr: number | undefined;
 
@@ -125,7 +133,7 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   async function stop(step: IssueStep, reason: StopReason, detail?: string): Promise<never> {
     if (!NO_COMMENT_FAILURES.includes(reason)) {
       try {
-        await github.commentIssue({ issue, key: stopCommentKey(step, reason), body: stopComment(workflowId, step, reason, pr, detail) });
+        await github.commentIssue({ issue, key: `${stopCommentKey(step, reason)}${keySuffix}`, body: stopComment(workflowId, step, reason, pr, detail) });
       } catch (commentError) {
         if (isCancellation(commentError)) {
           throw commentError;
@@ -135,7 +143,7 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
       // The same stop, in one line, on the PR when there is one (#715): a reader of the PR sees why it is not moving.
       if (pr !== undefined) {
         try {
-          await github.commentIssue({ issue: pr, key: stopPrCommentKey(step, reason), body: stopPrComment(workflowId, step, reason, issue) });
+          await github.commentIssue({ issue: pr, key: `${stopPrCommentKey(step, reason)}${keySuffix}`, body: stopPrComment(workflowId, step, reason, issue) });
         } catch (commentError) {
           if (isCancellation(commentError)) {
             throw commentError;
@@ -170,6 +178,24 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
       }
     }
     return await stop(name, 'BoardDisagrees');
+  }
+
+  // A resume run (#747) enters here: no claim, no session, no PR to open. The gate checks stay the ones the full run makes
+  // (`decisionStage`), for the head the PR shows now. Nothing above this line runs for it, and nothing below it changes for a
+  // run without `resume`, so the commands of an existing history stay in their order and no `patched()` is needed.
+  if (input.resume !== undefined) {
+    const target = input.resume;
+    const resolved = await step('resume', () => github.resolveResume(issue));
+    if (!resolved.ok) {
+      return { outcome: 'refused', issueNumber: issue, reason: resolved.reason };
+    }
+    // The entry point read the PR before it started this run. If the PR, its head or its base is not what GitHub shows now, a
+    // stale head would be gated under a run named for it: refuse, and let the person start again for the head that is there.
+    if (resolved.pr !== target.pr || resolved.headSha !== target.headSha || resolved.base !== input.base) {
+      return { outcome: 'refused', issueNumber: issue, reason: 'pr_changed' };
+    }
+    pr = resolved.pr;
+    return await decisionStage({ input, pr: resolved.pr, inbox, step, stop, stopAtGateClear: true, workflowId });
   }
 
   const check = await step('check', () => github.checkIssue(issue));
