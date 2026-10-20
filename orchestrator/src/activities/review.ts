@@ -50,6 +50,7 @@ import {
 } from '../review-types.ts';
 import type {
   AdvisoryFinding,
+  AdvisoryReason,
   Finding,
   FixerOutput,
   FixerSessionResult,
@@ -446,7 +447,7 @@ export function createReviewActivities(deps: ReviewDeps) {
    * Opens a thread for each finding on an unchanged line of a changed file (#714). The thread is on the file, with the path
    * and the original line in its first comment. When GitHub refuses that (a non-retryable client error such as a 422), the
    * finding is anchored on the nearest changed line of its file instead, and its text says so. A second refusal
-   * (`thread_failed`) or a file with no changed line makes the finding advisory, listed in the review
+   * (`thread_failed`) or a file with no changed line (`no_changed_line`) makes the finding advisory, listed in the review
    * body: never dropped. A failure that is not a refusal (a 5xx, a timeout, a 429, a failed read) is thrown, so the
    * activity retries: that is idempotent by key, and a finding is never made advisory by an outage. Only the finding's
    * path, already a file of the diff, and fixed words go in a thread.
@@ -462,14 +463,17 @@ export function createReviewActivities(deps: ReviewDeps) {
     for (const finding of findings) {
       const base = { pr: input.pr, commitId: input.headSha, path: finding.path, key: findingKey(input, finding) };
       let result = await tryAddThread(() => deps.addReviewThread({ ...base, body: fileThreadBody(finding) }));
+      let reason: AdvisoryReason = 'thread_failed';
       if (result === undefined) {
         const line = nearestChangedLine(changed?.get(finding.path) ?? [], finding.line);
-        if (line !== undefined) {
+        if (line === undefined) {
+          reason = 'no_changed_line';
+        } else {
           result = await tryAddThread(() => deps.addReviewThread({ ...base, line, body: nearestThreadBody(finding, line) }));
         }
       }
       if (result === undefined) {
-        failed.push({ ...finding, reason: 'thread_failed' });
+        failed.push({ ...finding, reason });
       } else if (result.level === 'file') {
         file += 1;
       } else {

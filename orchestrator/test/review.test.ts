@@ -609,7 +609,7 @@ test('the reviewer: a file with no changed line, or a refused fallback, makes th
   assert.deepEqual(await gone.run(gone.activities.postSessionReview), { reviewId: 5001, posted: true, comments: 0, fileLevel: 0, nearest: 0, advisory: 1, omitted: 0 });
   assert.equal((await threadPosts(gone)).length, 1, 'the file-level call only: there is no line to try');
   const goneReview = await postedReviewBody(gone);
-  assert.ok(goneReview.body.includes('`gone.txt:1` (GitHub refused a thread for it)') && goneReview.body.includes('NO-LINE finding'));
+  assert.ok(goneReview.body.includes('`gone.txt:1` (GitHub refused a file-level thread for it, and its file has no changed line to place it on)') && goneReview.body.includes('NO-LINE finding'));
 
   // Both calls refused.
   const refused = await scenario((state) => { state.refuseThreads = 'all'; });
@@ -618,6 +618,7 @@ test('the reviewer: a file with no changed line, or a refused fallback, makes th
   assert.deepEqual(await refused.run(refused.activities.postSessionReview), { reviewId: 5001, posted: true, comments: 0, fileLevel: 0, nearest: 0, advisory: 1, omitted: 0 });
   assert.equal((await threadPosts(refused)).length, 2);
   assert.ok((await postedReviewBody(refused)).body.includes('FILE-LEVEL finding'));
+  assert.ok((await postedReviewBody(refused)).body.includes('`atlas.txt:40` (GitHub refused a thread for it)'), 'a second refusal has its own reason, not the one of a file with no changed line');
   assert.equal(((await new MockActivityEnvironment().run(refused.github.listReviewThreads, 77)) as ReviewThread[]).length, 0, 'no thread exists');
 });
 
