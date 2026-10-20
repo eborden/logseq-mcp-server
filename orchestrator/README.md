@@ -560,14 +560,14 @@ A bad flag prints one line on stderr and exits 1 before it connects (`cap must b
 |---|---|---|---|
 | `--cap <n>` | `3` | a whole number, 1 to 10 | The most runs in flight ("The cap" below) |
 | `--every <n>m` or `<n>h` | `5m` | 1 minute to 1 hour; a bare number such as `5` is refused, the unit is required | The tick interval. A shorter one costs GitHub rate limit, because the board read is GraphQL through `gh` |
-| `--base <branch>` | `main` | a plain branch name: letters, digits, `.`, `_`, `-` and `/`, at most 100 characters, no `..`, no `//`, no trailing `/` or `.lock` | The branch each run's PR targets. Set it when the work lands on a feature branch |
+| `--base <branch>` | `main` | a plain branch name: starts with a letter or digit, then letters, digits, `.`, `_`, `-` and `/`, at most 100 characters, no `..`, no `//`, no trailing `/` or `.lock` | The branch each run's PR targets. Set it when the work lands on a feature branch |
 | `--repo-dir <path>` | the parent of the directory you run it from, which is the main checkout when you run it from `orchestrator/` | any path; a relative one is made absolute | The checkout the runs' worktrees are made from (`<repo-dir>/.claude/worktrees/issue-<n>`) |
 | `--host-integration` | off | takes no value (`--host-integration=false` is an error) | Every run does the host integration check at the gate ("The host integration check at the gate") |
 | `--executor <local\|remote>` | `local` | those two words | Where the model sessions run ("The executor flag"). `remote` needs the six `REMOTE_ROUTINE_*` variables on the worker, or each run stops at its first remote step as `RemoteExecutorUnavailable` |
 
 `run-issue` has three flags the watcher does not take: `--worktree-dir`, `--wait` and `--attempt`. The flags are stored in the schedule, so a run you start by hand gets only the flags you give `run-issue`. Add them to the commands a skip's `restart` gives you.
 
-**When ticks happen.** Ticks fall on the clock, on multiples of the interval: a `10m` schedule ticks at :00, :10, :20 and so on, so the first tick comes within one interval of `create`, not after a full one. `temporal schedule describe --schedule-id queue-watcher` shows the state, the flags and the next times, and `temporal schedule trigger --schedule-id queue-watcher` runs one tick now. The `temporal` CLI reads `TEMPORAL_ADDRESS` too. A tick with no worker running waits for one, up to its 10 minute execution timeout.
+**When ticks happen.** Ticks fall on the clock, on multiples of the interval: a `10m` schedule ticks at :00, :10, :20 and so on, so the first tick comes within one interval of `create`, not after a full one. `temporal schedule describe --schedule-id queue-watcher` shows the state, the overlap policy and the next times. The flags are in it only as base64 `Args`. To read them back: `temporal schedule describe --schedule-id queue-watcher --output json | grep '"data"' | sed 's/.*: "//; s/".*//' | base64 -d` prints `{"cap":2,"repoDir":"<dir>","base":"main"}` (`cap`, `hostIntegration` and `executor` appear only when you set them). And `temporal schedule trigger --schedule-id queue-watcher` runs one tick now. The `temporal` CLI reads `TEMPORAL_ADDRESS` too. A tick with no worker running waits for one, up to its 10 minute execution timeout.
 
 ### First time
 
@@ -605,12 +605,12 @@ A report (made-up numbers: cap 2, one run in flight):
     { "number": 13, "reason": "over_cap" },
     { "number": 14, "reason": "taken" },
     { "number": 15, "reason": "untrusted" },
-    { "number": 16, "reason": "failed", "stopReason": "ProtectedPath",
+    { "number": 16, "reason": "timed_out",
       "restart": ["temporal workflow delete --workflow-id issue-16", "npm run run-issue -- --issue 16"] }
   ],
   "skippedNotReported": 0,
   "trustNotRead": 0,
-  "closedRuns": { "counts": { "failed": 1 }, "notLookedUp": 0 }
+  "closedRuns": { "counts": { "timed_out": 1 }, "notLookedUp": 0 }
 }
 ```
 
@@ -623,10 +623,18 @@ A report (made-up numbers: cap 2, one run in flight):
 | `skipped` | Each Ready issue that did not start, with a `reason` ("Skip reasons" below). At most 100 are named. Only a closed run's skip has `stopReason`, `restart` or `instead` |
 | `skippedNotReported` | How many skips the list left out because of that bound |
 | `trustNotRead` | Ready issues whose author the tick did not read (more than 50 candidates). They are skipped as `untrusted` and counted here |
-| `closedRuns` | Present when a Ready issue's `issue-<n>` run has closed: `counts` per reason, and `notLookedUp`, the closed runs past the 20 a tick reads. Absent otherwise |
+| `closedRuns` | Present when a Ready issue's `issue-<n>` run has closed: `counts` per reason, and `notLookedUp`, the closed runs the tick did not read: past the 20 it reads, or all of them when the tick failed at `start` or `run_status`. Absent otherwise |
 | `failure` | Present when `outcome` is `failed`: `{ "step", "reason" }` |
 
 The report holds issue numbers, counts and fixed words only. It never holds a title, a label or a line of an issue.
+
+**What the report cannot show.** It names a closed run only for an issue that is in Ready (and otherwise eligible). A run that closed after it claimed the issue leaves the item In progress, In review or Needs Input, and the watcher does not look at those: a stuck run there is invisible in every report. The example's issue 16 is a run the report can list. A run that stopped after the claim would appear only if someone moved its item back to Ready. To find closed runs wherever their item is, list them from Temporal:
+
+```bash
+temporal workflow list --query "WorkflowType='issueWorkflow' AND ExecutionStatus!='Running'"
+```
+
+That lists every closed `issueWorkflow` run, old ones included: Completed (most of them), Failed, Terminated, TimedOut or Canceled. Add `AND ExecutionStatus='Failed'` for the stops. Read a hit with `temporal workflow show --workflow-id issue-<n>` and "Recovering a stuck run".
 
 ### Skip reasons
 
@@ -641,9 +649,9 @@ The report holds issue numbers, counts and fixed words only. It never holds a ti
 | `parked` | The run asked a question on the issue and no trusted comment answered in time | Answer on the issue, then run the `restart` commands. `<k>` is one more than the `attempt=` in the question comment's first line |
 | `terminated`, `timed_out`, `cancelled` | A person or the server closed the run, or it passed its 50 day limit | The `restart` commands, or `instead` |
 | `completed_but_open` | The run finished and its issue is still open and Ready | No command. `temporal workflow show --workflow-id issue-<n>`: close the issue if its PR merged, or read the `skipped` row of "Recovering a stuck run" |
-| `id_already_ran` | A closed run the tick did not read (past 20, or the read answered nothing) | `temporal workflow describe --workflow-id issue-<n>`, or wait for the next tick |
+| `id_already_ran` | A closed run the tick did not read: past the 20 it reads, the tick failed at `start` or `run_status` before or at the read, or the read answered nothing for it | `temporal workflow describe --workflow-id issue-<n>`, or wait for the next tick |
 
-The watcher never runs a `restart` command, and `--attempt` alone does not start a closed run: delete it first. A closed run's skip appears only for an issue that is in Ready and otherwise eligible. A run that stopped after it claimed the issue leaves the item In progress, In review or Needs Input, so the report does not mention it. Find those with `temporal workflow list --query "WorkflowType='issueWorkflow' AND ExecutionStatus='Failed'"`.
+The watcher never runs a `restart` command, and `--attempt` alone does not start a closed run: delete it first. A closed run's skip appears only for an issue that is in Ready and otherwise eligible. A run that stopped after it claimed the issue leaves the item In progress, In review or Needs Input, so the report does not mention it ("What the report cannot show").
 
 ### A failed tick
 
@@ -652,7 +660,7 @@ A failed tick is a missed tick. A failed read (`list_ready`, `list_taken`, `list
 | Reason | What it says |
 |---|---|
 | `GitHubRateLimitExhausted`, `GitHubRateLimitTooLong` | `gh` is rate limited. Wait, or use a longer `--every` (`delete`, then `create`) |
-| `TooLarge` | More than 50 Ready items, or a list of PRs or branches past its page bound. Trim the Ready column |
+| `TooLarge` | At `list_ready`: more than 50 Ready items. Trim the Ready column. At `list_taken`: more open PRs or `claude/` branches than its 5 pages of each list. Close the stale PRs and delete the stale `claude/` branches |
 | `TooManyRuns` (`list_running`) | More than 200 open `issueWorkflow` runs, and a partial count would break the cap |
 | `TickDeadline` | The tick ran 8 minutes without finishing. `step` is where it was. A start it cut off may still have happened, and the next tick finds that run open |
 
@@ -660,7 +668,7 @@ The 8 minute deadline sits 2 minutes under the tick's 10 minute execution timeou
 
 ### With held runs, Needs Input and the board
 
-- **A run held for a decision** (the gate is clear and the run waits for `npm run signal`, or waits for the merge): open, so it keeps its slot. Its issue is In review, so the report does not name it. Deciding it, or the merge, frees the slot.
+- **A run held for a decision** (the gate is clear and the run waits for `npm run signal`, or waits for the merge): open, so it keeps its slot. Its issue is In review, so the report does not name it. A `changes_requested` decision, or the merge (or the end of the merge wait), frees the slot. An `approved` decision does not: the run then waits for the merge and keeps the slot until the PR merges or closes, or that wait ends.
 - **A run parked on Needs Input**: open, so it keeps its slot for as long as it waits (7 days by default). Its board item is in Needs Input, not Ready, so the watcher does not name it. An answer on the issue lets the run go on. With no answer the run closes as `parked`, and the issue is in the report only once a person moves the item back to Ready.
 - **Backlog to Ready** is still the maintainer's. The watcher reads Ready and nothing else, so an issue enters the queue only when someone moves it there. The watcher never moves a board item.
 - **Putting an issue back in Ready after a run** starts nothing while its `issue-<n>` run exists, open or closed. The report says why ("Skip reasons").
