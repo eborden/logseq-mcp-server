@@ -159,7 +159,7 @@ test('the commands for a closed run are fixed text and the issue number, as two 
 });
 
 /** The steps whose stop the resume entry point re-gates (#747): the host check, the fix round, and the resume run's own read. The rest of the loop stays by hand. */
-const RESUMABLE_STEPS: readonly string[] = ['resume', 'fix_session', 'fix_guard', 'fix_push', 'fix_reply', 'host_integration'];
+const RESUMABLE_STEPS: readonly string[] = ['resume', 'fix_session', 'fix_guard', 'fix_push', 'fix_reply', 'host_integration', 'decision_comment'];
 
 /**
  * Stops the workflows really make at a step once the PR is open and the issue is In review (the `by_hand` steps), as
@@ -214,6 +214,13 @@ const STOPS_A_RESTART_RECOVERS: readonly (readonly [string, string])[] = [
   ['board_pr', 'BoardDisagrees'],
   ['board_issue', 'BoardDisagrees'],
 ];
+
+test('the re-gate advice names --resume and says to delete a resume run that already ran for the head; a failed comment post is one it covers, a failed gate read is not (the step is shared with a closed PR)', () => {
+  const advice = restartAdvice(12, 'failed', 'decision_comment').instead ?? '';
+  assert.match(advice, /npm run run-issue -- --issue 12 --resume/);
+  assert.match(advice, /if a resume already ran for this head, delete its closed run first/);
+  assert.equal(restartAdvice(12, 'failed', 'decision_gate').instead, PR_BY_HAND_TEXT);
+});
 
 test('a stop at a step after the PR is open gets the by-hand sentence and no command, whatever the reason; any earlier step gets the commands', () => {
   for (const [step, reason] of STOPS_WITH_THE_PR_OPEN) {

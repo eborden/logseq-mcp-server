@@ -263,10 +263,13 @@ export type StopRecovery = 'restart' | 'by_hand' | 'resume';
  * review loop is finished by hand"). A `Record` over `IssueStep`, so a new step does not compile until it is placed here.
  *
  * `resume` (#747): the steps whose stop a person mends on the PR and then re-gates with `npm run run-issue -- --issue <n> --resume`
- * (README, "Resuming a stopped gate"): the host integration check, the fix round that comes with it, and the resume run's own
- * read. A restart still ends `skipped`, so the advice is the sentence `resumeAdvice` builds, not the restart commands. A stop
- * at the other `by_hand` steps (a reviewer that never posted, the loop's own bounds, the maintainer's decision) is not one the resume
- * enters at: the resume starts at the gate and runs no reviewer or fixer of its own, so those stay by hand.
+ * (README, "Resuming a stopped gate"): the host integration check, the fix round that comes with it, the resume run's own
+ * read, and `decision_comment` (the gate-clear statement or the decision comment failed to post: a re-gate posts it again, keyed).
+ * A restart still ends `skipped`, so the advice is the sentence `resumeAdvice` builds, not the restart commands. `decision_gate`
+ * stays `by_hand` although a failed read there is recoverable too: the advice is keyed on the step, and the step is shared with
+ * `PrClosedUnmerged`, where a resume would be refused (`no_open_pr`). A stop at the other `by_hand` steps (a reviewer that never
+ * posted, the loop's own bounds, the merge steps) is not one the resume enters at: it starts at the gate and runs no reviewer
+ * or fixer of its own, so those stay by hand.
  */
 export const STOP_STEP_RECOVERY: Readonly<Record<IssueStep, StopRecovery>> = {
   check: 'restart',
@@ -291,7 +294,7 @@ export const STOP_STEP_RECOVERY: Readonly<Record<IssueStep, StopRecovery>> = {
   host_integration: 'resume',
   review_loop: 'by_hand',
   decision_gate: 'by_hand',
-  decision_comment: 'by_hand',
+  decision_comment: 'resume',
   merge_wait: 'by_hand',
   board_done: 'by_hand',
   issue_close: 'by_hand',
@@ -311,7 +314,7 @@ export const PR_BY_HAND_TEXT =
  * The PR is open and the issue is In review, so a restart would end skipped; the resume entry point re-gates the PR's current head.
  */
 export function resumeAdvice(issue: number): string {
-  return `the PR is already open, so a restart would end skipped: fix the PR by hand and have its new head reviewed, then re-gate it with "npm run run-issue -- --issue ${issue} --resume" (add --host-integration if the stopped run had it; README, "Resuming a stopped gate")`;
+  return `the PR is already open, so a restart would end skipped: fix the PR by hand and have its new head reviewed, then re-gate it with "npm run run-issue -- --issue ${issue} --resume" (add --host-integration if the stopped run had it; if a resume already ran for this head, delete its closed run first; README, "Resuming a stopped gate")`;
 }
 
 /** What a person does about a closed run: two commands to run in order, or a fixed sentence, or nothing to say. */
