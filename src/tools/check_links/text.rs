@@ -260,7 +260,6 @@ mod tests {
         link_counts(text).into_iter().map(|(term, n)| (Box::leak(term.into_boxed_str()) as &'static str, n)).collect()
     }
 
-    // Issue 657: text in a code span or a fenced block is no ref.
     // Issue 654: the totals match, but a `]]` comes before any `[[`.
     #[test]
     fn mis_ordered_brackets_are_not_balanced() {
@@ -273,6 +272,7 @@ mod tests {
         assert!(check_brackets("[[a [[b]] c]]").nested.is_some());
     }
 
+    // Issue 657: text in a code span or a fenced block is no ref.
     #[test]
     fn code_spans_and_fences_hold_no_refs() {
         assert_eq!(counts("use `m[[0]]` here [[Alice]]"), [("Alice", 1)]);
