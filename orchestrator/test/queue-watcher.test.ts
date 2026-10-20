@@ -51,6 +51,7 @@ import {
   CLOSED_RUN_REASONS,
   MAX_CLOSED_EXCLUDED,
   MAX_CLOSED_NOT_READY,
+  MAX_CLOSED_ROWS_READ,
   MAX_RUN_STATUS_LOOKUPS,
   closedRunReason,
   parseClosedRunsInput,
@@ -1533,7 +1534,7 @@ test('the closed-run list reads real runs newest first, never a completed one, p
   assert.deepEqual(all.runs[0], { issue: 1221, status: 'failed', stopReason: 'SessionError', step: 'session' });
   assert.equal(all.runs.some((run) => run.issue === 1250), false, 'a completed run is not looked for');
   const total = (await client.workflow.count(CLOSED_NOT_READY_QUERY)).count;
-  assert.equal(all.notLookedUp, total - (MAX_CLOSED_NOT_READY + 1), 'the rows it read are the 20 and the one run of another ID; the rest are counted');
+  assert.equal(all.notLookedUp, total - 1 - MAX_CLOSED_NOT_READY, 'every row was read (the list ran out): the run of another ID is passed over and the qualifying runs past the 20 are counted exactly');
   assert.ok(all.notLookedUp >= 2, 'more closed runs than the cap');
 
   // A Ready number is passed over, and the next one takes its place in the 20.
@@ -1543,6 +1544,82 @@ test('the closed-run list reads real runs newest first, never a completed one, p
 
   await assert.rejects(activities.listClosedRuns({ exclude: [0] }), (error: unknown) => error instanceof ApplicationFailure && error.type === 'InvalidInput');
   await assert.rejects(activities.listClosedRuns({}), (error: unknown) => error instanceof ApplicationFailure && error.type === 'InvalidInput');
+});
+
+/**
+ * A client whose visibility list answers `rows` in the order given, as a store with another default order would, and whose
+ * count is `countAnswer`. Every closed run describes as Terminated, so no result is read. `counts` says how often count was asked.
+ */
+function listingClient(rows: readonly { workflowId: string; closeTime?: Date }[], countAnswer: () => number): { client: Client; counts: { asked: number } } {
+  const counts = { asked: 0 };
+  const stub = {
+    workflow: {
+      list: async function* () {
+        for (const row of rows) {
+          yield row;
+        }
+      },
+      count: async () => {
+        counts.asked += 1;
+        return { count: countAnswer() };
+      },
+      getHandle: () => ({ describe: async () => ({ status: { name: 'TERMINATED' }, runId: 'run' }) }),
+    },
+  };
+  return { client: stub as unknown as Client, counts };
+}
+
+const closedAt = (issue: number, seconds: number): { workflowId: string; closeTime: Date } => ({ workflowId: issueWorkflowId(issue), closeTime: new Date(Date.UTC(2025, 0, 1, 0, 0, seconds)) });
+
+test('the 20 named are the newest by close time whatever order the store answers in; a list that ran out is exact and asks for no count (#744)', async () => {
+  // 30 runs, issue n closed at second n. The store answers oldest first, so a read that trusted its order would name 1 to 20.
+  const rows = Array.from({ length: 30 }, (_, index) => closedAt(index + 1, index + 1));
+  for (const order of [rows, [...rows].reverse(), [...rows.slice(10), ...rows.slice(0, 10)]]) {
+    const { client: stub, counts } = listingClient(order, () => {
+      throw new Error('a list that ran out must not ask for a count');
+    });
+
+    const found = await createQueueActivities({ client: stub, taskQueue: REAL_QUEUE }).listClosedRuns({ exclude: [] });
+
+    assert.deepEqual(found.runs.map((run) => run.issue), Array.from({ length: 20 }, (_, index) => 30 - index), 'newest close first');
+    assert.equal(found.notLookedUp, 10, 'the 10 older qualifying runs it read and did not name');
+    assert.equal(counts.asked, 0);
+  }
+});
+
+test('a clean list says nothing unread: no count is asked, so a run that closes between two reads cannot make a number (#744)', async () => {
+  const { client: stub, counts } = listingClient([closedAt(5, 1), closedAt(6, 2)], () => 3);
+
+  const found = await createQueueActivities({ client: stub, taskQueue: REAL_QUEUE }).listClosedRuns({ exclude: [] });
+
+  assert.deepEqual(found.runs.map((run) => run.issue), [6, 5]);
+  assert.equal(found.notLookedUp, 0);
+  assert.equal(counts.asked, 0);
+  // Exactly the row bound is still a list that ran out.
+  const exact = listingClient(Array.from({ length: MAX_CLOSED_ROWS_READ }, (_, index) => closedAt(index + 1, index + 1)), () => 999);
+  const full = await createQueueActivities({ client: exact.client, taskQueue: REAL_QUEUE }).listClosedRuns({ exclude: [] });
+  assert.equal(full.notLookedUp, MAX_CLOSED_ROWS_READ - MAX_CLOSED_NOT_READY);
+  assert.equal(exact.counts.asked, 0);
+});
+
+test('a list past the row bound reads 200 rows, counts the rest from the server, and says it can miss the newest when the store answers oldest first (#744)', async () => {
+  const rows = Array.from({ length: 250 }, (_, index) => closedAt(index + 1, index + 1));
+
+  const oldestFirst = listingClient(rows, () => 250);
+  const found = await createQueueActivities({ client: oldestFirst.client, taskQueue: REAL_QUEUE }).listClosedRuns({ exclude: [] });
+  // It read the 200 oldest rows and named the newest of those: 200 down to 181. Issues 201 to 250 are in the 50 it did not read.
+  assert.deepEqual(found.runs.map((run) => run.issue), Array.from({ length: 20 }, (_, index) => 200 - index));
+  assert.equal(found.notLookedUp, 200 - MAX_CLOSED_NOT_READY + 50, 'the 180 it read and did not name, and the 50 past the bound');
+  assert.equal(oldestFirst.counts.asked, 1);
+
+  const newestFirst = listingClient([...rows].reverse(), () => 250);
+  const other = await createQueueActivities({ client: newestFirst.client, taskQueue: REAL_QUEUE }).listClosedRuns({ exclude: [] });
+  assert.deepEqual(other.runs.map((run) => run.issue), Array.from({ length: 20 }, (_, index) => 250 - index), 'a store that answers newest first loses nothing the bound does not cut');
+
+  // A count that lags the list still reports at least the one row that proved the list went on.
+  const lagging = listingClient(Array.from({ length: MAX_CLOSED_ROWS_READ + 1 }, (_, index) => closedAt(index + 1, index + 1)), () => MAX_CLOSED_ROWS_READ);
+  const one = await createQueueActivities({ client: lagging.client, taskQueue: REAL_QUEUE }).listClosedRuns({ exclude: [] });
+  assert.equal(one.notLookedUp, MAX_CLOSED_ROWS_READ - MAX_CLOSED_NOT_READY + 1);
 });
 
 test('real runs: a tick names each kind of run that closed after its claim, restarts none of them, and a Ready issue is named once', async () => {
