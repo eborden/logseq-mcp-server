@@ -11,6 +11,7 @@ import { WorkflowFailedError } from '@temporalio/client';
 import type { Client } from '@temporalio/client';
 import type { TestWorkflowEnvironment } from '@temporalio/testing';
 import { bundleWorkflowCode, Worker } from '@temporalio/worker';
+import { GithubRefusal, parseNeedsInputWaitInput } from '../src/activities/github.ts';
 import { loadServerConfig } from '../src/config.ts';
 import { startDevServer } from '../src/dev-server.ts';
 import { NEEDS_INPUT_WAIT_CHUNK_MS, issueWorkflowId, needsInputParkCommentKey } from '../src/issue-types.ts';
@@ -79,6 +80,12 @@ function fakeActivities() {
       return w.sessions(raw.attempt);
     },
     waitForNeedsInputAnswer: async (input: NeedsInputWaitInput) => {
+      // The activity's own parse (#726): a comment id the real wait refuses fails here the way it does there, non-retryable.
+      try {
+        parseNeedsInputWaitInput(input);
+      } catch (error) {
+        throw error instanceof GithubRefusal ? ApplicationFailure.nonRetryable(error.message, error.type) : error;
+      }
       const w = worldOf(input.issue);
       w.waits.push(input);
       w.onWait?.();
@@ -226,6 +233,16 @@ test('a needs-input session parks the run (running, not failed), one comment, th
   assert.deepEqual(world.issueStatuses.slice(0, 3), ['In progress', 'Needs Input', 'In progress'], 'moved back when the answer came');
   assert.equal(world.status, 'In review', 'and on to In review as before');
   assert.deepEqual(world.commentCalls.filter((key) => key === parkKey(1)), [parkKey(1)], 'the park comment was posted once');
+});
+
+test('a park whose needs-input comment id is above 2^32 reaches the wait and resumes, not InvalidInput (#726)', { timeout: 120_000 }, async () => {
+  const bigId = 6_281_995_388;
+  const { issue, world, handle } = start((attempt) => (attempt === 1 ? asked(bigId) : pushed));
+  world.waitScript = () => ({ answered: true, commentId: bigId + 1 });
+  const cause = await failure(issue, handle);
+  assert.equal(cause.details?.[0], STOPS_AT_FIXER, 'the run got past the park, the guard and the PR');
+  assert.deepEqual(world.waits.map((wait) => wait.afterCommentId), [bigId], 'the wait is keyed on the large id as given');
+  assert.deepEqual(world.attempts, [1, 2]);
 });
 
 test('no answer by the limit ends the run as NeedsInputTimeout with one stop comment; the item stays in Needs Input and no PR opens', { timeout: 120_000 }, async () => {
