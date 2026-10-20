@@ -114,7 +114,7 @@ const MAX_READY_ITEMS = 50;
 /** Most issue numbers `checkTrustedIssues` accepts, and most of them it reads in one call (one request each). */
 const MAX_TRUST_INPUT = 200;
 const MAX_TRUST_READS = 50;
-/** Most pages `listTakenIssues` reads of each list (open PRs, `claude/` branches). A longer list is reported as not read. */
+/** Most pages `listTakenIssues` reads of each list (open PRs, `claude/` branches). A longer list fails the call: a `taken` list with entries missing would make issues look eligible. */
 const MAX_TAKEN_PAGES = 5;
 /** The issue a `claude/<n>` or `claude/<n>-<slug>` branch name belongs to. */
 const CLAUDE_BRANCH_ISSUE = /^claude\/([1-9]\d{0,8})(?:-|$)/;
@@ -593,13 +593,16 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
   /**
    * The issues that already have work under way on GitHub (#722): an open PR whose head branch is `claude/<n>` (or
    * `claude/<n>-<slug>`), or a remote branch of that name. Only numbers come out. A PR from an author who is not trusted
-   * is counted and its branch name is not read, as `openPrsFor` does. Each list is bounded at MAX_TAKEN_PAGES pages and
-   * says when it was longer (`notRead`). A failed read fails the call, so a broken read is never an empty list.
-   * Running Temporal workflows are not read here (#723).
+   * is counted and neither its branch name nor its `Closes #N` is read, as `openPrsFor` does. Each list is bounded at
+   * MAX_TAKEN_PAGES pages. A longer list fails the call (`output_too_large`), as `listAll` does: missing entries would make
+   * an issue look eligible, so an incomplete read must not look like a complete one (BR-0003). A failed read fails the
+   * call too, so a broken read is never an empty list. Running Temporal workflows are not read here (#723).
    */
   async function listTakenIssues(): Promise<TakenIssues> {
     const prs = await listPages(`${repoRoute}/pulls?state=open`, 'pull requests', parseOpenPr, MAX_TAKEN_PAGES);
+    requireComplete(prs.complete, 'pull requests');
     const branches = await listPages(`${repoRoute}/git/matching-refs/heads/claude`, 'branches', parseRefName, MAX_TAKEN_PAGES);
+    requireComplete(branches.complete, 'branches');
     const taken = new Set<number>();
     for (const name of [...prs.items.map((pr) => pr.headRef), ...branches.items]) {
       const match = CLAUDE_BRANCH_ISSUE.exec(name);
@@ -609,9 +612,14 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     }
     return {
       taken: [...taken].sort((a, b) => a - b),
-      notRead: { pullRequests: !prs.complete, branches: !branches.complete },
       untrustedPullRequests: prs.dropped,
     };
+  }
+
+  function requireComplete(complete: boolean, what: string): void {
+    if (!complete) {
+      throw new GhError(`${what}: more than ${MAX_TAKEN_PAGES * PAGE_SIZE} entries, which is more than one call reads`, 'output_too_large');
+    }
   }
 
   async function readIssue(raw: unknown): Promise<IssueView> {

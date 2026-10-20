@@ -184,12 +184,10 @@ export interface TrustedIssues {
   readonly notRead: readonly number[];
 }
 
-/** The issue numbers that already have work under way on GitHub (#722). Numbers and flags only. */
+/** The issue numbers that already have work under way on GitHub (#722). Numbers only. A list longer than one call reads fails the call, so `taken` is never a partial answer. */
 export interface TakenIssues {
   /** Issues with an open PR whose head is `claude/<n>` or with a remote branch `claude/<n>`, ascending. */
   readonly taken: readonly number[];
-  /** True for a source whose list was longer than one call reads, so `taken` may miss an issue. Never a silent cut. */
-  readonly notRead: { readonly pullRequests: boolean; readonly branches: boolean };
   /** Open PRs left out of the reading because their author is not trusted (their branch names are not read). */
   readonly untrustedPullRequests: number;
 }
