@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BriefTooLargeError, briefCommands, buildBrief, buildRemoteImplementerBrief, buildRemoteReviewerBrief, buildReviewerBrief, CO_AUTHOR_LINE, encodeIssueData, ISSUE_DATA_CLOSE, ISSUE_DATA_OPEN, needsInputCommentCommand, prBodyCommentCommand } from '../src/brief.ts';
+import { BriefTooLargeError, briefCommands, buildBrief, buildFixerBrief, buildRemoteFixerBrief, buildRemoteImplementerBrief, buildRemoteReviewerBrief, buildReviewerBrief, CO_AUTHOR_LINE, encodeIssueData, ISSUE_DATA_CLOSE, ISSUE_DATA_OPEN, needsInputCommentCommand, prBodyCommentCommand } from '../src/brief.ts';
 import { DEFAULT_ALLOWED_TOOLS, DEFAULT_DISALLOWED_TOOLS } from '../src/config.ts';
 import { commandAllowed } from './tool-rules.ts';
 import { InvalidReviewInputError, parseReviewStepInput } from '../src/review-types.ts';
@@ -317,4 +317,20 @@ test('a review step input carries the body source, and refuses any other value',
   assert.equal(parseReviewStepInput({ ...base, bodySource: 'fallback' }).bodySource, 'fallback');
   assert.equal('bodySource' in parseReviewStepInput(base), false);
   assert.throws(() => parseReviewStepInput({ ...base, bodySource: 'other' }), InvalidReviewInputError);
+});
+
+// ---- the reviewer anchors on a changed line when one shows the problem (#714) -------------------------------------
+
+test('both reviewer briefs ask for a changed line first, and the unchanged line only when no changed line shows the problem', () => {
+  const fixer = { ...REVIEW_BASE, branch: 'claude/123' };
+  for (const brief of [buildReviewerBrief(REVIEW_BASE), buildRemoteReviewerBrief({ ...REVIEW_BASE, marker: '<!-- orchestrator-findings pr=77 -->' })]) {
+    assert.ok(brief.includes('Anchor each finding on a line that the diff changed'), 'the changed line comes first');
+    assert.ok(brief.includes('whenever one shows the problem') && brief.includes('only when no changed line does'));
+    assert.ok(brief.includes('opens a thread on that file') && brief.includes('your line number'), 'an unchanged line of a changed file still reaches the fixer');
+    assert.ok(brief.includes('opens no thread and holds nothing'), 'a file outside the diff is said to hold nothing');
+    assert.ok(!brief.includes('must name a line that the diff changed'), 'the old absolute rule is gone');
+  }
+  for (const brief of [buildFixerBrief({ ...fixer }), buildRemoteFixerBrief({ ...fixer, marker: '<!-- orchestrator-fixer-replies pr=77 -->' })]) {
+    assert.ok(brief.includes('whose `line` is null is on a whole file'), 'the fixer knows what a file-level thread is');
+  }
 });
