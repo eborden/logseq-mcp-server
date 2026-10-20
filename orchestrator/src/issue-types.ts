@@ -454,10 +454,13 @@ export interface GateClearFacts {
   readonly reviewsOnHead: number;
   readonly unresolvedThreads: number;
   readonly host: GateHostLine;
-  /** Findings of the last review that sit in its body, not in a thread. */
-  readonly advisory: number;
-  /** Advisory findings that did not fit the review body. */
-  readonly advisoryOmitted: number;
+  /**
+   * Findings of the last review that sit in its body, not in a thread. `undefined` when that review was not on this head (the
+   * head moved after the review loop): the statement then says the count is not known for this head.
+   */
+  readonly advisory: number | undefined;
+  /** Advisory findings that did not fit the review body. `undefined` together with `advisory`. */
+  readonly advisoryOmitted: number | undefined;
 }
 
 /** The key of the gate-clear statement: the PR and the head, so a push gets its own and a retry posts once. */
@@ -487,15 +490,17 @@ function hostLine(host: GateHostLine): string {
  * and how the maintainer decides. It carries the head, so a statement for an older commit is visibly stale.
  */
 export function gateClearComment(facts: GateClearFacts): string {
-  const advisory = facts.advisory + facts.advisoryOmitted;
+  const advisory = facts.advisory === undefined || facts.advisoryOmitted === undefined ? undefined : facts.advisory + facts.advisoryOmitted;
   return [
     `**Gate clear** for head \`${facts.headSha}\` of #${facts.pr}, recorded by the orchestrator (workflow \`${facts.workflowId}\`). This is a gate result and not an approval: the orchestrator never approves, merges, labels or resolves anything.`,
     [
       `At this head: ${countOf(facts.reviewsOnHead, 'review')} on the head, ${countOf(facts.unresolvedThreads, 'unresolved review thread')}, ${countOf(facts.fixRounds, 'fix round')} used.`,
       hostLine(facts.host),
-      advisory === 0
-        ? 'Advisory findings in the last review: none.'
-        : `Advisory findings in the last review: ${advisory} (${facts.advisoryOmitted} not listed in its body). They are in the body of the last review on this head, not in a thread, and they do not hold the gate: read that review.`,
+      advisory === undefined
+        ? 'Advisory findings: not known for this head. The last review that counted them was on an earlier head, so read the reviews on this head.'
+        : advisory === 0
+          ? 'Advisory findings in the last review: none.'
+          : `Advisory findings in the last review: ${advisory} (${facts.advisoryOmitted} not listed in its body). They are in the body of the last review on this head, not in a thread, and they do not hold the gate: read that review.`,
     ].join('\n'),
     `The maintainer decides. From the orchestrator directory, \`npm run signal -- ${facts.issue} approved\` records an approval, and \`npm run signal -- ${facts.issue} changes_requested --message "..."\` asks for changes. The run reads the gate again before it uses a decision.`,
     'A push moves the head and makes this statement stale. The next time the gate is clear on a new head, a new statement is posted for that commit.',
@@ -511,11 +516,21 @@ export function gateHeldCommentKey(pr: number, headSha: string): string {
  * The statement for `waiting_for_threads` on the PR (#715): what holds the gate, as counts and thread ids. The issue keeps its
  * own, longer comment. Only a person resolves a thread.
  */
-export function gateHeldComment(workflowId: string, pr: number, headSha: string, openThreads: number, acceptedThreadIds: readonly string[]): string {
+export function gateHeldComment(
+  workflowId: string,
+  pr: number,
+  headSha: string,
+  openThreads: number,
+  acceptedThreadIds: readonly string[],
+  /** Whether the decision stage runs after the review loop (`awaitDecision` is not `false`). */
+  decisionStageRuns: boolean,
+): string {
   return [
     `**Gate not clear** for head \`${headSha}\` of #${pr}, recorded by the orchestrator (workflow \`${workflowId}\`). This is a gate result and not an approval.`,
     `What holds it: ${countOf(openThreads, 'open review thread')}, ${acceptedThreadIds.length} of them with a reply the reviewer accepted${acceptedThreadIds.length === 0 ? '' : ` (thread ids: ${acceptedThreadIds.map((id) => `\`${id}\``).join(', ')})`}. The loop cannot act on the rest.`,
-    'Only a person resolves a review thread. The run keeps reading the gate, and when it is clear on a head it posts a gate-clear statement for that head.',
+    decisionStageRuns
+      ? 'Only a person resolves a review thread. The run keeps reading the gate, and when it is clear on a head it posts a gate-clear statement for that head.'
+      : 'Only a person resolves a review thread. This run ends here and does not read the gate again, so it will post no gate-clear statement: a new run is needed once the threads are resolved.',
   ].join('\n\n');
 }
 

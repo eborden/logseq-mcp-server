@@ -241,7 +241,7 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
       );
       // The same on the PR (#715), keyed by the head: a reader of the PR sees what holds the gate. A failure to post is a step failure.
       await step('threads', () =>
-        reviewGithub.commentIssue({ issue: pr, key: gateHeldCommentKey(pr, head), body: gateHeldComment(issueWorkflowId(input.issueNumber), pr, head, open.length, acceptedOpen) }),
+        reviewGithub.commentIssue({ issue: pr, key: gateHeldCommentKey(pr, head), body: gateHeldComment(issueWorkflowId(input.issueNumber), pr, head, open.length, acceptedOpen, input.awaitDecision !== false) }),
       );
       return { outcome: 'waiting_for_threads', issueNumber: input.issueNumber, branch, headSha: head, pr, fixRounds: round, acceptedThreadIds: acceptedOpen, openThreads: open.length, advisory: posted.advisory, advisoryOmitted: posted.omitted, ...hiddenField() };
     }
