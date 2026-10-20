@@ -72,11 +72,7 @@ async function main(): Promise<void> {
   const connection = await NativeConnection.connect({ address: config.address });
   // The queue watcher's two Temporal activities (#723) need a client: the worker's own connection cannot start or list workflows.
   const clientConnection = await Connection.connect({ address: config.address, connectTimeout: '10 seconds' }).catch(async (error: unknown) => {
-    try {
-      await connection.close();
-    } catch {
-      // The connect error below is the one to report.
-    }
+    await closeBoth(connection, undefined);
     throw error;
   });
   const queue = createQueueActivities({ client: new Client({ connection: clientConnection, namespace: config.namespace }), taskQueue: config.taskQueue });
@@ -86,6 +82,10 @@ async function main(): Promise<void> {
     taskQueue: config.taskQueue,
     workflowsPath: fileURLToPath(new URL('./workflows/index.ts', import.meta.url)),
     activities: { ...hello, ...claude, ...github, ...branches, ...implementer, ...review, ...remote, ...remoteImplementer, ...queue },
+  }).catch(async (error: unknown) => {
+    // A bundle or config error lands here. Close both connections and let this error be the one reported.
+    await closeBoth(connection, clientConnection);
+    throw error;
   });
 
   // The host worker runs one activity at a time: the host's LogSeq serves one suite, and `stop` must finish before the next start.
@@ -100,13 +100,8 @@ async function main(): Promise<void> {
           maxConcurrentActivityTaskExecutions: 1,
         }).catch(async (error: unknown) => {
           // The default worker was created but never started, so it holds no poller and needs no shutdown (shutdown() only
-          // works on a running worker). Close the connection, and let this error be the one reported, not a failed close.
-          try {
-            await connection.close();
-            await clientConnection.close();
-          } catch {
-            // The Worker.create error below is the one to report.
-          }
+          // works on a running worker). Close both connections, and let this error be the one reported, not a failed close.
+          await closeBoth(connection, clientConnection);
           throw error;
         });
 
@@ -124,8 +119,21 @@ async function main(): Promise<void> {
   try {
     await Promise.all([worker.run(), hostWorker?.run()]);
   } finally {
-    await connection.close();
-    await clientConnection.close();
+    await closeBoth(connection, clientConnection);
+  }
+}
+
+/**
+ * Closes the worker's connection and the queue watcher's client connection (#723), each in its own attempt: a close that throws
+ * is logged and cannot skip the other, and cannot replace the error the caller is already reporting. `client` is absent only
+ * while the client connection is being made.
+ */
+async function closeBoth(native: NativeConnection, client: Connection | undefined): Promise<void> {
+  const results = await Promise.allSettled([native.close(), client?.close()]);
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error(`closing a connection failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+    }
   }
 }
 
