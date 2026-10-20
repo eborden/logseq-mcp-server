@@ -13,6 +13,11 @@
 //   that is one of the orchestrator's own words (src/run-status.ts). The watcher asks about the closed runs it skipped, at most
 //   MAX_RUN_STATUS_LOOKUPS a tick, so the read is bounded: it describes each run and reads the failure of a Failed one, nothing else.
 //
+// - `listClosedRuns` (#733): the closed runs whose issue is not in Ready, which the Ready-column read never meets (a run that closed
+//   after it claimed the issue leaves its item In progress, In review or Needs Input). One bounded visibility list, newest first, at
+//   most MAX_CLOSED_ROWS_READ rows, one count, and the status of at most MAX_CLOSED_NOT_READY runs through the same `readRunStatus`.
+//   Read-only: nothing is restarted, deleted or signalled.
+//
 // No title, memo, input or other text from a workflow is read or returned. Numbers, fixed words and one flag come out. A Failed
 // run's message is never put in a result, and the details of its failure only through `stopDetails`, which keeps fixed words.
 
@@ -23,18 +28,28 @@ import { InvalidIssueInputError, ISSUE_STOPPED_FAILURE, ISSUE_WORKFLOW_NAME, iss
 import { startIssueRun } from '../issue-client.ts';
 import {
   InvalidQueueInputError,
+  MAX_CLOSED_NOT_READY,
+  MAX_CLOSED_ROWS_READ,
   MAX_RUNNING_READ,
   QUEUE_TOO_MANY_RUNS,
   isStopStep,
+  parseClosedRunsInput,
   parseRunStatusesInput,
   parseStartQueuedRunInput,
 } from '../queue-types.ts';
-import type { RunStatusEntry, RunStatuses, RunningIssues, StartQueuedRunResult } from '../queue-types.ts';
+import type { ClosedRuns, RunStatusEntry, RunStatuses, RunningIssues, StartQueuedRunResult } from '../queue-types.ts';
 import { buildRunInput } from '../run-issue-input.ts';
 import { closedStatusOfName, isParkedStop, stopDetails } from '../run-status.ts';
 
 /** `issue-<n>` as `issueWorkflowId` builds it. */
 const ISSUE_WORKFLOW_ID = /^issue-([1-9]\d{0,8})$/;
+
+/**
+ * The closed ends a person has to look at: every closed status but Completed, which is a run's own end. No `ORDER BY`: the dev
+ * server's visibility store refuses it, and the server's default order for a list of closed runs is the newest close first,
+ * which is the order the list is read in (a test pins it).
+ */
+const CLOSED_NOT_READY_QUERY = `WorkflowType = "${ISSUE_WORKFLOW_NAME}" AND ExecutionStatus IN ("Failed", "Terminated", "TimedOut", "Canceled")`;
 
 export interface QueueActivityDeps {
   readonly client: Client;
@@ -152,7 +167,50 @@ export function createQueueActivities(deps: QueueActivityDeps) {
     return { runs };
   }
 
-  return { listRunningIssues, startQueuedRun, readRunStatuses };
+  /**
+   * The closed runs whose issue is not in the Ready column (#733), newest first: the visibility list of `issueWorkflow` runs
+   * that ended Failed, Terminated, TimedOut or Canceled, passing over the IDs of the numbers it is told (the Ready column, which
+   * the Ready path already reports) and any ID that is not `issue-<n>`. It reads at most MAX_CLOSED_ROWS_READ rows and describes
+   * at most MAX_CLOSED_NOT_READY runs (`readRunStatus`: one describe, and one result for a Failed run), then asks the server how
+   * many closed runs there are, so `notLookedUp` says what the bound left out. A failed read throws (BR-0003).
+   */
+  async function listClosedRuns(raw: unknown): Promise<ClosedRuns> {
+    let exclude: ReadonlySet<number>;
+    try {
+      exclude = new Set(parseClosedRunsInput(raw).exclude);
+    } catch (error) {
+      if (error instanceof InvalidQueueInputError) {
+        throw ApplicationFailure.nonRetryable(error.message, 'InvalidInput');
+      }
+      throw error;
+    }
+    const issues: number[] = [];
+    let rowsRead = 0;
+    for await (const info of deps.client.workflow.list({ query: CLOSED_NOT_READY_QUERY })) {
+      rowsRead += 1;
+      const match = ISSUE_WORKFLOW_ID.exec(info.workflowId);
+      if (match !== null && !exclude.has(Number(match[1])) && !issues.includes(Number(match[1]))) {
+        issues.push(Number(match[1]));
+      }
+      if (issues.length >= MAX_CLOSED_NOT_READY || rowsRead >= MAX_CLOSED_ROWS_READ) {
+        break;
+      }
+    }
+    // Counted after the list, so the count is never below the rows read. The two reads are not one snapshot: a run that closed
+    // between them only moves the number by one, and the floor keeps it from going negative.
+    const { count } = await deps.client.workflow.count(CLOSED_NOT_READY_QUERY);
+    const runs: RunStatusEntry[] = [];
+    for (const issue of issues) {
+      const entry = await readRunStatus(issue);
+      // A run that is open again, gone, or completed since the list has no closed end to report.
+      if (entry !== undefined && entry.status !== 'completed') {
+        runs.push(entry);
+      }
+    }
+    return { runs, notLookedUp: Math.max(0, count - rowsRead) };
+  }
+
+  return { listRunningIssues, startQueuedRun, readRunStatuses, listClosedRuns };
 }
 
 export type QueueActivities = ReturnType<typeof createQueueActivities>;

@@ -217,6 +217,26 @@ export const CLOSED_RUN_REASONS: readonly ClosedRunReason[] = ['failed', 'parked
  */
 export const MAX_RUN_STATUS_LOOKUPS = 20;
 
+/**
+ * Closed runs whose issue is not in Ready (#733). The run closed after it claimed the issue (or the item left Ready some other
+ * way), so the Ready-column read above never meets it. One more bounded read per tick: the visibility list of closed
+ * `issueWorkflow` runs, newest first, and the status of at most MAX_CLOSED_NOT_READY of them, which is the same read and the same
+ * bound as the Ready case. A `completed` run is not looked for: it is the normal end, and a merged PR leaves nothing to say.
+ */
+export const MAX_CLOSED_NOT_READY = MAX_RUN_STATUS_LOOKUPS;
+
+/** Most visibility rows one tick reads for it, whatever their issue: the rows of Ready issues and of IDs that are not `issue-<n>` are read and passed over. The rest are counted, not read. */
+export const MAX_CLOSED_ROWS_READ = 200;
+
+/** The Ready numbers `listClosedRuns` is told to pass over: at most 50 from `listReadyIssues`, with room to spare. */
+export const MAX_CLOSED_EXCLUDED = 100;
+
+/** The reasons a closed run outside Ready can have: the closed ends a person has to look at. The same words as in a Ready skip. */
+export type ClosedNotReadyReason = 'failed' | 'parked' | 'terminated' | 'timed_out' | 'cancelled';
+
+/** Every such reason, in the order a report lists its counts. */
+export const CLOSED_NOT_READY_REASONS: readonly ClosedNotReadyReason[] = ['failed', 'parked', 'terminated', 'timed_out', 'cancelled'];
+
 export function closedRunReason(status: ClosedRunStatus): ClosedRunReason {
   return status === 'completed' ? 'completed_but_open' : status;
 }
@@ -341,6 +361,38 @@ export function parseRunStatusesInput(raw: unknown): RunStatusesInput {
   return { issues: [...new Set(numbers)].sort((a, b) => a - b) };
 }
 
+/** What `listClosedRuns` is asked: the issue numbers of the Ready column (blocked ones too), whose closed runs the Ready path already reports. */
+export interface ClosedRunsInput {
+  readonly exclude: readonly number[];
+}
+
+/** What `listClosedRuns` found (#733). */
+export interface ClosedRuns {
+  /** Closed runs of issues that are not in Ready, newest first, at most MAX_CLOSED_NOT_READY, as numbers and fixed words (BR-0001). */
+  readonly runs: readonly RunStatusEntry[];
+  /** Closed runs the call did not look at: the visibility count of closed `issueWorkflow` runs, less the rows it read. It can count a run of a Ready issue or an ID that is not `issue-<n>`: an upper bound, never a silent cut (BR-0006). */
+  readonly notLookedUp: number;
+}
+
+/** Parses a closed-runs request at the activity's boundary. An empty list is fine: no Ready issue to pass over. */
+export function parseClosedRunsInput(raw: unknown): ClosedRunsInput {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new InvalidQueueInputError('input must be an object');
+  }
+  const exclude: unknown = 'exclude' in raw ? raw.exclude : undefined;
+  if (!Array.isArray(exclude) || exclude.length > MAX_CLOSED_EXCLUDED) {
+    throw new InvalidQueueInputError(`exclude must be a list of at most ${MAX_CLOSED_EXCLUDED} numbers`);
+  }
+  const numbers: number[] = [];
+  for (const issue of exclude as unknown[]) {
+    if (typeof issue !== 'number' || !Number.isSafeInteger(issue) || issue < 1 || issue > 999_999_999) {
+      throw new InvalidQueueInputError('every excluded issue must be a positive whole number');
+    }
+    numbers.push(issue);
+  }
+  return { exclude: [...new Set(numbers)].sort((a, b) => a - b) };
+}
+
 // ---- the tick report----------------------------------------------------------------------------------------
 
 /**
@@ -362,7 +414,7 @@ export interface TickSkip {
 }
 
 /** Where a failed tick stopped. Nothing is started after a failed read. */
-export type TickFailureStep = 'list_ready' | 'list_taken' | 'list_running' | 'check_trusted' | 'start' | 'run_status';
+export type TickFailureStep = 'list_ready' | 'list_taken' | 'list_running' | 'check_trusted' | 'start' | 'run_status' | 'list_closed';
 
 /** Most skipped issues one report names. The rest are counted in `skippedNotReported`, never dropped silently (BR-0006). */
 export const MAX_TICK_SKIPS_REPORTED = 100;
@@ -383,6 +435,8 @@ export interface TickReport {
   readonly trustNotRead: number;
   /** The closed runs the start found (#724). Absent when there were none. */
   readonly closedRuns?: ClosedRunsReport;
+  /** The closed runs whose issue is not in Ready (#733). Absent when there are none and the tick left none unread. */
+  readonly closedNotReady?: ClosedNotReadyReport;
   readonly failure?: { readonly step: TickFailureStep; readonly reason: string };
 }
 
@@ -391,5 +445,27 @@ export interface ClosedRunsReport {
   /** Only the reasons that occurred, in the order of CLOSED_RUN_REASONS. `id_already_ran` counts the ones whose status was not read. */
   readonly counts: Readonly<Partial<Record<ClosedRunReason, number>>>;
   /** Closed runs the tick did not ask about: over MAX_RUN_STATUS_LOOKUPS, or after a failure that came before the read. */
+  readonly notLookedUp: number;
+}
+
+/** One closed run whose issue is not in Ready: the same fields, words and advice as the skip of a closed run in the Ready column (#733). */
+export interface ClosedRunNote {
+  readonly number: number;
+  readonly reason: ClosedNotReadyReason;
+  /** The stop reason the run recorded, when it is one of the orchestrator's own fixed words. Never a message. */
+  readonly stopReason?: string;
+  /** The two commands a person runs, in order, when a restart recovers the run (`restartAdvice`). */
+  readonly restart?: readonly string[];
+  /** What a person does instead when a restart would not recover it (`PR_BY_HAND_TEXT`). */
+  readonly instead?: string;
+}
+
+/** The closed runs outside the Ready column (#733): what the tick read, bounded, and how much it did not. */
+export interface ClosedNotReadyReport {
+  /** The count of the runs named in `runs` per reason: only the reasons that occurred, in the order of CLOSED_NOT_READY_REASONS. */
+  readonly counts: Readonly<Partial<Record<ClosedNotReadyReason, number>>>;
+  /** At most MAX_CLOSED_NOT_READY runs, newest first. */
+  readonly runs: readonly ClosedRunNote[];
+  /** Closed runs the tick did not look at (`ClosedRuns.notLookedUp`). */
   readonly notLookedUp: number;
 }
