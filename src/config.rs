@@ -16,6 +16,12 @@ pub const DEFAULT_API_URL: &str = "http://127.0.0.1:12315";
 /// What a field must be, the `<field> <problem>` tail of a [`ConfigError::Validation`] message.
 const AUTH_TOKEN_REQUIRED: &str = "is required";
 const NOT_A_STRING: &str = "must be a string";
+/// An `apiUrl` that is not an absolute `http` or `https` URL with a host (#656). Checked at load so a
+/// typo is a configuration error and not a "LogSeq is not running" one on every call.
+const API_URL_INVALID: &str = "must be an absolute http or https URL, such as http://127.0.0.1:12315";
+/// An `authToken` with whitespace (a trailing newline from a copy, say) or a control character, which
+/// can't go in an `Authorization` header (#656).
+const AUTH_TOKEN_CHARACTERS: &str = "must not contain whitespace or control characters (a trailing newline?)";
 /// The largest `timeoutMs` the file may set: `i32::MAX` ms, about 24.8 days: the largest value
 /// accepted, chosen in #426 because it equals Node's `setTimeout` ceiling (above it the retired server fired
 /// after 1 ms). Anything longer is refused at load (ADR-0019), so no call has to check it again.
@@ -119,10 +125,13 @@ pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
     let api_url = match object.get("apiUrl") {
         None | Some(Value::Null) => DEFAULT_API_URL.to_owned(),
         Some(Value::String(url)) if url.is_empty() => DEFAULT_API_URL.to_owned(),
-        Some(Value::String(url)) => url.clone(),
+        Some(Value::String(url)) => api_url(url).ok_or_else(|| invalid("apiUrl", API_URL_INVALID))?,
         Some(_) => return Err(invalid("apiUrl", NOT_A_STRING)),
     };
     let auth_token = match object.get("authToken") {
+        Some(Value::String(token)) if token.chars().any(|c| c.is_whitespace() || c.is_control()) => {
+            return Err(invalid("authToken", AUTH_TOKEN_CHARACTERS));
+        }
         Some(Value::String(token)) => token.clone(),
         _ => return Err(invalid("authToken", NOT_A_STRING)),
     };
@@ -138,6 +147,16 @@ pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
     };
 
     Ok(Config { api_url, auth_token, timeout_ms, tips })
+}
+
+/// An `apiUrl` as the base the client appends `/api` to: an absolute `http` or `https` URL with a host,
+/// minus any trailing slashes (which would make `//api`). `None` when it is not one.
+fn api_url(text: &str) -> Option<String> {
+    let url = reqwest::Url::parse(text).ok()?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return None;
+    }
+    Some(text.trim_end_matches('/').to_owned())
 }
 
 /// A `timeoutMs` number as whole milliseconds. JSON has one number type, so `5000.0` and `5e3`
@@ -190,6 +209,28 @@ mod tests {
                 tips: Some(false),
             }
         );
+    }
+
+    #[test]
+    fn an_api_url_loses_its_trailing_slashes() {
+        let config = parse_config(r#"{"apiUrl":"http://127.0.0.1:4000//","authToken":"x"}"#).unwrap();
+        assert_eq!(config.api_url, "http://127.0.0.1:4000");
+    }
+
+    #[test]
+    fn an_api_url_that_is_not_an_absolute_http_url_is_refused() {
+        for url in ["127.0.0.1:12315", "localhost:12315", "ftp://127.0.0.1", "http://", "not a url", "/api"] {
+            let (field, problem) = validation(&format!(r#"{{"apiUrl":"{url}","authToken":"x"}}"#));
+            assert_eq!((field.as_str(), problem.as_str()), ("apiUrl", API_URL_INVALID), "apiUrl {url}");
+        }
+    }
+
+    #[test]
+    fn an_auth_token_with_whitespace_or_a_control_character_is_refused_without_quoting_it() {
+        for token in [r"abc\n", r"abc\t", r"ab c", r"abc\u0007", r" abc"] {
+            let (field, problem) = validation(&format!(r#"{{"authToken":"{token}"}}"#));
+            assert_eq!((field.as_str(), problem.as_str()), ("authToken", AUTH_TOKEN_CHARACTERS), "token {token}");
+        }
     }
 
     #[test]
