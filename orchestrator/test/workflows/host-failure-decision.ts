@@ -19,6 +19,8 @@ export interface HostFailureDecisionArgs {
   readonly fixRounds: number;
   /** Where the PR body came from (#708). */
   readonly bodySource?: 'session' | 'fallback' | 'unknown';
+  /** The review loop's last review, as `issue.ts` hands it on (#718): its counts, its id and the head it was on. */
+  readonly lastReview?: { readonly advisory: number; readonly advisoryOmitted: number; readonly reviewId: number; readonly headSha: string };
 }
 
 export async function hostFailureDecisionWorkflow(args: HostFailureDecisionArgs): Promise<IssueRunResult> {
@@ -37,6 +39,9 @@ export async function hostFailureDecisionWorkflow(args: HostFailureDecisionArgs)
     inbox,
     fixRounds: args.fixRounds,
     ...(args.bodySource === undefined ? {} : { bodySource: args.bodySource }),
+    ...(args.lastReview === undefined
+      ? {}
+      : { advisory: args.lastReview.advisory, advisoryOmitted: args.lastReview.advisoryOmitted, advisoryReviewId: args.lastReview.reviewId, advisoryHead: args.lastReview.headSha }),
     step: async (name, call) => {
       try {
         return await call();
