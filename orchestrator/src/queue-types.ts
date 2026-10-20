@@ -222,18 +222,49 @@ export function closedRunReason(status: ClosedRunStatus): ClosedRunReason {
 }
 
 /**
- * The command a person uses for a closed run, from fixed text and the issue number, or undefined when there is nothing to
- * restart. A closed run holds its ID (`REJECT_DUPLICATE`), so `run-issue` alone is refused: the run is deleted first (README,
- * "Recovering a stuck run"). `--attempt` does not get round that. It sets the remote implementer's first attempt number, so a
- * parked run is started again with the next one (`<k>`: one more than the attempt it stopped at, which the report does not hold).
- * The watcher never runs either command.
+ * Stop reasons after which the PR is already open, so a restart is no recovery: the claim finds the PR and the run ends
+ * `skipped` (README, "Recovering: a stopped review loop is finished by hand", and the rows of "Recovering a stuck run" that say
+ * "by hand" or "a restart skips the loop"). The report says so instead of giving a command.
  */
-export function restartCommand(issue: number, reason: ClosedRunReason): string | undefined {
+export const PR_BY_HAND_STOP_REASONS: ReadonlySet<string> = new Set([
+  'MaxRoundsReached',
+  'ReviewLoopTimeout',
+  'ReviewNotCounted',
+  'HeadMismatch',
+  'MalformedFindings',
+  'FindingsTooLarge',
+  'DiffUnreadable',
+  'FixerPushRejected',
+]);
+
+/** The fixed text a report gives for a stop in PR_BY_HAND_STOP_REASONS. */
+export const PR_BY_HAND_TEXT = 'the PR is open and a restart would end skipped: finish the PR by hand (README, "Recovering: a stopped review loop is finished by hand")';
+
+/** What a person does about a closed run: two commands to run in order, or a fixed sentence, or nothing to say. */
+export interface RestartAdvice {
+  readonly restart?: readonly string[];
+  readonly instead?: string;
+}
+
+/**
+ * What a person does for a closed run, from fixed text and the issue number. A closed run holds its ID (`REJECT_DUPLICATE`),
+ * so `run-issue` alone is refused: the run is deleted first (README, "Recovering a stuck run"), and the two commands are
+ * separate strings so each can be pasted as it is. `--attempt` does not get round the held ID. It sets the remote
+ * implementer's first attempt number, so a parked run (always a remote run) is started again with `--executor remote` and the
+ * next attempt (`<k>`: one more than the attempt in the question comment's marker, which the report does not hold). The
+ * schedule's other flags (`--base`, `--repo-dir`, `--host-integration`) are the person's to add. A stop after the PR is open
+ * has no command, only the sentence. The watcher never runs any of it.
+ */
+export function restartAdvice(issue: number, reason: ClosedRunReason, stopReason?: string): RestartAdvice {
   if (reason === 'id_already_ran' || reason === 'completed_but_open') {
-    return undefined;
+    return {};
   }
-  const run = `npm run run-issue -- --issue ${issue}${reason === 'parked' ? ' --attempt <k>' : ''}`;
-  return `temporal workflow delete --workflow-id issue-${issue}, then ${run}`;
+  if (stopReason !== undefined && PR_BY_HAND_STOP_REASONS.has(stopReason)) {
+    return { instead: PR_BY_HAND_TEXT };
+  }
+  const remove = `temporal workflow delete --workflow-id issue-${issue}`;
+  const run = reason === 'parked' ? `npm run run-issue -- --issue ${issue} --executor remote --attempt <k>` : `npm run run-issue -- --issue ${issue}`;
+  return { restart: [remove, run] };
 }
 
 /** What `readRunStatuses` is asked: closed runs' issue numbers, at most MAX_RUN_STATUS_LOOKUPS. */
@@ -286,8 +317,10 @@ export interface TickSkip {
   readonly reason: TickSkipReason;
   /** The stop reason the closed run recorded, when it is one of the orchestrator's own fixed words (src/run-status.ts). Never a message. */
   readonly stopReason?: string;
-  /** What a person runs for a closed run that needs one: fixed text and the issue number (`restartCommand`). */
-  readonly restart?: string;
+  /** The two commands a person runs, in order, for a closed run a restart recovers: fixed text and the issue number (`restartAdvice`). */
+  readonly restart?: readonly string[];
+  /** What a person does instead when a restart would not recover the run (`PR_BY_HAND_TEXT`). */
+  readonly instead?: string;
 }
 
 /** Where a failed tick stopped. Nothing is started after a failed read. */
