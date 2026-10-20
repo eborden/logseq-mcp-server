@@ -44,6 +44,8 @@ export interface FakeState {
   /** Raw review thread nodes by PR (#630), and the switch that makes the gate follow `reviews`, `threads` and `heads`. */
   threads?: Record<string, unknown[]>;
   dynamicGate?: boolean;
+  /** Which review comments of their own (#714) answer 422: the file-level ones, or all of them. */
+  refuseThreads?: 'file' | 'all';
   /** The node ids of the comments a `minimizeComment` call hid (#674). */
   minimized?: string[];
   heads?: Record<string, string>;

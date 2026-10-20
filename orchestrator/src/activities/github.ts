@@ -13,6 +13,7 @@
 // - `addToBoard` reads the board first and adds only an item that is not on it.
 // - `openPr` looks for an open PR with the same head and base before it creates one.
 // - `postReview` looks for a review that carries its idempotency key before it posts one.
+// - `addReviewThread` looks for an open thread whose first comment carries its idempotency key before it opens one.
 // A write whose answer was lost (a timeout, a killed worker) is found by the next attempt's read.
 //
 // Inputs arrive from workflow code as untyped JSON, so each activity parses its input first. A bad input is a
@@ -89,6 +90,8 @@ import type {
   OpenPrInput,
   OpenPrResult,
   PrStateResult,
+  AddReviewThreadInput,
+  AddReviewThreadResult,
   PostReviewInput,
   PostReviewResult,
   ReadyIssues,
@@ -367,6 +370,28 @@ function parseReplyInput(raw: unknown): ReplyToThreadInput {
   return {
     pr: parseIssueNumber(input.get('pr'), 'pr'),
     threadId: inputText(input, 'threadId', THREAD_ID, 80),
+    key: inputText(input, 'key', KEY, 100),
+    body: inputText(input, 'body', undefined, MAX_TEXT_CHARS),
+  };
+}
+
+const THREAD_PATH = /^[A-Za-z0-9._@+-][A-Za-z0-9._@+/ -]*$/;
+
+function parseAddThreadInput(raw: unknown): AddReviewThreadInput {
+  const input = inputObject(raw, 'addReviewThread input');
+  const path = inputText(input, 'path', THREAD_PATH, 300);
+  if (path.split('/').some((part) => part === '..' || part === '')) {
+    return refuse('path must be a relative path of the repository');
+  }
+  const line = input.get('line');
+  if (line !== undefined && (typeof line !== 'number' || !Number.isSafeInteger(line) || line < 1)) {
+    return refuse('line must be a positive whole number');
+  }
+  return {
+    pr: parseIssueNumber(input.get('pr'), 'pr'),
+    commitId: inputText(input, 'commitId', SHA, 40),
+    path,
+    ...(line === undefined ? {} : { line }),
     key: inputText(input, 'key', KEY, 100),
     body: inputText(input, 'body', undefined, MAX_TEXT_CHARS),
   };
@@ -972,6 +997,32 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     return { posted: true };
   }
 
+  /**
+   * Opens a review thread of its own on the PR (#714), once. With a `line`, the thread sits on that line of the new side,
+   * which has to be a line the diff shows. Without one it is a file-level thread: the REST comment with
+   * `subject_type: file`, which GitHub submits at once, as a thread of the file as a whole. (The GraphQL route,
+   * `addPullRequestReviewThread` with `subjectType: FILE`, adds to the viewer's pending review when no review is named, and
+   * a pending thread is invisible to the gate and the fixer. The REST comment has no pending state.) This is the one place
+   * to change if GitHub refuses it. The body carries a hidden marker with the idempotency key, and a retry looks for it in the
+   * open threads' first comments first, trusted authors only, so a retry opens no second thread for the same finding.
+   */
+  async function addReviewThread(raw: unknown): Promise<AddReviewThreadResult> {
+    const input = parseAddThreadInput(raw);
+    const marker = `<!-- orchestrator-finding:${input.key} -->`;
+    const earlier = (await listReviewThreads(input.pr)).find((thread) => thread.comments[0]?.trusted === true && thread.comments[0].body.includes(marker));
+    if (earlier !== undefined) {
+      return { posted: false, level: earlier.line === null ? 'file' : 'line' };
+    }
+    const where = input.line === undefined ? { subject_type: 'file' } : { subject_type: 'line', line: input.line, side: 'RIGHT' };
+    parseCreatedCommentId(
+      await gh.api(`${repoRoute}/pulls/${input.pr}/comments`, {
+        method: 'POST',
+        body: { commit_id: input.commitId, path: input.path, body: `${input.body}\n\n${marker}`, ...where },
+      }),
+    );
+    return { posted: true, level: input.line === undefined ? 'file' : 'line' };
+  }
+
   return {
     listReadyIssues,
     readIssue,
@@ -991,6 +1042,7 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
     closeIssue,
     listReviewThreads,
     replyToThread,
+    addReviewThread,
     listFindingsCandidates,
     waitForNeedsInputAnswer,
     minimizeComment,
@@ -1039,6 +1091,7 @@ export function createGithubActivities(config: GhConfig, deps: GhDeps = activity
     closeIssue: activity((ops, issue: number) => ops.closeIssue(issue)),
     listReviewThreads: activity((ops, pr: number) => ops.listReviewThreads(pr)),
     replyToThread: activity((ops, input: ReplyToThreadInput) => ops.replyToThread(input)),
+    addReviewThread: activity((ops, input: AddReviewThreadInput) => ops.addReviewThread(input)),
     listFindingsCandidates: activity((ops, pr: number) => ops.listFindingsCandidates(pr)),
     waitForNeedsInputAnswer: activity((ops, input: NeedsInputWaitInput) => ops.waitForNeedsInputAnswer(input)),
     minimizeComment: activity((ops, input: { nodeId: string }) => ops.minimizeComment(input)),

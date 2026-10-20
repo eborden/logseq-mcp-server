@@ -356,6 +356,27 @@ export interface ReplyToThreadResult {
   readonly posted: boolean;
 }
 
+/** A review thread of its own, outside a posted review (#714): on one line of the diff, or on a file as a whole. */
+export interface AddReviewThreadInput {
+  readonly pr: number;
+  /** The head commit the thread is about. */
+  readonly commitId: string;
+  /** A file of the PR's diff. */
+  readonly path: string;
+  /** The changed line of the new side the thread sits on. Absent: a file-level thread, which has no line. */
+  readonly line?: number;
+  /** Names this thread, so a retry finds it instead of opening a second one. */
+  readonly key: string;
+  readonly body: string;
+}
+
+export interface AddReviewThreadResult {
+  /** False when a thread with this key was already open on the PR. */
+  readonly posted: boolean;
+  /** Where the thread is: on the file as a whole, or on a line. Read back from the existing thread when `posted` is false. */
+  readonly level: 'file' | 'line';
+}
+
 // ---- Board items for issues and PRs (#635) --------------------------------------------------------------------
 
 /** What a board item is. Issues and PRs share one number space, so a number alone does not say which. */

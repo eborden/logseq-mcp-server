@@ -340,6 +340,25 @@ if (argv[0] === 'api') {
     save();
     send(201, { id: thread.comments.at(-1).databaseId });
   }
+  if ((match = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/comments$/.exec(path)) && method === 'POST') {
+    // A review comment of its own (#714): a thread on a line, or on a file (`subject_type: file`, which has no line).
+    // `state.refuseThreads` is 'file' (a file-level comment answers 422) or 'all' (every one does).
+    const sent = JSON.parse(stdin);
+    if (state.refuseThreads === 'all' || (state.refuseThreads === 'file' && sent.subject_type === 'file')) {
+      respond({ stdout: http(422, { message: 'Validation Failed' }), stderr: 'gh: Validation Failed (HTTP 422)\n', exit: 1 });
+    }
+    const threads = ((state.threads ??= {})[match[1]] ??= []);
+    const databaseId = 7000 + threads.length * 100 + 1;
+    threads.push({
+      id: `PRRT_${match[1]}_${threads.length + 1}`,
+      isResolved: false,
+      path: sent.path,
+      line: sent.subject_type === 'file' ? null : sent.line,
+      comments: [{ databaseId, authorAssociation: 'OWNER', body: sent.body }],
+    });
+    save();
+    send(201, { id: databaseId });
+  }
   if ((match = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/reviews$/.exec(path))) {
     const reviews = (state.reviews[match[1]] ??= []);
     if (method === 'GET') {
