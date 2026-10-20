@@ -4,17 +4,20 @@
 // Activities registered: `hello` (the engine check of #626, kept on purpose: `npm run run-hello` and the crash test
 // use it), `runClaudeSession` (#627), the GitHub activities (#628, #635, #629), `guardBranch` and `pushBranch` (the only push) `runImplementerSession` (#629), and the review activities (#630: a fresh reviewer, a fixer, the posting of their output).
 // With the six `REMOTE_ROUTINE_*` variables set, `runRemoteSession` (#672) and `runRemoteImplementerSession` (#673) are registered too; without them they are not.
+// `listRunningIssues` and `startQueuedRun` (#723) are the queue watcher's, and use a Temporal client connection of the worker's own.
 // With `HOST_TASK_QUEUE` set, a second worker in this process polls the `host` queue and registers only
 // `runHostIntegration` (#647), one activity at a time. Without it the worker is exactly as before.
 // Their settings are read once here, from the environment, and a bad value stops the worker before it polls.
 
 import { fileURLToPath } from 'node:url';
+import { Client, Connection } from '@temporalio/client';
 import { NativeConnection, Worker } from '@temporalio/worker';
 import { createBranchActivities } from './activities/branch.ts';
 import { createClaudeSessionActivities } from './activities/claude-session.ts';
 import { createGithubActivities, createRemoteGithubReads } from './activities/github.ts';
 import * as hello from './activities/hello.ts';
 import { createImplementerActivities, createRemoteImplementerActivities } from './activities/implementer.ts';
+import { createQueueActivities } from './activities/queue.ts';
 import { createReviewActivities } from './activities/review.ts';
 import { createRemoteSessionActivities } from './activities/remote-session.ts';
 import type { RemoteSessionActivities } from './activities/remote-session.ts';
@@ -67,12 +70,22 @@ async function main(): Promise<void> {
   });
 
   const connection = await NativeConnection.connect({ address: config.address });
+  // The queue watcher's two Temporal activities (#723) need a client: the worker's own connection cannot start or list workflows.
+  const clientConnection = await Connection.connect({ address: config.address, connectTimeout: '10 seconds' }).catch(async (error: unknown) => {
+    try {
+      await connection.close();
+    } catch {
+      // The connect error below is the one to report.
+    }
+    throw error;
+  });
+  const queue = createQueueActivities({ client: new Client({ connection: clientConnection, namespace: config.namespace }), taskQueue: config.taskQueue });
   const worker = await Worker.create({
     connection,
     namespace: config.namespace,
     taskQueue: config.taskQueue,
     workflowsPath: fileURLToPath(new URL('./workflows/index.ts', import.meta.url)),
-    activities: { ...hello, ...claude, ...github, ...branches, ...implementer, ...review, ...remote, ...remoteImplementer },
+    activities: { ...hello, ...claude, ...github, ...branches, ...implementer, ...review, ...remote, ...remoteImplementer, ...queue },
   });
 
   // The host worker runs one activity at a time: the host's LogSeq serves one suite, and `stop` must finish before the next start.
@@ -90,6 +103,7 @@ async function main(): Promise<void> {
           // works on a running worker). Close the connection, and let this error be the one reported, not a failed close.
           try {
             await connection.close();
+            await clientConnection.close();
           } catch {
             // The Worker.create error below is the one to report.
           }
@@ -111,6 +125,7 @@ async function main(): Promise<void> {
     await Promise.all([worker.run(), hostWorker?.run()]);
   } finally {
     await connection.close();
+    await clientConnection.close();
   }
 }
 
