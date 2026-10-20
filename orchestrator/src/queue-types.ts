@@ -33,7 +33,8 @@ export const MAX_TICK_MS = 60 * 60_000;
  * tick back while one runs, so this is also the longest a stuck tick can hold the schedule.
  *
  * The sum of the activity retry bounds is far longer than this: one failing read can take 3 attempts of 2 minutes plus
- * backoff (about 6 minutes 15 seconds), a tick makes 4 reads, and then one start attempt per eligible issue (up to 50).
+ * backoff (about 6 minutes 15 seconds), a tick makes 4 reads, then one start attempt per eligible issue (up to 50), then 2 more
+ * reads (`readRunStatuses` and `listClosedRuns`, each describing up to 20 runs one after another inside one activity).
  * Sizing the execution timeout to that would hold the schedule for hours, so the tick bounds itself instead: the workflow
  * gives up at QUEUE_TICK_DEADLINE_MS and returns a failed report (`TickDeadline`, the step it was in), and the execution
  * timeout sits a margin above that deadline, so Temporal never kills a tick before it has answered. A start cut off by the
@@ -225,7 +226,7 @@ export const MAX_RUN_STATUS_LOOKUPS = 20;
  */
 export const MAX_CLOSED_NOT_READY = MAX_RUN_STATUS_LOOKUPS;
 
-/** Most visibility rows one tick reads for it, whatever their issue: the rows of Ready issues and of IDs that are not `issue-<n>` are read and passed over. The rest are counted, not read. */
+/** Most visibility rows one tick reads for it, whatever their issue: the rows of Ready issues and of IDs that are not `issue-<n>` are read and passed over. The rest are counted, not read, and a store that answers oldest first can leave the newest runs among them. */
 export const MAX_CLOSED_ROWS_READ = 200;
 
 /** The Ready numbers `listClosedRuns` is told to pass over: at most 50 from `listReadyIssues`, with room to spare. */
@@ -370,7 +371,12 @@ export interface ClosedRunsInput {
 export interface ClosedRuns {
   /** Closed runs of issues that are not in Ready, newest first, at most MAX_CLOSED_NOT_READY, as numbers and fixed words (BR-0001). */
   readonly runs: readonly RunStatusEntry[];
-  /** Closed runs the call did not look at: the visibility count of closed `issueWorkflow` runs, less the rows it read. It can count a run of a Ready issue or an ID that is not `issue-<n>`: an upper bound, never a silent cut (BR-0006). */
+  /**
+   * Closed runs the call did not look at (BR-0006): runs of an `issue-<n>` ID it read and did not name because more than
+   * MAX_CLOSED_NOT_READY qualified, plus, only when the list went past MAX_CLOSED_ROWS_READ rows, the server's count of the rows
+   * beyond the bound (at least 1). A list that ran out gives an exact number and asks for no count. The rows past the bound can
+   * include a Ready issue's run or an ID that is not `issue-<n>`, so then it is an upper bound.
+   */
   readonly notLookedUp: number;
 }
 

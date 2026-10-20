@@ -14,8 +14,9 @@
 //   MAX_RUN_STATUS_LOOKUPS a tick, so the read is bounded: it describes each run and reads the failure of a Failed one, nothing else.
 //
 // - `listClosedRuns` (#733): the closed runs whose issue is not in Ready, which the Ready-column read never meets (a run that closed
-//   after it claimed the issue leaves its item In progress, In review or Needs Input). One bounded visibility list, newest first, at
-//   most MAX_CLOSED_ROWS_READ rows, one count, and the status of at most MAX_CLOSED_NOT_READY runs through the same `readRunStatus`.
+//   after it claimed the issue leaves its item In progress, In review or Needs Input). One bounded visibility list, at most
+//   MAX_CLOSED_ROWS_READ rows sorted newest close first here (never trusted to the store), a count only when the list goes past that
+//   bound, and the status of at most MAX_CLOSED_NOT_READY runs through the same `readRunStatus`.
 //   Read-only: nothing is restarted, deleted or signalled.
 //
 // No title, memo, input or other text from a workflow is read or returned. Numbers, fixed words and one flag come out. A Failed
@@ -46,8 +47,7 @@ const ISSUE_WORKFLOW_ID = /^issue-([1-9]\d{0,8})$/;
 
 /**
  * The closed ends a person has to look at: every closed status but Completed, which is a run's own end. No `ORDER BY`: the dev
- * server's visibility store refuses it, and the server's default order for a list of closed runs is the newest close first,
- * which is the order the list is read in (a test pins it).
+ * server's visibility store refuses it, so `listClosedRuns` sorts the rows it read by close time itself.
  */
 const CLOSED_NOT_READY_QUERY = `WorkflowType = "${ISSUE_WORKFLOW_NAME}" AND ExecutionStatus IN ("Failed", "Terminated", "TimedOut", "Canceled")`;
 
@@ -168,11 +168,19 @@ export function createQueueActivities(deps: QueueActivityDeps) {
   }
 
   /**
-   * The closed runs whose issue is not in the Ready column (#733), newest first: the visibility list of `issueWorkflow` runs
+   * The closed runs whose issue is not in the Ready column (#733), newest close first: the visibility list of `issueWorkflow` runs
    * that ended Failed, Terminated, TimedOut or Canceled, passing over the IDs of the numbers it is told (the Ready column, which
-   * the Ready path already reports) and any ID that is not `issue-<n>`. It reads at most MAX_CLOSED_ROWS_READ rows and describes
-   * at most MAX_CLOSED_NOT_READY runs (`readRunStatus`: one describe, and one result for a Failed run), then asks the server how
-   * many closed runs there are, so `notLookedUp` says what the bound left out. A failed read throws (BR-0003).
+   * the Ready path already reports) and any ID that is not `issue-<n>`.
+   *
+   * The order is made here, not trusted to the store: it reads up to MAX_CLOSED_ROWS_READ rows (it does not stop at the 20 it
+   * names), sorts what it read by close time, newest first, and describes the first MAX_CLOSED_NOT_READY of them
+   * (`readRunStatus`: one describe, and one result for a Failed run). So which 20 are named never depends on the order the store
+   * answers in. The one thing the bound can still cost: with more closed runs than MAX_CLOSED_ROWS_READ, a store that answers
+   * oldest first hands over its oldest rows, and the newest runs are among the unread ones, which only `notLookedUp` says.
+   *
+   * `notLookedUp` is the closed runs of an `issue-<n>` ID the call read and did not name (more than 20 qualified), plus, only when
+   * the list went past the row bound, the server's count of the rows beyond it. A list that ran out is exact and asks for no count,
+   * so a clean tick never shows a number that two reads of a changing store made up. A failed read throws (BR-0003).
    */
   async function listClosedRuns(raw: unknown): Promise<ClosedRuns> {
     let exclude: ReadonlySet<number>;
@@ -184,30 +192,40 @@ export function createQueueActivities(deps: QueueActivityDeps) {
       }
       throw error;
     }
-    const issues: number[] = [];
+    // Issue number to the close time of its row, in milliseconds (a row with no close time sorts as the oldest).
+    const found = new Map<number, number>();
     let rowsRead = 0;
+    let pastBound = false;
     for await (const info of deps.client.workflow.list({ query: CLOSED_NOT_READY_QUERY })) {
-      rowsRead += 1;
-      const match = ISSUE_WORKFLOW_ID.exec(info.workflowId);
-      if (match !== null && !exclude.has(Number(match[1])) && !issues.includes(Number(match[1]))) {
-        issues.push(Number(match[1]));
-      }
-      if (issues.length >= MAX_CLOSED_NOT_READY || rowsRead >= MAX_CLOSED_ROWS_READ) {
+      if (rowsRead >= MAX_CLOSED_ROWS_READ) {
+        // One more row exists than the bound reads: the list did not run out.
+        pastBound = true;
         break;
       }
+      rowsRead += 1;
+      const match = ISSUE_WORKFLOW_ID.exec(info.workflowId);
+      if (match !== null && !exclude.has(Number(match[1]))) {
+        const issue = Number(match[1]);
+        found.set(issue, Math.max(found.get(issue) ?? 0, info.closeTime?.getTime() ?? 0));
+      }
     }
-    // Counted after the list, so the count is never below the rows read. The two reads are not one snapshot: a run that closed
-    // between them only moves the number by one, and the floor keeps it from going negative.
-    const { count } = await deps.client.workflow.count(CLOSED_NOT_READY_QUERY);
+    const newestFirst = [...found].sort((a, b) => b[1] - a[1] || b[0] - a[0]).map(([issue]) => issue);
+    const named = newestFirst.slice(0, MAX_CLOSED_NOT_READY);
+    let notLookedUp = newestFirst.length - named.length;
+    if (pastBound) {
+      // The rows past the bound were not read, and the count says how many. The row that proved there was one is at least one of them.
+      const { count } = await deps.client.workflow.count(CLOSED_NOT_READY_QUERY);
+      notLookedUp += Math.max(1, count - rowsRead);
+    }
     const runs: RunStatusEntry[] = [];
-    for (const issue of issues) {
+    for (const issue of named) {
       const entry = await readRunStatus(issue);
       // A run that is open again, gone, or completed since the list has no closed end to report.
       if (entry !== undefined && entry.status !== 'completed') {
         runs.push(entry);
       }
     }
-    return { runs, notLookedUp: Math.max(0, count - rowsRead) };
+    return { runs, notLookedUp };
   }
 
   return { listRunningIssues, startQueuedRun, readRunStatuses, listClosedRuns };
