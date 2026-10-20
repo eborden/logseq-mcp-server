@@ -195,7 +195,7 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
       return { outcome: 'refused', issueNumber: issue, reason: 'pr_changed' };
     }
     pr = resolved.pr;
-    return await decisionStage({ input, pr: resolved.pr, inbox, step, stop, stopAtGateClear: true, workflowId });
+    return await decisionStage({ input, pr: resolved.pr, inbox, step, stop, stopAtGateClear: true, resumeHead: resolved.headSha, workflowId });
   }
 
   const check = await step('check', () => github.checkIssue(issue));
