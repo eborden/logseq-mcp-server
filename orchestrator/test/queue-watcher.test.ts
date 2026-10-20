@@ -49,8 +49,11 @@ import {
   parseQueueWatcherInput,
   parseStartQueuedRunInput,
   CLOSED_RUN_REASONS,
+  MAX_CLOSED_EXCLUDED,
+  MAX_CLOSED_NOT_READY,
   MAX_RUN_STATUS_LOOKUPS,
   closedRunReason,
+  parseClosedRunsInput,
   parseRunStatusesInput,
   PR_BY_HAND_TEXT,
   STOP_STEP_RECOVERY,
@@ -58,6 +61,8 @@ import {
   restartAdvice,
 } from '../src/queue-types.ts';
 import type {
+  ClosedRuns,
+  ClosedRunsInput,
   QueueRunTemplate,
   RunStatusEntry,
   RunStatuses,
@@ -348,6 +353,12 @@ class World {
   readonly trustReads: number[][] = [];
   readonly startCalls: StartQueuedRunInput[] = [];
   readonly statusReads: number[][] = [];
+  /** The closed runs whose issue is not in Ready, newest first, as the visibility list gives them (#733). The fake passes over the numbers it is told to exclude. */
+  closedRuns: RunStatusEntry[] = [];
+  /** Closed runs the fake did not look at, as the activity counts them. */
+  closedNotLookedUp = 0;
+  /** What each `listClosedRuns` call was told to pass over. */
+  readonly closedReads: number[][] = [];
 }
 
 let world = new World();
@@ -415,6 +426,15 @@ function fakeQueueActivities() {
       world.statusReads.push([...input.issues]);
       return { runs: input.issues.flatMap((issue) => world.runStatuses.get(issue) ?? []) };
     },
+    listClosedRuns: async (input: ClosedRunsInput): Promise<ClosedRuns> => {
+      const delay = world.delays.get('listClosedRuns');
+      if (delay !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      failIf('listClosedRuns');
+      world.closedReads.push([...input.exclude]);
+      return { runs: world.closedRuns.filter((entry) => !input.exclude.includes(entry.issue)), notLookedUp: world.closedNotLookedUp };
+    },
   };
 }
 
@@ -437,6 +457,7 @@ function faultFor(kind: 'describe' | 'result', workflowId: string): Error | unde
 function brokenClient(): Client {
   const workflow = {
     list: (...args: Parameters<Client['workflow']['list']>) => client.workflow.list(...args),
+    count: (...args: Parameters<Client['workflow']['count']>) => client.workflow.count(...args),
     start: (...args: Parameters<Client['workflow']['start']>) => client.workflow.start(...args),
     getHandle: (workflowId: string, runId?: string) => {
       const handle = client.workflow.getHandle(workflowId, runId);
@@ -826,7 +847,7 @@ test('a tick that read a closed run schedules the status read with the same boun
 
   const history = await client.workflow.getHandle(lastTickId()).fetchHistory();
   const scheduled = (history.events ?? []).flatMap((event) => (event.activityTaskScheduledEventAttributes === undefined || event.activityTaskScheduledEventAttributes === null ? [] : [event.activityTaskScheduledEventAttributes]));
-  assert.deepEqual(scheduled.map((attributes) => attributes.activityType?.name), ['listReadyIssues', 'listTakenIssues', 'listRunningIssues', 'checkTrustedIssues', 'startQueuedRun', 'readRunStatuses']);
+  assert.deepEqual(scheduled.map((attributes) => attributes.activityType?.name), ['listReadyIssues', 'listTakenIssues', 'listRunningIssues', 'checkTrustedIssues', 'startQueuedRun', 'readRunStatuses', 'listClosedRuns']);
   for (const attributes of scheduled) {
     assert.equal(Number(attributes.startToCloseTimeout?.seconds), 120, String(attributes.activityType?.name));
     assert.equal(attributes.retryPolicy?.maximumAttempts, 3, String(attributes.activityType?.name));
@@ -897,7 +918,7 @@ test('every activity of a tick runs with the bounded options: a start-to-close o
 
   const history = await client.workflow.getHandle(lastTickId()).fetchHistory();
   const scheduled = (history.events ?? []).flatMap((event) => (event.activityTaskScheduledEventAttributes === undefined || event.activityTaskScheduledEventAttributes === null ? [] : [event.activityTaskScheduledEventAttributes]));
-  assert.deepEqual(scheduled.map((attributes) => attributes.activityType?.name), ['listReadyIssues', 'listTakenIssues', 'listRunningIssues', 'checkTrustedIssues', 'startQueuedRun']);
+  assert.deepEqual(scheduled.map((attributes) => attributes.activityType?.name), ['listReadyIssues', 'listTakenIssues', 'listRunningIssues', 'checkTrustedIssues', 'startQueuedRun', 'listClosedRuns']);
   for (const attributes of scheduled) {
     assert.equal(Number(attributes.startToCloseTimeout?.seconds), 120, String(attributes.activityType?.name));
     assert.equal(attributes.retryPolicy?.maximumAttempts, 3, String(attributes.activityType?.name));
@@ -1006,6 +1027,209 @@ test('a bad watcher input fails the workflow before any read, as InvalidInput', 
     );
   }
   assert.equal(world.startCalls.length, 0);
+});
+
+// ---- closed runs whose issue is not in Ready (#733) -------------------------------------------------------------------
+
+test('a run that failed after it claimed its issue is named in the next tick with its stop word and the advice a Ready skip gets', async () => {
+  world = new World();
+  world.ready = [90];
+  // Issue 21 is In progress on the board, so not in Ready: no other step of the tick meets its closed run.
+  world.closedRuns = [{ issue: 21, status: 'failed', stopReason: 'SessionError', step: 'session' }];
+
+  const report = await fakeTick();
+
+  assert.equal(report.outcome, 'ok');
+  assert.deepEqual(report.started, [90]);
+  assert.deepEqual(report.skipped, [], 'the issue is not in Ready, so it is no skip');
+  assert.deepEqual(report.closedNotReady, {
+    counts: { failed: 1 },
+    runs: [{ number: 21, reason: 'failed', stopReason: 'SessionError', restart: restartOf(21) }],
+    notLookedUp: 0,
+  });
+  assert.equal(report.closedRuns, undefined);
+});
+
+test('a closed run outside Ready that stopped with the PR open gets the by-hand sentence and no command, as a Ready skip does', async () => {
+  world = new World();
+  world.closedRuns = [{ issue: 22, status: 'failed', stopReason: 'MaxRoundsReached', step: 'review_loop' }];
+
+  const report = await fakeTick();
+
+  assert.deepEqual(report.closedNotReady?.runs, [{ number: 22, reason: 'failed', stopReason: 'MaxRoundsReached', instead: PR_BY_HAND_TEXT }]);
+  assert.equal('restart' in (report.closedNotReady?.runs[0] ?? {}), false);
+});
+
+for (const [status, word, expected] of [
+  ['failed', 'failed', { restart: restartOf(31) }],
+  ['parked', 'parked', { restart: restartOf(31, PARKED_RUN(31)) }],
+  ['terminated', 'terminated', { restart: restartOf(31) }],
+  ['timed_out', 'timed_out', { restart: restartOf(31) }],
+  ['cancelled', 'cancelled', { restart: restartOf(31) }],
+] as const) {
+  test(`a closed run outside Ready that ${word === 'timed_out' ? 'timed out' : word} is named ${word}, with the advice of the same word in the Ready column`, async () => {
+    world = new World();
+    world.closedRuns = [{ issue: 31, status }];
+
+    const report = await fakeTick();
+
+    assert.deepEqual(report.closedNotReady, { counts: { [word]: 1 }, runs: [{ number: 31, reason: word, ...expected }], notLookedUp: 0 });
+    // The Ready column gives the same word and the same advice for the same run.
+    const ready = await closedRunTick(31, { issue: 31, status });
+    assert.deepEqual(ready.skipped, [{ number: 31, reason: word, ...expected }]);
+  });
+}
+
+test('the closed runs outside Ready are counted per reason in a fixed order, newest first in the list', async () => {
+  world = new World();
+  world.closedRuns = [
+    { issue: 45, status: 'cancelled' },
+    { issue: 44, status: 'failed' },
+    { issue: 43, status: 'parked' },
+    { issue: 42, status: 'failed' },
+    { issue: 41, status: 'terminated' },
+  ];
+
+  const report = await fakeTick();
+
+  assert.deepEqual(Object.entries(report.closedNotReady?.counts ?? {}), [['failed', 2], ['parked', 1], ['terminated', 1], ['cancelled', 1]]);
+  assert.deepEqual(report.closedNotReady?.runs.map((run) => run.number), [45, 44, 43, 42, 41], 'the order the activity gave');
+});
+
+test('the Ready column and its blocked issues are passed over, so a run is in one place only', async () => {
+  world = new World();
+  world.ready = [11, 12];
+  world.blocked = [{ number: 13, openBlockers: [5] }];
+  world.everStarted.add(11);
+  world.closedRuns = [
+    { issue: 11, status: 'failed', step: 'session' },
+    { issue: 13, status: 'failed', step: 'session' },
+    { issue: 21, status: 'failed', step: 'session' },
+  ];
+  world.runStatuses.set(11, { issue: 11, status: 'failed', step: 'session' });
+
+  const report = await fakeTick();
+
+  assert.deepEqual(world.closedReads, [[11, 12, 13]], 'told to pass over every Ready number, blocked ones too');
+  assert.deepEqual(report.skipped.map((skip) => [skip.number, skip.reason]), [[11, 'failed'], [13, 'blocked']]);
+  assert.deepEqual(report.closedNotReady?.runs.map((run) => run.number), [21]);
+});
+
+test('more closed runs than the cap: 20 are named and the report says how many it did not look at', async () => {
+  world = new World();
+  world.closedRuns = Array.from({ length: MAX_CLOSED_NOT_READY }, (_, index) => ({ issue: 200 - index, status: 'failed', step: 'session' }) as const);
+  world.closedNotLookedUp = 7;
+
+  const report = await fakeTick();
+
+  assert.equal(MAX_CLOSED_NOT_READY, 20);
+  assert.equal(report.closedNotReady?.runs.length, 20);
+  assert.deepEqual(report.closedNotReady?.counts, { failed: 20 });
+  assert.equal(report.closedNotReady?.notLookedUp, 7);
+  assert.equal(report.outcome, 'ok');
+
+  // Whatever an activity answers, the report never names more than 20.
+  world.closedRuns = Array.from({ length: 25 }, (_, index) => ({ issue: 300 - index, status: 'failed', step: 'session' }) as const);
+  world.closedNotLookedUp = 0;
+  const longer = await fakeTick();
+  assert.deepEqual(longer.closedNotReady?.runs.map((run) => run.number), world.closedRuns.slice(0, 20).map((run) => run.issue));
+});
+
+test('nothing left to read leaves the report as it was; only a count of unread runs adds the field', async () => {
+  world = new World();
+  world.ready = [90];
+
+  const empty = await fakeTick();
+
+  assert.deepEqual(empty, { outcome: 'ok', cap: 3, inFlight: 0, started: [90], skipped: [], skippedNotReported: 0, trustNotRead: 0 });
+  assert.equal('closedNotReady' in empty, false);
+  assert.deepEqual(world.closedReads, [[90]], 'it still asked');
+
+  world.closedNotLookedUp = 4;
+  const unread = await fakeTick();
+  assert.deepEqual(unread.closedNotReady, { counts: {}, runs: [], notLookedUp: 4 });
+});
+
+test('a completed run is not a closed run outside Ready: it is dropped, whatever the activity answers', async () => {
+  world = new World();
+  world.closedRuns = [{ issue: 51, status: 'completed' }];
+
+  const report = await fakeTick();
+
+  assert.equal('closedNotReady' in report, false);
+});
+
+test('a failed read of the closed runs fails the tick at list_closed, after the starts and the Ready skips, and the message stays out (BR-0003)', async () => {
+  world = new World();
+  world.ready = [11, 90];
+  world.everStarted.add(11);
+  world.runStatuses.set(11, { issue: 11, status: 'failed', step: 'session' });
+  world.failures.set('listClosedRuns', ApplicationFailure.nonRetryable(CANARY, 'ServerUnavailable'));
+
+  const report = await fakeTick();
+
+  assert.equal(report.outcome, 'failed');
+  assert.deepEqual(report.failure, { step: 'list_closed', reason: 'ServerUnavailable' });
+  assert.deepEqual(report.started, [90], 'the start stands');
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'failed', restart: restartOf(11) }], 'so does the Ready skip');
+  assert.equal('closedNotReady' in report, false, 'never an empty or partial list');
+  assert.equal(JSON.stringify(report).includes(CANARY), false);
+});
+
+test('a failed start or status read ends the tick before the closed runs are read, so the first failure is the one reported', async () => {
+  world = new World();
+  world.ready = [11, 12];
+  world.failures.set('startQueuedRun:11', ApplicationFailure.nonRetryable(CANARY, 'ServerUnavailable'));
+  world.closedRuns = [{ issue: 21, status: 'failed' }];
+
+  const startFailed = await fakeTick();
+  assert.deepEqual(startFailed.failure, { step: 'start', reason: 'ServerUnavailable' });
+  assert.deepEqual(world.closedReads, []);
+
+  world = new World();
+  world.ready = [11];
+  world.everStarted.add(11);
+  world.failures.set('readRunStatuses', ApplicationFailure.nonRetryable(CANARY, 'TooLarge'));
+  const statusFailed = await fakeTick();
+  assert.deepEqual(statusFailed.failure, { step: 'run_status', reason: 'TooLarge' });
+  assert.deepEqual(world.closedReads, []);
+});
+
+test('the closed-run read is covered by the tick deadline: a tick still in it at the deadline reports list_closed and what it started', async () => {
+  world = new World();
+  world.ready = [90];
+  world.delays.set('listClosedRuns', 4_000);
+
+  const report = await fakeTick({ ...RUN, tickDeadlineMs: 1_500 });
+
+  assert.equal(report.outcome, 'failed');
+  assert.deepEqual(report.failure, { step: 'list_closed', reason: TICK_DEADLINE_REASON });
+  assert.deepEqual(report.started, [90]);
+});
+
+test('the closed-run read has the same bounded options as every other activity, and the history holds numbers and fixed words only', async () => {
+  world = new World();
+  world.closedRuns = [{ issue: 21, status: 'failed', stopReason: `${CANARY} not a word`, step: 'session' }];
+  const report = await fakeTick();
+
+  assert.deepEqual(report.closedNotReady?.runs, [{ number: 21, reason: 'failed', restart: restartOf(21) }], 'a stop reason that is not a plain word is dropped');
+  const history = await client.workflow.getHandle(lastTickId()).fetchHistory();
+  const scheduled = (history.events ?? []).flatMap((event) => (event.activityTaskScheduledEventAttributes === undefined || event.activityTaskScheduledEventAttributes === null ? [] : [event.activityTaskScheduledEventAttributes]));
+  const closedRead = scheduled.filter((attributes) => attributes.activityType?.name === 'listClosedRuns');
+  assert.equal(closedRead.length, 1, 'one read for the tick');
+  assert.equal(Number(closedRead[0]?.startToCloseTimeout?.seconds), 120);
+  assert.equal(closedRead[0]?.retryPolicy?.maximumAttempts, 3);
+  assert.equal(JSON.stringify(history).includes(CANARY), false, 'no text of a run in the history');
+});
+
+test('a closed-runs request is parsed at the boundary: at most 100 positive issue numbers, sorted and without repeats; an empty list is fine', () => {
+  assert.equal(MAX_CLOSED_EXCLUDED, 100);
+  assert.deepEqual(parseClosedRunsInput({ exclude: [] }), { exclude: [] });
+  assert.deepEqual(parseClosedRunsInput({ exclude: [13, 11, 13, 12] }), { exclude: [11, 12, 13] });
+  assert.equal(parseClosedRunsInput({ exclude: Array.from({ length: 100 }, (_, index) => index + 1) }).exclude.length, 100);
+  for (const bad of [{ exclude: Array.from({ length: 101 }, (_, index) => index + 1) }, { exclude: [0] }, { exclude: [1.5] }, { exclude: ['12'] }, { exclude: [1_000_000_000] }, { exclude: 12 }, {}, null, 'x', []]) {
+    assert.throws(() => parseClosedRunsInput(bad), InvalidQueueInputError, JSON.stringify(bad));
+  }
 });
 
 // ---- layer 2: the real client activities and real executions ------------------------------------------------------
@@ -1276,6 +1500,100 @@ test('a run deleted between the describe and the result is no entry, and the oth
       { number: 1005, reason: 'failed', stopReason: 'SessionError', restart: restartOf(1005) },
     ]);
     assert.deepEqual(report.closedRuns, { counts: { failed: 1, id_already_ran: 1 }, notLookedUp: 0 });
+  });
+});
+
+// ---- closed runs whose issue is not in Ready, from real executions (#733) -----------------------------------------------
+
+const CLOSED_NOT_READY_QUERY = `WorkflowType = "${ISSUE_WORKFLOW_NAME}" AND ExecutionStatus IN ("Failed", "Terminated", "TimedOut", "Canceled")`;
+
+test('the closed-run list reads real runs newest first, never a completed one, passes over the Ready numbers, and counts what its bound left out', async () => {
+  const activities = createQueueActivities({ client, taskQueue: REAL_QUEUE });
+  // More failed runs than the cap, closed one after another, with a completed run and a run of another ID among them.
+  const failed = Array.from({ length: MAX_CLOSED_NOT_READY + 2 }, (_, index) => 1200 + index);
+  for (const issue of failed) {
+    await startAndFinish(activities, issue, issue === 1203 ? 'stop:review_loop:MaxRoundsReached' : 'stop:session:SessionError');
+  }
+  await startAndFinish(activities, 1250, 'complete');
+  await client.workflow.start(ISSUE_WORKFLOW_NAME, { taskQueue: REAL_QUEUE, workflowId: 'not-an-issue-id-2', args: [{}] });
+  const other = client.workflow.getHandle('not-an-issue-id-2');
+  await other.terminate('simulated');
+  await until('the visibility list to show the newest closed run', async () => {
+    for await (const info of client.workflow.list({ query: CLOSED_NOT_READY_QUERY })) {
+      return info.workflowId === 'not-an-issue-id-2';
+    }
+    return false;
+  });
+
+  const all = await activities.listClosedRuns({ exclude: [] });
+
+  // Newest close first: the terminated run of the other ID is the newest and is passed over (no issue number), then 1221 down.
+  assert.equal(all.runs.length, MAX_CLOSED_NOT_READY, 'at most the cap');
+  assert.deepEqual(all.runs.map((run) => run.issue), failed.slice(-MAX_CLOSED_NOT_READY).reverse());
+  assert.deepEqual(all.runs[0], { issue: 1221, status: 'failed', stopReason: 'SessionError', step: 'session' });
+  assert.equal(all.runs.some((run) => run.issue === 1250), false, 'a completed run is not looked for');
+  const total = (await client.workflow.count(CLOSED_NOT_READY_QUERY)).count;
+  assert.equal(all.notLookedUp, total - (MAX_CLOSED_NOT_READY + 1), 'the rows it read are the 20 and the one run of another ID; the rest are counted');
+  assert.ok(all.notLookedUp >= 2, 'more closed runs than the cap');
+
+  // A Ready number is passed over, and the next one takes its place in the 20.
+  const passed = await activities.listClosedRuns({ exclude: [1221, 1220] });
+  assert.deepEqual(passed.runs.map((run) => run.issue), failed.slice(-MAX_CLOSED_NOT_READY - 2, -2).reverse());
+  assert.equal(passed.runs.find((run) => run.issue === 1203)?.stopReason, 'MaxRoundsReached', 'a stop reason is read like the Ready path reads it');
+
+  await assert.rejects(activities.listClosedRuns({ exclude: [0] }), (error: unknown) => error instanceof ApplicationFailure && error.type === 'InvalidInput');
+  await assert.rejects(activities.listClosedRuns({}), (error: unknown) => error instanceof ApplicationFailure && error.type === 'InvalidInput');
+});
+
+test('real runs: a tick names each kind of run that closed after its claim, restarts none of them, and a Ready issue is named once', async () => {
+  const activities = createQueueActivities({ client, taskQueue: REAL_QUEUE });
+  await startAndFinish(activities, 1301, 'stop:review_loop:MaxRoundsReached');
+  await startAndFinish(activities, 1302, 'stop:park:NeedsInputTimeout');
+  await startAndFinish(activities, 1303, 'stop:session:SessionError');
+  assert.deepEqual(await activities.startQueuedRun({ issue: 1304, run: RUN }), { status: 'started' });
+  await client.workflow.getHandle(issueWorkflowId(1304)).terminate(STUB_FAILURE_MESSAGE);
+  assert.deepEqual(await activities.startQueuedRun({ issue: 1305, run: RUN }), { status: 'started' });
+  const cancelled = client.workflow.getHandle(issueWorkflowId(1305));
+  await cancelled.cancel();
+  await cancelled.result().catch(() => undefined);
+  await client.workflow.start(ISSUE_WORKFLOW_NAME, { taskQueue: REAL_QUEUE, workflowId: issueWorkflowId(1306), args: [{ issueNumber: 1306 }], workflowExecutionTimeout: '1 second' });
+  await until('the short run to time out', async () => (await client.workflow.getHandle(issueWorkflowId(1306)).describe()).status.name === 'TIMED_OUT');
+  await until('the visibility list to show the last run', async () => (await activities.listClosedRuns({ exclude: [] })).runs[0]?.issue === 1306);
+  world = new World();
+  world.ready = [1302];
+
+  const report = await tick(REAL_QUEUE, { ...RUN, cap: 3 });
+
+  assert.equal(report.outcome, 'ok');
+  assert.deepEqual(report.started, [], 'a closed run is never started again');
+  assert.deepEqual(report.skipped, [{ number: 1302, reason: 'parked', stopReason: 'NeedsInputTimeout', restart: restartOf(1302, PARKED_RUN(1302)) }], '1302 is in Ready: the Ready column names it');
+  assert.deepEqual(report.closedNotReady?.runs.slice(0, 5), [
+    { number: 1306, reason: 'timed_out', restart: restartOf(1306) },
+    { number: 1305, reason: 'cancelled', restart: restartOf(1305) },
+    { number: 1304, reason: 'terminated', restart: restartOf(1304) },
+    { number: 1303, reason: 'failed', stopReason: 'SessionError', restart: restartOf(1303) },
+    { number: 1301, reason: 'failed', stopReason: 'MaxRoundsReached', instead: PR_BY_HAND_TEXT },
+  ]);
+  assert.equal(report.closedNotReady?.runs.some((run) => run.number === 1302), false, 'named by the Ready column only');
+  assert.equal(report.closedNotReady?.runs.length, MAX_CLOSED_NOT_READY);
+  assert.ok((report.closedNotReady?.notLookedUp ?? 0) > 0);
+  for (const [issue, status] of [[1301, 'FAILED'], [1302, 'FAILED'], [1303, 'FAILED'], [1304, 'TERMINATED'], [1305, 'CANCELLED'], [1306, 'TIMED_OUT']] as const) {
+    assert.equal((await client.workflow.getHandle(issueWorkflowId(issue)).describe()).status.name, status, `issue ${issue} was not started again or deleted`);
+  }
+  const history = await client.workflow.getHandle(lastTickId()).fetchHistory();
+  assert.equal(JSON.stringify(history).includes(STUB_FAILURE_MESSAGE), false, 'no failure message in the tick history');
+  assert.equal(JSON.stringify(report).includes(STUB_FAILURE_MESSAGE), false);
+});
+
+test('a closed-run read that cannot reach the server fails the tick at list_closed, not as an empty list (BR-0003)', async () => {
+  world = new World();
+  await withFaults({ describe: () => serverDown() }, async () => {
+    const report = await tick(BROKEN_QUEUE, { ...RUN, cap: 3 });
+
+    assert.equal(report.outcome, 'failed');
+    assert.deepEqual(report.failure, { step: 'list_closed', reason: 'ServerUnavailable' });
+    assert.equal('closedNotReady' in report, false);
+    assert.equal(JSON.stringify(report).includes(CANARY), false);
   });
 });
 

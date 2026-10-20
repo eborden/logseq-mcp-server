@@ -27,6 +27,11 @@
 //                  issue is still Ready and open: the merge did not close it), and carries the command a person uses. The watcher
 //                  never restarts a closed run. The read comes after the starts, so a failing read cannot hold one back; it fails
 //                  the tick (BR-0003) and the skips stay `id_already_ran`. The report counts per reason and says how many it did not read.
+//   list_closed    listClosedRuns (#733): the closed runs whose issue is NOT in Ready (a run that closed after it claimed its issue
+//                  leaves the item In progress, In review or Needs Input, where no other step looks). Newest first, at most
+//                  MAX_CLOSED_NOT_READY of them with the same fixed words and `restart` / `instead` advice as the Ready case, and
+//                  the rest counted in `closedNotReady.notLookedUp`. Last, so a failing read cannot hold back a start or a skip;
+//                  it fails the tick (BR-0003). An empty answer adds nothing to the report. Information only: nothing is restarted.
 // The whole tick has a deadline (QUEUE_TICK_DEADLINE_MS, src/queue-types.ts): a tick still working at it returns a failed report
 // (`TickDeadline` and the step it was in) instead of being killed by the execution timeout with no report.
 // It never merges, approves, labels, resolves a thread or moves a board item: it reads, and it starts runs.
@@ -35,8 +40,10 @@ import { ApplicationFailure, CancellationScope, isCancellation, proxyActivities 
 import type { GithubActivities } from '../activities/github.ts';
 import type { QueueActivities } from '../activities/queue.ts';
 import {
+  CLOSED_NOT_READY_REASONS,
   CLOSED_RUN_REASONS,
   InvalidQueueInputError,
+  MAX_CLOSED_NOT_READY,
   MAX_RUN_STATUS_LOOKUPS,
   MAX_TICK_SKIPS_REPORTED,
   QUEUE_ACTIVITY_OPTIONS,
@@ -46,7 +53,19 @@ import {
   parseQueueWatcherInput,
   restartAdvice,
 } from '../queue-types.ts';
-import type { ClosedRunReason, ClosedRunsReport, ParsedQueueInput, RunStatusEntry, TickFailureStep, TickReport, TickSkip } from '../queue-types.ts';
+import type {
+  ClosedNotReadyReason,
+  ClosedNotReadyReport,
+  ClosedRunNote,
+  ClosedRunReason,
+  ClosedRuns,
+  ClosedRunsReport,
+  ParsedQueueInput,
+  RunStatusEntry,
+  TickFailureStep,
+  TickReport,
+  TickSkip,
+} from '../queue-types.ts';
 import { eligibleIssues } from '../queue-policy.ts';
 import type { TrustedIssues } from '../types.ts';
 import { failureReason } from './failure-reason.ts';
@@ -180,6 +199,21 @@ async function tick(input: ParsedQueueInput, progress: Progress): Promise<TickRe
       failure = { step: 'run_status', reason: failureReason(error) };
     }
   }
+  // The closed runs whose issue is not in Ready (#733), last: nothing before it waits on it, and a failing read fails the tick
+  // here (BR-0003) with the starts and the Ready skips already in the report.
+  let closedNotReady: ClosedNotReadyReport | undefined;
+  if (failure === undefined) {
+    progress.step = 'list_closed';
+    try {
+      const readyNow = [...listed.ready, ...listed.blocked.map((issue) => issue.number)];
+      closedNotReady = closedNotReadyReport(await queue.listClosedRuns({ exclude: readyNow }));
+    } catch (error) {
+      if (isCancellation(error)) {
+        throw error;
+      }
+      failure = { step: 'list_closed', reason: failureReason(error) };
+    }
+  }
   const closed = new Set(finished);
   const reported = skipped.map((skip) => {
     const entry = skip.reason === 'id_already_ran' && closed.has(skip.number) ? statuses.get(skip.number) : undefined;
@@ -196,6 +230,7 @@ async function tick(input: ParsedQueueInput, progress: Progress): Promise<TickRe
     skippedNotReported: eligibility.skippedNotReported + Math.max(0, reported.length - MAX_TICK_SKIPS_REPORTED),
     trustNotRead: trust.notRead.length,
     ...(finished.length === 0 ? {} : { closedRuns: closedRunsReport(finished, statuses, finished.length - asked) }),
+    ...(closedNotReady === undefined ? {} : { closedNotReady }),
     ...(failure === undefined ? {} : { failure }),
   };
 }
@@ -203,19 +238,45 @@ async function tick(input: ParsedQueueInput, progress: Progress): Promise<TickRe
 /** What a stop reason must look like to be reported: a plain type word. The activity only sends the orchestrator's own words; this keeps any other shape out of the history. */
 const STOP_REASON_WORD = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 
-/** The skip of a Ready issue whose run is closed: the refined reason, the stop reason when there is one, and what a person does. */
-function closedRunSkip(entry: RunStatusEntry): TickSkip {
-  const reason = closedRunReason(entry.status);
+/** The stop reason a closed run recorded (when it is a plain type word) and what a person does about it: the fields a Ready skip and a closed run outside Ready share. */
+function closedRunDetails(entry: RunStatusEntry, reason: ClosedRunReason): Pick<TickSkip, 'stopReason' | 'restart' | 'instead'> {
   const stopReason = entry.stopReason !== undefined && STOP_REASON_WORD.test(entry.stopReason) ? entry.stopReason : undefined;
   // Only a step the workflow can stop at decides: an unknown word is dropped, and the run gets the commands.
   const advice = restartAdvice(entry.issue, reason, entry.step !== undefined && isStopStep(entry.step) ? entry.step : undefined);
   return {
-    number: entry.issue,
-    reason,
     ...(stopReason === undefined ? {} : { stopReason }),
     ...(advice.restart === undefined ? {} : { restart: advice.restart }),
     ...(advice.instead === undefined ? {} : { instead: advice.instead }),
   };
+}
+
+/** The skip of a Ready issue whose run is closed: the refined reason, the stop reason when there is one, and what a person does. */
+function closedRunSkip(entry: RunStatusEntry): TickSkip {
+  const reason = closedRunReason(entry.status);
+  return { number: entry.issue, reason, ...closedRunDetails(entry, reason) };
+}
+
+/** The report of the closed runs outside Ready (#733), or undefined when there are none and none were left unread, so an empty result leaves the report as it was. */
+function closedNotReadyReport(closed: ClosedRuns): ClosedNotReadyReport | undefined {
+  const runs: ClosedRunNote[] = [];
+  for (const entry of closed.runs.slice(0, MAX_CLOSED_NOT_READY)) {
+    // A completed run is a run's own end, not one a person has to look at: the activity does not list it, and it is dropped here too.
+    if (entry.status !== 'completed') {
+      runs.push({ number: entry.issue, reason: entry.status, ...closedRunDetails(entry, entry.status) });
+    }
+  }
+  if (runs.length === 0 && closed.notLookedUp === 0) {
+    return undefined;
+  }
+  // In the order of CLOSED_NOT_READY_REASONS, so the report reads the same on every replay and every tick.
+  const counts: Partial<Record<ClosedNotReadyReason, number>> = {};
+  for (const reason of CLOSED_NOT_READY_REASONS) {
+    const count = runs.filter((run) => run.reason === reason).length;
+    if (count > 0) {
+      counts[reason] = count;
+    }
+  }
+  return { counts, runs, notLookedUp: closed.notLookedUp };
 }
 
 function closedRunsReport(finished: readonly number[], statuses: ReadonlyMap<number, RunStatusEntry>, notLookedUp: number): ClosedRunsReport {
