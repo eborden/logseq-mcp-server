@@ -23,8 +23,8 @@ export const MAX_QUEUE_CAP = 10;
 
 // ---- the tick interval ------------------------------------------------------------------------------------------
 
-/** The board read is GraphQL through `gh`, so a shorter interval costs rate limit (plan #721). */
-export const DEFAULT_TICK_MS = 5 * 60_000;
+/** One minute, the shortest allowed: ready work starts within a minute. The board read is the filtered Ready query, a handful of GraphQL points a tick; a full board listing by hand is what drains the hourly bucket (plan #721 drill). */
+export const DEFAULT_TICK_MS = 60_000;
 export const MIN_TICK_MS = 60_000;
 export const MAX_TICK_MS = 60 * 60_000;
 
