@@ -174,6 +174,26 @@ export interface ReadyIssues {
   readonly blocked: readonly BlockedReadyIssue[];
 }
 
+/** What `checkTrustedIssues` read (#722): a boolean per number as two lists, never the association text or any issue text. */
+export interface TrustedIssues {
+  /** Issues whose author is an OWNER, MEMBER or COLLABORATOR, ascending. */
+  readonly trusted: readonly number[];
+  /** Issues read whose author is anyone else, ascending. */
+  readonly untrusted: readonly number[];
+  /** Issues asked about and not read because of the bound on one call, ascending. Treat them as not trusted. */
+  readonly notRead: readonly number[];
+}
+
+/** The issue numbers that already have work under way on GitHub (#722). Numbers and flags only. */
+export interface TakenIssues {
+  /** Issues with an open PR whose head is `claude/<n>` or with a remote branch `claude/<n>`, ascending. */
+  readonly taken: readonly number[];
+  /** True for a source whose list was longer than one call reads, so `taken` may miss an issue. Never a silent cut. */
+  readonly notRead: { readonly pullRequests: boolean; readonly branches: boolean };
+  /** Open PRs left out of the reading because their author is not trusted (their branch names are not read). */
+  readonly untrustedPullRequests: number;
+}
+
 export interface IssueComment {
   readonly id: number;
   /** The author's GitHub login. */
