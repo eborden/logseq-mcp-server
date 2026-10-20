@@ -195,6 +195,8 @@ class World {
   readonly comments = new Map<string, { body: string; gateReadsAtPost: number; target: number }>();
   readonly counters = { closeIssue: 0, getPrState: 0, getPrChanges: 0, commentCalls: 0 };
   readonly loseOnce = new Set<string>();
+  /** A comment whose key starts with this fails every attempt, as a PR that GitHub refuses to take a comment on would. */
+  failCommentsWith: string | undefined;
 
   lose(name: string): void {
     if (this.loseOnce.delete(name)) {
@@ -274,6 +276,9 @@ function fakeActivities() {
       // A comment on the PR (its number) or on the issue.
       const w = world(input.issue >= PR_OFFSET ? input.issue - PR_OFFSET : input.issue);
       w.counters.commentCalls += 1;
+      if (w.failCommentsWith !== undefined && input.key.startsWith(w.failCommentsWith)) {
+        throw ApplicationFailure.nonRetryable('simulated: the comment cannot be posted');
+      }
       const posted = !w.comments.has(input.key);
       if (posted) {
         w.comments.set(input.key, { body: input.body, gateReadsAtPost: w.gateReads, target: input.issue });
@@ -722,6 +727,29 @@ test('a push after the statement leaves it stale: the next clear gate on the new
   assert.match(world.comments.get(gateClearKey(issue))?.body ?? '', /for head `a{40}`/);
   assert.match(world.comments.get(gateClearKey(issue, NEXT))?.body ?? '', /for head `b{40}`/);
   assert.equal([...world.comments.keys()].filter((key) => key.startsWith('gate-clear-')).length, 2);
+  // The advisory counts came from the review loop's last review, which was on the first head: the statement for the new head does not claim them.
+  assert.match(world.comments.get(gateClearKey(issue))?.body ?? '', /Advisory findings in the last review: none/);
+  assert.match(world.comments.get(gateClearKey(issue, NEXT))?.body ?? '', /Advisory findings: not known for this head/);
+  assert.doesNotMatch(world.comments.get(gateClearKey(issue, NEXT))?.body ?? '', /Advisory findings in the last review/);
+});
+
+test('a gate-clear statement that cannot be posted stops the run at decision_comment: a counted step failure, not a silent skip', { timeout: 120_000 }, async () => {
+  const { issue, world } = newWorld((w) => {
+    w.failCommentsWith = 'gate-clear-';
+  });
+  await startRun(issue);
+
+  const stopped = await stoppedWith(issue);
+
+  assert.equal(stopped.step, 'decision_comment');
+  assert.ok(world.counters.commentCalls >= 1, 'the post was attempted');
+  assert.deepEqual(
+    [...world.comments.keys()].filter((key) => key.startsWith('gate-clear-') || key.startsWith('decision-')),
+    [],
+    'no statement and no decision comment were posted',
+  );
+  assert.equal(world.merged, false);
+  assert.deepEqual(world.statusWrites, ['pr:In review', 'issue:In review'], 'nothing moved to Done');
 });
 
 // ---- the invariants, read from the code ----------------------------------------------------------------------------
