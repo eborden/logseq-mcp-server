@@ -422,7 +422,7 @@ export function waitingForThreadsComment(
       : `The reviewer accepted the reply on ${acceptedThreadIds.length} of them (thread ids: ${acceptedThreadIds.map((id) => `\`${id}\``).join(', ')}). The others are not an author the loop may act on.`,
     advisory === 0
       ? ''
-      : `The last review also has ${advisory + advisoryOmitted} advisory finding${advisory + advisoryOmitted === 1 ? '' : 's'} in its body (${advisoryOmitted} of them not listed there), on lines the commit does not change. They open no thread, so they do not hold the gate: read the review.`,
+      : `The last review also has ${advisory + advisoryOmitted} advisory finding${advisory + advisoryOmitted === 1 ? '' : 's'} in its body (${advisoryOmitted} of them not listed there), that could not become a thread (a file the commit does not change, or a thread GitHub did not take). They open no thread, so they do not hold the gate: read the review.`,
     'Only a person resolves a review thread: the workflow never does. Once the threads are resolved, the gate is clear if a review is on the head commit.',
   ]
     .filter((paragraph) => paragraph !== '')
