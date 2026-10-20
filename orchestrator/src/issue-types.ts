@@ -14,6 +14,26 @@ export function issueWorkflowId(issueNumber: number): string {
   return `issue-${issueNumber}`;
 }
 
+/**
+ * The workflow ID of a resume run (#747): the issue number and the first 12 characters of the head it re-gates. One ID per
+ * head, so a second start for the same head is refused by the server like a second start of a run (REJECT_DUPLICATE and FAIL),
+ * and a new head, after another hand fix, gets its own. It never equals `issueWorkflowId`, so the stopped run's ID is not
+ * touched and nothing has to be deleted first. The signal command (`issueWorkflowId`) does not reach it: a resume run
+ * ends at the gate and waits for no decision.
+ */
+export function resumeWorkflowId(issueNumber: number, headSha: string): string {
+  return `issue-${issueNumber}-resume-${headSha.slice(0, 12)}`;
+}
+
+/**
+ * The end of the key of every stop comment a resume run leaves (#747). The stopped run's comment has the same step and reason
+ * (`stopped-host_integration-IntegrationFailed`), and a key that is already posted is never posted again, so without the head a
+ * resume that stops the same way on a new head would leave no comment at all.
+ */
+export function resumeKeySuffix(headSha: string): string {
+  return `-resume-${headSha.slice(0, 12)}`;
+}
+
 /** The branch the implementer works on, derived from the issue number alone so every retry finds the same one. */
 export function issueBranch(issueNumber: number): string {
   return `claude/${issueNumber}`;
@@ -81,7 +101,38 @@ export interface IssueWorkflowInput {
   readonly attempt?: number;
   /** The longest one park for a person's answer waits, in milliseconds (#698). Absent means DEFAULT_NEEDS_INPUT_TIMEOUT_MS. */
   readonly needsInputTimeoutMs?: number;
+  /**
+   * Present on a resume run (#747): the run enters at the gate of an open PR, with no claim, no session and no new PR. The PR
+   * and head are what the entry point read when it started the run; the workflow reads them again and refuses the run if the
+   * PR now shows another head (`pr_changed`), so a stale head is never gated. `base` is the PR's own base branch.
+   */
+  readonly resume?: ResumeTarget;
 }
+
+/** What a resume run was started for. Numbers and a SHA only. */
+export interface ResumeTarget {
+  readonly pr: number;
+  readonly headSha: string;
+}
+
+/**
+ * Why a resume is refused (#747), as fixed words. The entry point answers them before it starts anything, and the workflow
+ * answers them again at its start (a PR can change in between). `run_open` is the entry point's alone.
+ * - `issue_closed`: the issue is closed.
+ * - `issue_not_in_review`: the issue is not In review on the board (or not on it).
+ * - `no_open_pr`: no open PR of a trusted author is for the issue; a merged or closed PR is not open.
+ * - `several_open_prs`: more than one open PR is for the issue, so which one to gate is not decided here.
+ * - `run_open`: the issue's own run (`issue-<n>`) is still open, and it holds the gate.
+ * - `pr_changed`: the PR, its head or its base is not what the run was started with.
+ */
+export type ResumeRefusal = 'issue_closed' | 'issue_not_in_review' | 'no_open_pr' | 'several_open_prs' | 'run_open' | 'pr_changed';
+
+export const RESUME_REFUSALS: readonly ResumeRefusal[] = ['issue_closed', 'issue_not_in_review', 'no_open_pr', 'several_open_prs', 'run_open', 'pr_changed'];
+
+/** What `resolveResume` reads from GitHub: the one PR to gate and its head and base, or the fixed word that refuses the resume. */
+export type ResumeResolution =
+  | { readonly ok: true; readonly pr: number; readonly headSha: string; readonly base: string }
+  | { readonly ok: false; readonly reason: Exclude<ResumeRefusal, 'run_open' | 'pr_changed'> };
 
 export type HostIntegrationMode = 'auto' | 'off';
 
@@ -235,6 +286,7 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
   }
   const attempt = optionalWholeNumber(raw, 'attempt', 1, MAX_ATTEMPT);
   const needsInputTimeoutMs = optionalWholeNumber(raw, 'needsInputTimeoutMs', MIN_NEEDS_INPUT_TIMEOUT_MS, MAX_NEEDS_INPUT_TIMEOUT_MS);
+  const resume = parseResumeTarget(raw);
   return {
     issueNumber,
     repoDir: absolutePath('repoDir', repoDir),
@@ -249,7 +301,29 @@ export function parseIssueWorkflowInput(raw: unknown): IssueWorkflowInput {
     ...(executor === undefined ? {} : { executor }),
     ...(attempt === undefined ? {} : { attempt }),
     ...(needsInputTimeoutMs === undefined ? {} : { needsInputTimeoutMs }),
+    ...(resume === undefined ? {} : { resume }),
   };
+}
+
+const HEAD_SHA = /^[0-9a-f]{40}$/;
+
+function parseResumeTarget(raw: object): ResumeTarget | undefined {
+  const value: unknown = 'resume' in raw ? raw.resume : undefined;
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new InvalidIssueInputError('resume must be an object');
+  }
+  const pr: unknown = 'pr' in value ? value.pr : undefined;
+  const headSha: unknown = 'headSha' in value ? value.headSha : undefined;
+  if (typeof pr !== 'number' || !Number.isSafeInteger(pr) || pr < 1 || pr > 999_999_999) {
+    throw new InvalidIssueInputError('resume.pr must be a positive whole number');
+  }
+  if (typeof headSha !== 'string' || !HEAD_SHA.test(headSha)) {
+    throw new InvalidIssueInputError('resume.headSha must be a full commit sha');
+  }
+  return { pr, headSha };
 }
 
 function optionalWholeNumber(raw: object, name: string, min: number, max: number): number | undefined {
@@ -343,7 +417,14 @@ export type IssueRunOutcome =
       readonly ignoredSignals: number;
     }
   /** The maintainer approved and the PR did not merge in time (#631). Nothing was moved to Done. */
-  | { readonly outcome: 'merge_timeout'; readonly issueNumber: number; readonly pr: number; readonly headSha: string; readonly ignoredSignals: number };
+  | { readonly outcome: 'merge_timeout'; readonly issueNumber: number; readonly pr: number; readonly headSha: string; readonly ignoredSignals: number }
+  /** A resume run (#747) was refused at its start, before it read or wrote anything on GitHub. A fixed word only. */
+  | { readonly outcome: 'refused'; readonly issueNumber: number; readonly reason: ResumeRefusal }
+  /**
+   * A resume run (#747) found the gate clear for `headSha`, with the host check passed when the run asked for it, and posted the
+   * gate-clear statement. It ends here: it waits for no decision, and the maintainer merges on GitHub.
+   */
+  | { readonly outcome: 'resumed_gate_clear'; readonly issueNumber: number; readonly pr: number; readonly headSha: string; readonly reviewsOnHead: number };
 
 /** The steps a run can stop at. Part of the failure comment and of the failure the run ends with. */
 export type IssueStep =
@@ -357,6 +438,7 @@ export type IssueStep =
   | 'open_pr'
   | 'board_pr'
   | 'board_issue'
+  | 'resume'
   | 'review_session'
   | 'review_post'
   | 'gate'
@@ -450,6 +532,8 @@ export type GateHostLine =
   | { readonly kind: 'checked'; readonly state: HostIntegrationState; readonly counts?: { readonly passed: number; readonly failed: number } };
 
 export interface GateClearFacts {
+  /** True for a resume run (#747): fix rounds of the stopped run are not known to it, and no signal reaches it. */
+  readonly resumed?: boolean;
   readonly workflowId: string;
   readonly issue: number;
   readonly pr: number;
@@ -510,7 +594,9 @@ export function gateClearComment(facts: GateClearFacts): string {
   return [
     `**Gate clear** for head \`${facts.headSha}\` of #${facts.pr}, recorded by the orchestrator (workflow \`${facts.workflowId}\`). This is a gate result and not an approval: the orchestrator never approves, merges, labels or resolves anything.`,
     [
-      `At this head: ${countOf(facts.reviewsOnHead, 'review')} on the head, ${countOf(facts.unresolvedThreads, 'unresolved review thread')}, ${countOf(facts.fixRounds, 'fix round')} used.`,
+      facts.resumed === true
+        ? `At this head: ${countOf(facts.reviewsOnHead, 'review')} on the head, ${countOf(facts.unresolvedThreads, 'unresolved review thread')}. This run started at the gate for this head, so the fix rounds of the earlier run are not counted here.`
+        : `At this head: ${countOf(facts.reviewsOnHead, 'review')} on the head, ${countOf(facts.unresolvedThreads, 'unresolved review thread')}, ${countOf(facts.fixRounds, 'fix round')} used.`,
       hostLine(facts.host),
       advisory === undefined
         ? 'Advisory findings: not known for this head. The last review that counted them was on an earlier head, so read the reviews on this head.'
@@ -518,7 +604,9 @@ export function gateClearComment(facts: GateClearFacts): string {
           ? `Advisory findings in the ${last}: none.`
           : `Advisory findings in the ${last}: ${advisory} (${facts.advisoryOmitted} not listed in its body). They are in the body of that review, not in a thread, and they do not hold the gate: read it.`,
     ].join('\n'),
-    `The maintainer decides. From the orchestrator directory, \`npm run signal -- ${facts.issue} approved\` records an approval, and \`npm run signal -- ${facts.issue} changes_requested --message "..."\` asks for changes. The run reads the gate again before it uses a decision.`,
+    facts.resumed === true
+      ? 'The maintainer decides, on GitHub. This run ends here and waits for no decision: the earlier run is closed, so there is no run for a signal to reach.'
+      : `The maintainer decides. From the orchestrator directory, \`npm run signal -- ${facts.issue} approved\` records an approval, and \`npm run signal -- ${facts.issue} changes_requested --message "..."\` asks for changes. The run reads the gate again before it uses a decision.`,
     'A push moves the head and makes this statement stale. The next time the gate is clear on a new head, a new statement is posted for that commit.',
   ].join('\n\n');
 }
