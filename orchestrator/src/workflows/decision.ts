@@ -111,6 +111,8 @@ export interface DecisionContext {
   /** Advisory findings of the review loop's last review (#715), for the gate-clear statement. Counts only. Default 0. */
   readonly advisory?: number;
   readonly advisoryOmitted?: number;
+  /** The id of the review those counts come from (#718), linked in the gate-clear statement. Carried with the counts and `advisoryHead`. */
+  readonly advisoryReviewId?: number;
   /** The head the review those counts come from was on (the review loop's `headSha`). The counts are said only for that head. */
   readonly advisoryHead?: string;
   /** Runs one activity call; a failure of it ends the run at `name` (issue.ts). */
@@ -150,6 +152,7 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
   let advisory = context.advisory ?? 0;
   let advisoryOmitted = context.advisoryOmitted ?? 0;
   let advisoryHead = context.advisoryHead;
+  let advisoryReviewId = context.advisoryReviewId;
   const maxFixRounds = input.maxFixRounds ?? DEFAULT_MAX_FIX_ROUNDS;
   const fixHostFailure =
     input.executor === 'remote'
@@ -163,6 +166,7 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
           if ('advisory' in looped) {
             advisory = looped.advisory;
             advisoryOmitted = looped.advisoryOmitted;
+            advisoryReviewId = looped.lastReviewId;
             advisoryHead = looped.headSha;
           }
           return true;
@@ -216,7 +220,8 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
     if (!statedFor.has(head)) {
       // The counts belong to the review loop's last review. If the head moved since (a person pushed, a host failure round pushed a fix), the
       // statement says the count is not known for this head rather than describe an older head's review as this one's.
-      const countsForHead = advisoryHead === head;
+      // The review link moves with the counts: it is the id of the review they came from, so it is said only for that head too.
+      const countsForHead = advisoryHead === head && advisoryReviewId !== undefined;
       const facts = {
         workflowId,
         issue,
@@ -228,6 +233,7 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
         host,
         advisory: countsForHead ? advisory : undefined,
         advisoryOmitted: countsForHead ? advisoryOmitted : undefined,
+        lastReviewId: countsForHead ? advisoryReviewId : undefined,
       };
       await step('decision_comment', () => github.commentIssue({ issue: pr, key: gateClearCommentKey(pr, head), body: gateClearComment(facts) }));
       statedFor.add(head);

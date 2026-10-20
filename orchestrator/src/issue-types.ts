@@ -298,6 +298,8 @@ export type IssueRunOutcome =
       readonly advisory: number;
       /** Advisory findings that did not fit the review body's bound. */
       readonly advisoryOmitted: number;
+      /** The id of the review those counts come from, on `headSha` (#718). The gate-clear statement links it. An id only. */
+      readonly lastReviewId: number;
       /** Remote reviewer rounds whose raw findings comment could not be hidden (#674). Present only for `executor: 'remote'`. The review was posted. */
       readonly rawCommentsNotHidden?: number;
     }
@@ -312,6 +314,8 @@ export type IssueRunOutcome =
       readonly openThreads: number;
       readonly advisory: number;
       readonly advisoryOmitted: number;
+      /** The id of the review those counts come from, on `headSha` (#718). */
+      readonly lastReviewId: number;
       /** Remote reviewer rounds whose raw findings comment could not be hidden (#674). Present only for `executor: 'remote'`. The review was posted. */
       readonly rawCommentsNotHidden?: number;
     }
@@ -461,6 +465,11 @@ export interface GateClearFacts {
   readonly advisory: number | undefined;
   /** Advisory findings that did not fit the review body. `undefined` together with `advisory`. */
   readonly advisoryOmitted: number | undefined;
+  /**
+   * The id of the review the counts come from (#718), linked in the statement. `undefined` together with `advisory`: a review
+   * of an earlier head is never linked from a statement for a later one.
+   */
+  readonly lastReviewId: number | undefined;
 }
 
 /** The key of the gate-clear statement: the PR and the head, so a push gets its own and a retry posts once. */
@@ -470,6 +479,11 @@ export function gateClearCommentKey(pr: number, headSha: string): string {
 
 function countOf(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/** A link to a review on the PR the statement is posted on: the fragment GitHub gives each review, which resolves on that PR's page. */
+function reviewLink(reviewId: number): string {
+  return `[last review](#pullrequestreview-${reviewId})`;
 }
 
 function hostLine(host: GateHostLine): string {
@@ -491,6 +505,8 @@ function hostLine(host: GateHostLine): string {
  */
 export function gateClearComment(facts: GateClearFacts): string {
   const advisory = facts.advisory === undefined || facts.advisoryOmitted === undefined ? undefined : facts.advisory + facts.advisoryOmitted;
+  // The link is for the review the counts came from. With no id the words say so, and no review is linked.
+  const last = facts.lastReviewId === undefined ? 'last review (its link is not known)' : reviewLink(facts.lastReviewId);
   return [
     `**Gate clear** for head \`${facts.headSha}\` of #${facts.pr}, recorded by the orchestrator (workflow \`${facts.workflowId}\`). This is a gate result and not an approval: the orchestrator never approves, merges, labels or resolves anything.`,
     [
@@ -499,8 +515,8 @@ export function gateClearComment(facts: GateClearFacts): string {
       advisory === undefined
         ? 'Advisory findings: not known for this head. The last review that counted them was on an earlier head, so read the reviews on this head.'
         : advisory === 0
-          ? 'Advisory findings in the last review: none.'
-          : `Advisory findings in the last review: ${advisory} (${facts.advisoryOmitted} not listed in its body). They are in the body of the last review on this head, not in a thread, and they do not hold the gate: read that review.`,
+          ? `Advisory findings in the ${last}: none.`
+          : `Advisory findings in the ${last}: ${advisory} (${facts.advisoryOmitted} not listed in its body). They are in the body of that review, not in a thread, and they do not hold the gate: read it.`,
     ].join('\n'),
     `The maintainer decides. From the orchestrator directory, \`npm run signal -- ${facts.issue} approved\` records an approval, and \`npm run signal -- ${facts.issue} changes_requested --message "..."\` asks for changes. The run reads the gate again before it uses a decision.`,
     'A push moves the head and makes this statement stale. The next time the gate is clear on a new head, a new statement is posted for that commit.',

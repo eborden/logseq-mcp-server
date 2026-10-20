@@ -418,7 +418,7 @@ test('a clean first review clears the gate with no fixer run, and the run ends t
 
   const result = await runIssue(FAKE_QUEUE, issue);
 
-  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD0, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, prBody: { source: 'unknown', unmet: 0 } });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD0, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, lastReviewId: 5000, prBody: { source: 'unknown', unmet: 0 } });
   assert.deepEqual(w.counters, { reviewerSessions: 1, reviews: 1, fixerSessions: 0, guards: 1, pushes: 1, replies: 0, comments: 0 });
   assert.deepEqual(w.events, ['guard:a', 'push:a', 'reviewer:0', 'review:0@a']);
 });
@@ -433,7 +433,7 @@ test('threads open, a fix, a closing review on the new head, then the gate clear
 
   const result = await runIssue(FAKE_QUEUE, issue);
 
-  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: fixHead(0), pr: issue + PR_OFFSET, fixRounds: 1, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, prBody: { source: 'unknown', unmet: 0 } });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: fixHead(0), pr: issue + PR_OFFSET, fixRounds: 1, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, lastReviewId: 5001, prBody: { source: 'unknown', unmet: 0 } });
   // In order: a review on the first head, a fix, the guard and the push of the new commit, the replies, and then a
   // second review on the NEW head. The first review is on an older commit and does not count for the gate any more.
   assert.deepEqual(w.events, ['guard:a', 'push:a', 'reviewer:0', 'review:0@a', 'fixer:0', 'guard:1', 'push:1', 'replies:0@1', 'reviewer:1', 'review:1@1']);
@@ -464,6 +464,7 @@ test('without a person resolving the thread, the run ends waiting for threads to
     openThreads: 1,
     advisory: 0,
     advisoryOmitted: 0,
+    lastReviewId: 5001,
     prBody: { source: 'unknown', unmet: 0 },
   });
   assert.equal(w.counters.fixerSessions, 1, 'no second fixer round for a thread the reviewer accepted');
@@ -692,6 +693,7 @@ test('advisory findings of the last review are in the result and in the waiting 
 
   assert.ok(result.outcome === 'gate_clear');
   assert.deepEqual([result.advisory, result.advisoryOmitted], [2, 1], 'clear, with 3 findings no thread holds');
+  assert.equal(result.lastReviewId, 5000, 'the id of the review the counts came from travels with them (#718)');
   assert.ok(other.outcome === 'waiting_for_threads');
   assert.equal(other.advisory, 3);
   assert.equal(waiting.world.prCommentKeys.size, 1, 'one gate statement on the PR for the waiting run');

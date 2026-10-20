@@ -265,6 +265,6 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   if (input.awaitDecision === false) {
     return { ...looped, prBody };
   }
-  const decided = await decisionStage({ input, pr: opened.number, inbox, step, stop, ...(opened.bodySource === undefined ? {} : { bodySource: opened.bodySource }), ...('fixRounds' in looped ? { fixRounds: looped.fixRounds } : {}), ...('advisory' in looped ? { advisory: looped.advisory, advisoryOmitted: looped.advisoryOmitted, advisoryHead: looped.headSha } : {}) });
+  const decided = await decisionStage({ input, pr: opened.number, inbox, step, stop, ...(opened.bodySource === undefined ? {} : { bodySource: opened.bodySource }), ...('fixRounds' in looped ? { fixRounds: looped.fixRounds } : {}), ...('advisory' in looped ? { advisory: looped.advisory, advisoryOmitted: looped.advisoryOmitted, advisoryReviewId: looped.lastReviewId, advisoryHead: looped.headSha } : {}) });
   return { ...decided, prBody };
 }
