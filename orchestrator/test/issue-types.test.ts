@@ -61,13 +61,28 @@ test('the keys carry the head, so a push gets its own statement and a retry post
 });
 
 test('the held-gate statement names what holds the gate and is not an approval', () => {
-  const none = gateHeldComment('issue-123', 456, HEAD, 1, []);
+  const none = gateHeldComment('issue-123', 456, HEAD, 1, [], true);
   assert.match(none, /Gate not clear/);
   assert.match(none, /not an approval/);
   assert.match(none, /1 open review thread, 0 of them with a reply the reviewer accepted\./);
-  const some = gateHeldComment('issue-123', 456, HEAD, 3, ['PRRT_a', 'PRRT_b']);
+  const some = gateHeldComment('issue-123', 456, HEAD, 3, ['PRRT_a', 'PRRT_b'], true);
   assert.match(some, /3 open review threads, 2 of them with a reply the reviewer accepted \(thread ids: `PRRT_a`, `PRRT_b`\)/);
   assert.ok(some.includes(HEAD));
+});
+
+test('the held-gate statement promises a gate-clear statement only when the decision stage runs', () => {
+  const waits = gateHeldComment('issue-123', 456, HEAD, 1, [], true);
+  assert.match(waits, /The run keeps reading the gate, and when it is clear on a head it posts a gate-clear statement/);
+  const ends = gateHeldComment('issue-123', 456, HEAD, 1, [], false);
+  assert.match(ends, /This run ends here and does not read the gate again, so it will post no gate-clear statement: a new run is needed/);
+  assert.doesNotMatch(ends, /keeps reading the gate/);
+});
+
+test('the gate-clear statement says the advisory count is not known when it is not for this head, and claims no count', () => {
+  const text = gateClearComment({ ...FACTS, advisory: undefined, advisoryOmitted: undefined });
+  assert.match(text, /Advisory findings: not known for this head/);
+  assert.doesNotMatch(text, /Advisory findings in the last review/);
+  assert.doesNotMatch(text, /on this head, not in a thread/);
 });
 
 test('the stop line is one line with the step and the reason, points at the issue, and is not an approval', () => {

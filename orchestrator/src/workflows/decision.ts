@@ -111,6 +111,8 @@ export interface DecisionContext {
   /** Advisory findings of the review loop's last review (#715), for the gate-clear statement. Counts only. Default 0. */
   readonly advisory?: number;
   readonly advisoryOmitted?: number;
+  /** The head the review those counts come from was on (the review loop's `headSha`). The counts are said only for that head. */
+  readonly advisoryHead?: string;
   /** Runs one activity call; a failure of it ends the run at `name` (issue.ts). */
   readonly step: <T>(name: IssueStep, call: () => Promise<T>) => Promise<T>;
   /** Ends the run with one comment on the issue and a Failed workflow (issue.ts). */
@@ -147,6 +149,7 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
   // The advisory counts of the last review, for the gate-clear statement (#715). A host failure round posts a newer review.
   let advisory = context.advisory ?? 0;
   let advisoryOmitted = context.advisoryOmitted ?? 0;
+  let advisoryHead = context.advisoryHead;
   const maxFixRounds = input.maxFixRounds ?? DEFAULT_MAX_FIX_ROUNDS;
   const fixHostFailure =
     input.executor === 'remote'
@@ -160,6 +163,7 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
           if ('advisory' in looped) {
             advisory = looped.advisory;
             advisoryOmitted = looped.advisoryOmitted;
+            advisoryHead = looped.headSha;
           }
           return true;
         }
@@ -210,7 +214,21 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
     // The exit statement (#715): ONE comment on the PR the first time the gate is clear for this head, from counts and ids
     // only. The key carries the head, so a retry posts once and a later push gets its own. A failure to post stops the run.
     if (!statedFor.has(head)) {
-      const facts = { workflowId, issue, pr, headSha: head, fixRounds: fixRoundsUsed, reviewsOnHead: gate.reviewsOnHead, unresolvedThreads: gate.unresolvedThreads, host, advisory, advisoryOmitted };
+      // The counts belong to the review loop's last review. If the head moved since (a person pushed, a host failure round pushed a fix), the
+      // statement says the count is not known for this head rather than describe an older head's review as this one's.
+      const countsForHead = advisoryHead === head;
+      const facts = {
+        workflowId,
+        issue,
+        pr,
+        headSha: head,
+        fixRounds: fixRoundsUsed,
+        reviewsOnHead: gate.reviewsOnHead,
+        unresolvedThreads: gate.unresolvedThreads,
+        host,
+        advisory: countsForHead ? advisory : undefined,
+        advisoryOmitted: countsForHead ? advisoryOmitted : undefined,
+      };
       await step('decision_comment', () => github.commentIssue({ issue: pr, key: gateClearCommentKey(pr, head), body: gateClearComment(facts) }));
       statedFor.add(head);
     }
