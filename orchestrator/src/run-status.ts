@@ -82,9 +82,13 @@ export function stopDetails(details: unknown): StopDetails {
   };
 }
 
-/** A run that stopped to wait for a person's answer and got none (README, "The park"): the park step, or a third needs-input at the session. */
+/**
+ * A run that stopped to wait for a person's answer and got none (README, "The park"): no answer within the limit
+ * (`NeedsInputTimeout` at the park step), or a third needs-input at the session. Any other stop at the park step is a fault of
+ * the park comment or the wait (GitHub failed after its retries): no question was asked, so it is `failed`.
+ */
 export function isParkedStop(details: StopDetails): boolean {
-  return details.step === 'park' || (details.step === 'session' && details.reason === NEEDS_INPUT);
+  return (details.step === 'park' && details.reason === NEEDS_INPUT_TIMEOUT) || (details.step === 'session' && details.reason === NEEDS_INPUT);
 }
 
 /** The status of a run Temporal calls closed, by the name Temporal gives it, or undefined for one that is not a closed end (RUNNING, CONTINUED_AS_NEW, UNSPECIFIED). */

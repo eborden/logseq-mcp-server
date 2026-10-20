@@ -20,7 +20,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { ApplicationFailure } from '@temporalio/activity';
-import { ScheduleOverlapPolicy, WorkflowFailedError } from '@temporalio/client';
+import { ScheduleOverlapPolicy, WorkflowFailedError, WorkflowNotFoundError } from '@temporalio/client';
 import type { Client } from '@temporalio/client';
 import type { TestWorkflowEnvironment } from '@temporalio/testing';
 import { bundleWorkflowCode, Worker } from '@temporalio/worker';
@@ -52,7 +52,9 @@ import {
   MAX_RUN_STATUS_LOOKUPS,
   closedRunReason,
   parseRunStatusesInput,
-  restartCommand,
+  PR_BY_HAND_STOP_REASONS,
+  PR_BY_HAND_TEXT,
+  restartAdvice,
 } from '../src/queue-types.ts';
 import type {
   QueueRunTemplate,
@@ -131,15 +133,30 @@ test('a closed run is a fixed word; a completed one is completed_but_open becaus
   assert.deepEqual(['COMPLETED', 'FAILED', 'TERMINATED', 'TIMED_OUT', 'CANCELLED', 'RUNNING', 'CONTINUED_AS_NEW', 'UNSPECIFIED', 'x'].map(closedStatusOfName), ['completed', 'failed', 'terminated', 'timed_out', 'cancelled', undefined, undefined, undefined, undefined]);
 });
 
-test('the command for a closed run is fixed text and the issue number: delete the run first, because a closed run holds its ID', () => {
-  const run = 'temporal workflow delete --workflow-id issue-12, then npm run run-issue -- --issue 12';
-  assert.equal(restartCommand(12, 'failed'), run);
-  assert.equal(restartCommand(12, 'terminated'), run);
-  assert.equal(restartCommand(12, 'timed_out'), run);
-  assert.equal(restartCommand(12, 'cancelled'), run);
-  assert.equal(restartCommand(12, 'parked'), `${run} --attempt <k>`, 'a parked run starts again with the next attempt number');
-  assert.equal(restartCommand(12, 'completed_but_open'), undefined, 'a finished run is not restarted: a person looks at why the issue is still open');
-  assert.equal(restartCommand(12, 'id_already_ran'), undefined);
+/** The two commands a person runs for issue `n`, in order, as the report gives them. */
+const restartOf = (n: number, run = `npm run run-issue -- --issue ${n}`): string[] => [`temporal workflow delete --workflow-id issue-${n}`, run];
+const PARKED_RUN = (n: number): string => `npm run run-issue -- --issue ${n} --executor remote --attempt <k>`;
+
+test('the commands for a closed run are fixed text and the issue number, as two strings to paste in order: delete the run first, because a closed run holds its ID', () => {
+  for (const reason of ['failed', 'terminated', 'timed_out', 'cancelled'] as const) {
+    assert.deepEqual(restartAdvice(12, reason), { restart: restartOf(12) }, reason);
+  }
+  assert.deepEqual(restartAdvice(12, 'failed', 'SessionError'), { restart: restartOf(12) }, 'a stop that a restart recovers');
+  assert.deepEqual(restartAdvice(12, 'parked', 'NeedsInputTimeout'), { restart: restartOf(12, PARKED_RUN(12)) }, 'a parked run is a remote run: it starts again with --executor remote and the next attempt number');
+  for (const command of restartOf(12, PARKED_RUN(12))) {
+    assert.doesNotMatch(command, /,| then /, 'one command per string, nothing to split before pasting');
+  }
+  assert.deepEqual(restartAdvice(12, 'completed_but_open'), {}, 'a finished run is not restarted: a person looks at why the issue is still open');
+  assert.deepEqual(restartAdvice(12, 'id_already_ran'), {});
+});
+
+test('a stop with the PR already open gets the by-hand sentence and no command, one case per reason', () => {
+  assert.deepEqual([...PR_BY_HAND_STOP_REASONS], ['MaxRoundsReached', 'ReviewLoopTimeout', 'ReviewNotCounted', 'HeadMismatch', 'MalformedFindings', 'FindingsTooLarge', 'DiffUnreadable', 'FixerPushRejected']);
+  for (const reason of PR_BY_HAND_STOP_REASONS) {
+    assert.deepEqual(restartAdvice(12, 'failed', reason), { instead: PR_BY_HAND_TEXT }, reason);
+    assert.ok(KNOWN_STOP_REASONS.has(reason), `${reason} is a word the report may name`);
+  }
+  assert.match(PR_BY_HAND_TEXT, /^the PR is open and a restart would end skipped: finish the PR by hand/);
 });
 
 test('a stop reason is reported only when it is one of the orchestrator words; a step only as a plain lowercase word', () => {
@@ -153,7 +170,10 @@ test('a stop reason is reported only when it is one of the orchestrator words; a
     assert.deepEqual(stopDetails(bad), {});
   }
   assert.equal(isParkedStop({ step: 'park', reason: 'NeedsInputTimeout' }), true);
-  assert.equal(isParkedStop({ step: 'park' }), true);
+  // A fault at the park step (the park comment or the wait failed after its retries) asked no question: it is failed, not parked.
+  assert.equal(isParkedStop({ step: 'park' }), false);
+  assert.equal(isParkedStop({ step: 'park', reason: 'ActivityFailed' }), false);
+  assert.equal(isParkedStop({ step: 'park', reason: 'GitHubRateLimitExhausted' }), false);
   assert.equal(isParkedStop({ step: 'session', reason: 'NeedsInput' }), true);
   assert.equal(isParkedStop({ step: 'session', reason: 'SessionError' }), false);
   assert.equal(isParkedStop({ step: 'review_loop', reason: 'MaxRoundsReached' }), false);
@@ -224,6 +244,7 @@ const workers: { worker: Worker; running: Promise<void> }[] = [];
 const FAKE_QUEUE = 'queue-watcher-fakes';
 const REAL_QUEUE = 'queue-watcher-real';
 const NO_WORKER_QUEUE = 'queue-watcher-no-worker';
+const BROKEN_QUEUE = 'queue-watcher-broken-client';
 
 /** What GitHub and the Temporal side answer in one test. Replaced before each test that uses it. */
 class World {
@@ -320,6 +341,52 @@ function fakeQueueActivities() {
   };
 }
 
+/**
+ * What the broken client throws from the status read of a run (#724): a Temporal server that is unreachable or a run deleted
+ * under the read. Each is a function of the issue's workflow ID and of how many times that handle method was called for it, so a
+ * test can break one run and leave the others alone. The start of an issue already calls `describe()` once (it asks how the
+ * closed run ended), so a fault meant for the status read starts at the second call.
+ */
+const faults: { describe?: (workflowId: string, nth: number) => Error | undefined; result?: (workflowId: string, nth: number) => Error | undefined } = {};
+const faultCalls = new Map<string, number>();
+function faultFor(kind: 'describe' | 'result', workflowId: string): Error | undefined {
+  const key = `${kind}:${workflowId}`;
+  const nth = (faultCalls.get(key) ?? 0) + 1;
+  faultCalls.set(key, nth);
+  return faults[kind]?.(workflowId, nth);
+}
+
+/** The real client, except that `describe()` and `result()` of a handle throw what `faults` says. The list and the start are the real ones. */
+function brokenClient(): Client {
+  const workflow = {
+    list: (...args: Parameters<Client['workflow']['list']>) => client.workflow.list(...args),
+    start: (...args: Parameters<Client['workflow']['start']>) => client.workflow.start(...args),
+    getHandle: (workflowId: string, runId?: string) => {
+      const handle = client.workflow.getHandle(workflowId, runId);
+      return {
+        describe: async () => {
+          const fault = faultFor('describe', workflowId);
+          if (fault !== undefined) {
+            throw fault;
+          }
+          return await handle.describe();
+        },
+        result: async () => {
+          const fault = faultFor('result', workflowId);
+          if (fault !== undefined) {
+            throw fault;
+          }
+          return await handle.result();
+        },
+      };
+    },
+  };
+  return { workflow } as unknown as Client;
+}
+
+/** A failure the Temporal client does not make a status of: not a workflow failure and not a missing run. Non-retryable, so the test does not wait out retries. */
+const serverDown = (): Error => ApplicationFailure.nonRetryable(CANARY, 'ServerUnavailable');
+
 before(async () => {
   const port = await freePort();
   env = await startDevServer({ port, cliPath: loadServerConfig(process.env).cliPath });
@@ -345,6 +412,15 @@ before(async () => {
     maxCachedWorkflows: 0,
   });
   workers.push({ worker: real, running: real.run() });
+  const broken = await Worker.create({
+    connection: env.nativeConnection,
+    namespace: 'default',
+    taskQueue: BROKEN_QUEUE,
+    workflowBundle: stubBundle,
+    activities: { ...fakeGithubReads(), ...createQueueActivities({ client: brokenClient(), taskQueue: BROKEN_QUEUE }) },
+    maxCachedWorkflows: 0,
+  });
+  workers.push({ worker: broken, running: broken.run() });
 });
 
 after(async () => {
@@ -493,14 +569,12 @@ async function closedRunTick(issue: number, entry: RunStatusEntry | undefined): 
   return await fakeTick();
 }
 
-test('a Ready issue with a failed run is skipped as failed, with its stop reason and the command; the watcher starts nothing for it', async () => {
-  const report = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'MaxRoundsReached' });
+test('a Ready issue with a failed run is skipped as failed, with its stop reason and the commands; the watcher starts nothing for it', async () => {
+  const report = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'SessionError' });
 
   assert.equal(report.outcome, 'ok');
   assert.deepEqual(report.started, [90, 91], 'a closed run holds no slot');
-  assert.deepEqual(report.skipped, [
-    { number: 11, reason: 'failed', stopReason: 'MaxRoundsReached', restart: 'temporal workflow delete --workflow-id issue-11, then npm run run-issue -- --issue 11' },
-  ]);
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'failed', stopReason: 'SessionError', restart: restartOf(11) }]);
   assert.deepEqual(report.closedRuns, { counts: { failed: 1 }, notLookedUp: 0 });
   assert.deepEqual(world.statusReads, [[11]]);
   assert.deepEqual(world.startCalls.filter((call) => call.issue === 11).length, 1, 'the one start that found the closed run, and no restart');
@@ -510,16 +584,22 @@ test('a Ready issue with a failed run is skipped as failed, with its stop reason
 test('a failed run that recorded no stop reason of the orchestrator is failed without one', async () => {
   const report = await closedRunTick(11, { issue: 11, status: 'failed' });
 
-  assert.deepEqual(report.skipped, [{ number: 11, reason: 'failed', restart: 'temporal workflow delete --workflow-id issue-11, then npm run run-issue -- --issue 11' }]);
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'failed', restart: restartOf(11) }]);
 });
 
-test('a Ready issue with a parked run is reported as parked, with the command that starts it at a next attempt', async () => {
+test('a failed run that stopped with the PR open is reported with its reason and the by-hand sentence, and no command', async () => {
+  const report = await closedRunTick(11, { issue: 11, status: 'failed', stopReason: 'MaxRoundsReached' });
+
+  assert.deepEqual(report.started, [90, 91]);
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'failed', stopReason: 'MaxRoundsReached', instead: PR_BY_HAND_TEXT }]);
+  assert.equal('restart' in (report.skipped[0] ?? {}), false);
+});
+
+test('a Ready issue with a parked run is reported as parked, with the commands that start it again as a remote run at a next attempt', async () => {
   const report = await closedRunTick(11, { issue: 11, status: 'parked', stopReason: 'NeedsInputTimeout' });
 
   assert.deepEqual(report.started, [90, 91]);
-  assert.deepEqual(report.skipped, [
-    { number: 11, reason: 'parked', stopReason: 'NeedsInputTimeout', restart: 'temporal workflow delete --workflow-id issue-11, then npm run run-issue -- --issue 11 --attempt <k>' },
-  ]);
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'parked', stopReason: 'NeedsInputTimeout', restart: restartOf(11, PARKED_RUN(11)) }]);
   assert.deepEqual(report.closedRuns, { counts: { parked: 1 }, notLookedUp: 0 });
 });
 
@@ -534,7 +614,7 @@ test('a Ready issue with a completed run is reported as completed_but_open: the 
 test('a Ready issue with a terminated run is reported as terminated, with the command', async () => {
   const report = await closedRunTick(11, { issue: 11, status: 'terminated' });
 
-  assert.deepEqual(report.skipped, [{ number: 11, reason: 'terminated', restart: 'temporal workflow delete --workflow-id issue-11, then npm run run-issue -- --issue 11' }]);
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'terminated', restart: restartOf(11) }]);
   assert.deepEqual(report.closedRuns, { counts: { terminated: 1 }, notLookedUp: 0 });
 });
 
@@ -542,7 +622,7 @@ test('a timed out run and a cancelled run are named for what they are, not as fa
   for (const status of ['timed_out', 'cancelled'] as const) {
     const report = await closedRunTick(11, { issue: 11, status });
 
-    assert.deepEqual(report.skipped, [{ number: 11, reason: status, restart: 'temporal workflow delete --workflow-id issue-11, then npm run run-issue -- --issue 11' }], status);
+    assert.deepEqual(report.skipped, [{ number: 11, reason: status, restart: restartOf(11) }], status);
     assert.deepEqual(report.closedRuns, { counts: { [status]: 1 }, notLookedUp: 0 }, status);
   }
 });
@@ -611,6 +691,22 @@ test('a status read that fails after its retries fails the tick at run_status: t
   assert.deepEqual(report.skipped, [{ number: 11, reason: 'id_already_ran' }]);
   assert.deepEqual(report.closedRuns, { counts: { id_already_ran: 1 }, notLookedUp: 1 });
   assert.equal(JSON.stringify(report).includes(CANARY), false);
+});
+
+test('a start that fails ends the tick before any status read: the first failure is the one reported, and the closed run is counted as not looked up', async () => {
+  world = new World();
+  world.ready = [11, 12, 13];
+  world.everStarted.add(11);
+  world.runStatuses.set(11, { issue: 11, status: 'failed', stopReason: 'SessionError' });
+  world.failures.set('startQueuedRun:12', ApplicationFailure.nonRetryable(CANARY, 'ServerUnavailable'));
+
+  const report = await fakeTick();
+
+  assert.equal(report.outcome, 'failed');
+  assert.deepEqual(report.failure, { step: 'start', reason: 'ServerUnavailable' });
+  assert.deepEqual(world.statusReads, [], 'no status read after a failed start');
+  assert.deepEqual(report.skipped, [{ number: 11, reason: 'id_already_ran' }]);
+  assert.deepEqual(report.closedRuns, { counts: { id_already_ran: 1 }, notLookedUp: 1 });
 });
 
 test('the status read is covered by the tick deadline: a tick still in it at the deadline reports run_status and what it started', async () => {
@@ -947,6 +1043,7 @@ test('the status read tells each way a real run closed, in fixed words, and neve
   await startAndFinish(activities, 806, 'stop:review_loop:a sentence with spaces');
   await startAndFinish(activities, 807, 'stop:review_loop:SomeNewWord');
   await startAndFinish(activities, 808, 'stop:guard:ProtectedPath');
+  await startAndFinish(activities, 814, 'stop:park:ActivityFailed');
 
   assert.deepEqual(await activities.startQueuedRun({ issue: 809, run: RUN }), { status: 'started' });
   await client.workflow.getHandle(issueWorkflowId(809)).terminate(STUB_FAILURE_MESSAGE);
@@ -960,7 +1057,7 @@ test('the status read tells each way a real run closed, in fixed words, and neve
   // Still open: not a closed run, so no answer. Never started: gone, so no answer.
   assert.deepEqual(await activities.startQueuedRun({ issue: 812, run: RUN }), { status: 'started' });
 
-  const found = await activities.readRunStatuses({ issues: [812, 813, 811, 810, 809, 808, 807, 806, 805, 804, 803, 802, 801] });
+  const found = await activities.readRunStatuses({ issues: [814, 812, 813, 811, 810, 809, 808, 807, 806, 805, 804, 803, 802, 801] });
 
   assert.deepEqual(found, {
     runs: [
@@ -975,6 +1072,7 @@ test('the status read tells each way a real run closed, in fixed words, and neve
       { issue: 809, status: 'terminated' },
       { issue: 810, status: 'cancelled' },
       { issue: 811, status: 'timed_out' },
+      { issue: 814, status: 'failed', stopReason: 'ActivityFailed' }, // a fault at the park step asked no question: not parked
     ],
   });
   assert.equal(JSON.stringify(found).includes(STUB_FAILURE_MESSAGE), false, 'no message of a failure reaches the answer');
@@ -999,8 +1097,8 @@ test('real runs: a tick names a failed, a parked and a completed run by how they
   assert.deepEqual(report.started, [904]);
   assert.deepEqual(report.skipped, [
     { number: 901, reason: 'completed_but_open' },
-    { number: 902, reason: 'failed', stopReason: 'MaxRoundsReached', restart: 'temporal workflow delete --workflow-id issue-902, then npm run run-issue -- --issue 902' },
-    { number: 903, reason: 'parked', stopReason: 'NeedsInputTimeout', restart: 'temporal workflow delete --workflow-id issue-903, then npm run run-issue -- --issue 903 --attempt <k>' },
+    { number: 902, reason: 'failed', stopReason: 'MaxRoundsReached', instead: PR_BY_HAND_TEXT },
+    { number: 903, reason: 'parked', stopReason: 'NeedsInputTimeout', restart: restartOf(903, PARKED_RUN(903)) },
   ]);
   assert.deepEqual(report.closedRuns, { counts: { failed: 1, parked: 1, completed_but_open: 1 }, notLookedUp: 0 });
   for (const [issue, status] of [[901, 'COMPLETED'], [902, 'FAILED'], [903, 'FAILED']] as const) {
@@ -1013,6 +1111,66 @@ test('real runs: a tick names a failed, a parked and a completed run by how they
   assert.equal(JSON.stringify(report).includes(STUB_FAILURE_MESSAGE), false);
 
   await release(issueWorkflowId(904));
+});
+
+/** Runs `body` with the broken client's faults set, and clears them after. */
+async function withFaults(set: typeof faults, body: () => Promise<void>): Promise<void> {
+  faultCalls.clear();
+  Object.assign(faults, set);
+  try {
+    await body();
+  } finally {
+    delete faults.describe;
+    delete faults.result;
+    faultCalls.clear();
+  }
+}
+
+test('a status read that cannot read a run from the server fails the tick at run_status: an infrastructure error is never read as a status (BR-0003)', async () => {
+  const activities = createQueueActivities({ client, taskQueue: REAL_QUEUE });
+  await startAndFinish(activities, 1001, 'stop:review_loop:SessionError');
+  await startAndFinish(activities, 1003, 'stop:session:SessionError');
+  const ids = { describe: issueWorkflowId(1001), result: issueWorkflowId(1003) };
+  const cases: { what: string; issues: number[]; set: typeof faults; started: number[]; notLookedUp: number; counts: object }[] = [
+    { what: 'describe() fails', issues: [1001, 1002], set: { describe: (id: string, nth: number) => (id === ids.describe && nth >= 2 ? serverDown() : undefined) }, started: [1002], notLookedUp: 1, counts: { id_already_ran: 1 } },
+    { what: 'result() of a Failed run fails with a non-workflow error', issues: [1003], set: { result: (id: string) => (id === ids.result ? serverDown() : undefined) }, started: [], notLookedUp: 1, counts: { id_already_ran: 1 } },
+  ];
+  for (const { what, issues, set, started, notLookedUp, counts } of cases) {
+    world = new World();
+    world.ready = issues;
+    await withFaults(set, async () => {
+      const report = await tick(BROKEN_QUEUE, { ...RUN, cap: 3 });
+
+      assert.equal(report.outcome, 'failed', what);
+      assert.deepEqual(report.failure, { step: 'run_status', reason: 'ServerUnavailable' }, what);
+      assert.deepEqual(report.started, started, `${what}: the starts stay reported`);
+      assert.deepEqual(report.skipped.filter((skip) => skip.reason === 'id_already_ran').map((skip) => skip.number), issues.filter((issue) => !started.includes(issue)), what);
+      assert.deepEqual(report.closedRuns, { counts, notLookedUp }, what);
+      assert.equal(JSON.stringify(report).includes(CANARY), false, 'the failure message is not in the report');
+    });
+  }
+  for (const issue of [1002]) {
+    await release(issueWorkflowId(issue));
+  }
+});
+
+test('a run deleted between the describe and the result is no entry, and the other runs are still read', async () => {
+  const activities = createQueueActivities({ client, taskQueue: REAL_QUEUE });
+  await startAndFinish(activities, 1004, 'stop:review_loop:SessionError');
+  await startAndFinish(activities, 1005, 'stop:review_loop:SessionError');
+  world = new World();
+  world.ready = [1004, 1005];
+
+  await withFaults({ result: (id) => (id === issueWorkflowId(1004) ? new WorkflowNotFoundError('simulated: deleted', id, undefined) : undefined) }, async () => {
+    const report = await tick(BROKEN_QUEUE, { ...RUN, cap: 3 });
+
+    assert.equal(report.outcome, 'ok', 'a deleted run is not a failure');
+    assert.deepEqual(report.skipped, [
+      { number: 1004, reason: 'id_already_ran' },
+      { number: 1005, reason: 'failed', stopReason: 'SessionError', restart: restartOf(1005) },
+    ]);
+    assert.deepEqual(report.closedRuns, { counts: { failed: 1, id_already_ran: 1 }, notLookedUp: 0 });
+  });
 });
 
 // ---- the Schedule and the script ----------------------------------------------------------------------------------

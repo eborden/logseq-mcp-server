@@ -105,11 +105,15 @@ export function createQueueActivities(deps: QueueActivityDeps) {
       return { issue, status };
     }
     // A Failed run's result is its failure. Only `IssueStopped` (the orchestrator's own stop) is read for details, and only
-    // fixed words come out of them. Any other failure is `failed` with no reason. An error that is not a workflow failure is
-    // an infrastructure error: it is thrown, never read as a status (BR-0003).
+    // fixed words come out of them. Any other failure is `failed` with no reason. A run deleted since the `describe` is gone, as
+    // there: no entry. Any other error that is not a workflow failure is an infrastructure error: it is thrown, never read as a
+    // status (BR-0003).
     try {
       await deps.client.workflow.getHandle(workflowId, description.runId).result();
     } catch (error) {
+      if (error instanceof WorkflowNotFoundError) {
+        return undefined;
+      }
       if (!(error instanceof WorkflowFailedError)) {
         throw error;
       }

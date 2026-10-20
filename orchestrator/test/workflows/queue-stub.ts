@@ -13,7 +13,7 @@ export { queueWatcher } from '../../src/workflows/queue-watcher.ts';
 /**
  * Ends the stand-in the way a test names: `complete` (returns its input), `stop:<step>:<reason>` (fails as `IssueStopped`,
  * the failure the real workflow ends a stopped run with: details are the step, the reason and no PR) or `crash` (fails with
- * a type that is not `IssueStopped`). Every failure carries a message with text that must never reach a report.
+ * a type that is not `IssueStopped`, with details shaped like a stop's). Every failure carries a message with text that must never reach a report.
  */
 export const stubFinishSignal = defineSignal<[string]>('stub-finish');
 
@@ -34,7 +34,8 @@ export async function issueWorkflow(input: IssueWorkflowInput): Promise<IssueWor
     throw ApplicationFailure.nonRetryable(STUB_FAILURE_MESSAGE, 'IssueStopped', step, reason.join(':'), undefined);
   }
   if (finish === 'crash') {
-    throw ApplicationFailure.nonRetryable(STUB_FAILURE_MESSAGE, 'StubCrash');
+    // The details are shaped like a stop's (step, reason) on purpose: a failure of another type must not be read as a stop.
+    throw ApplicationFailure.nonRetryable(STUB_FAILURE_MESSAGE, 'StubCrash', 'review_loop', 'MaxRoundsReached', undefined);
   }
   return input;
 }

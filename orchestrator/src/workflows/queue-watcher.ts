@@ -43,7 +43,7 @@ import {
   TICK_DEADLINE_REASON,
   closedRunReason,
   parseQueueWatcherInput,
-  restartCommand,
+  restartAdvice,
 } from '../queue-types.ts';
 import type { ClosedRunReason, ClosedRunsReport, ParsedQueueInput, RunStatusEntry, TickFailureStep, TickReport, TickSkip } from '../queue-types.ts';
 import { eligibleIssues } from '../queue-policy.ts';
@@ -202,15 +202,17 @@ async function tick(input: ParsedQueueInput, progress: Progress): Promise<TickRe
 /** What a stop reason must look like to be reported: a plain type word. The activity only sends the orchestrator's own words; this keeps any other shape out of the history. */
 const STOP_REASON_WORD = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 
-/** The skip of a Ready issue whose run is closed: the refined reason, the stop reason when there is one, and the command a person uses. */
+/** The skip of a Ready issue whose run is closed: the refined reason, the stop reason when there is one, and what a person does. */
 function closedRunSkip(entry: RunStatusEntry): TickSkip {
   const reason = closedRunReason(entry.status);
-  const restart = restartCommand(entry.issue, reason);
+  const stopReason = entry.stopReason !== undefined && STOP_REASON_WORD.test(entry.stopReason) ? entry.stopReason : undefined;
+  const advice = restartAdvice(entry.issue, reason, stopReason);
   return {
     number: entry.issue,
     reason,
-    ...(entry.stopReason !== undefined && STOP_REASON_WORD.test(entry.stopReason) ? { stopReason: entry.stopReason } : {}),
-    ...(restart === undefined ? {} : { restart }),
+    ...(stopReason === undefined ? {} : { stopReason }),
+    ...(advice.restart === undefined ? {} : { restart: advice.restart }),
+    ...(advice.instead === undefined ? {} : { instead: advice.instead }),
   };
 }
 
