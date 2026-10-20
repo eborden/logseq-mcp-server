@@ -24,6 +24,7 @@ const FACTS: GateClearFacts = {
   host: { kind: 'checked', state: 'success', counts: { passed: 82, failed: 0 } },
   advisory: 2,
   advisoryOmitted: 1,
+  lastReviewId: 5001,
 };
 
 test('the gate-clear statement carries the head, the counts and the signal command, and says it is not an approval', () => {
@@ -31,7 +32,7 @@ test('the gate-clear statement carries the head, the counts and the signal comma
   assert.ok(text.includes(`for head \`${HEAD}\` of #456`));
   assert.match(text, /1 review on the head, 0 unresolved review threads, 2 fix rounds used/);
   assert.match(text, /host\/integration: success \(82 passed, 0 failed\)/);
-  assert.match(text, /Advisory findings in the last review: 3 \(1 not listed in its body\)/);
+  assert.match(text, /Advisory findings in the \[last review\]\(#pullrequestreview-5001\): 3 \(1 not listed in its body\)/);
   assert.match(text, /This is a gate result and not an approval/);
   assert.ok(text.includes('`npm run signal -- 123 approved`'));
   assert.ok(text.includes('`npm run signal -- 123 changes_requested --message "..."`'));
@@ -48,7 +49,7 @@ test('the host line says what was read, or why nothing was', () => {
 test('counts read right in the singular, and no advisory findings are said so', () => {
   const text = gateClearComment({ ...FACTS, fixRounds: 1, advisory: 0, advisoryOmitted: 0 });
   assert.match(text, /1 review on the head, 0 unresolved review threads, 1 fix round used/);
-  assert.match(text, /Advisory findings in the last review: none/);
+  assert.match(text, /Advisory findings in the \[last review\]\(#pullrequestreview-5001\): none/);
 });
 
 test('the keys carry the head, so a push gets its own statement and a retry posts once', () => {
@@ -79,10 +80,25 @@ test('the held-gate statement promises a gate-clear statement only when the deci
 });
 
 test('the gate-clear statement says the advisory count is not known when it is not for this head, and claims no count', () => {
-  const text = gateClearComment({ ...FACTS, advisory: undefined, advisoryOmitted: undefined });
+  const text = gateClearComment({ ...FACTS, advisory: undefined, advisoryOmitted: undefined, lastReviewId: undefined });
   assert.match(text, /Advisory findings: not known for this head/);
-  assert.doesNotMatch(text, /Advisory findings in the last review/);
-  assert.doesNotMatch(text, /on this head, not in a thread/);
+  assert.doesNotMatch(text, /Advisory findings in the/);
+  assert.doesNotMatch(text, /not in a thread/);
+  assert.doesNotMatch(text, /pullrequestreview/, 'no review is linked when none was counted for this head');
+});
+
+test('the gate-clear statement links the review the counts came from, for both a count and none (#718)', () => {
+  const some = gateClearComment({ ...FACTS, lastReviewId: 7002 });
+  assert.ok(some.includes('[last review](#pullrequestreview-7002)'));
+  assert.equal(some.includes('pullrequestreview-5001'), false);
+  assert.match(some, /They are in the body of that review, not in a thread, and they do not hold the gate: read it\./);
+  assert.ok(gateClearComment({ ...FACTS, advisory: 0, advisoryOmitted: 0, lastReviewId: 7002 }).includes('[last review](#pullrequestreview-7002): none.'));
+});
+
+test('a count without a review id says the link is not known and links nothing (#718)', () => {
+  const text = gateClearComment({ ...FACTS, lastReviewId: undefined });
+  assert.match(text, /Advisory findings in the last review \(its link is not known\): 3/);
+  assert.doesNotMatch(text, /pullrequestreview/);
 });
 
 test('the stop line is one line with the step and the reason, points at the issue, and is not an approval', () => {

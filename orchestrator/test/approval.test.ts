@@ -676,7 +676,7 @@ test('a run that reaches gate clear leaves one statement on the PR for that head
   assert.match(statement.body, /for head `a{40}`/);
   assert.match(statement.body, /1 review on the head, 0 unresolved review threads, 0 fix rounds used/);
   assert.match(statement.body, /host\/integration: not asked for in this run/);
-  assert.match(statement.body, /Advisory findings in the last review: none/);
+  assert.match(statement.body, /Advisory findings in the \[last review\]\(#pullrequestreview-1\): none/, 'it links the review the count came from');
   assert.match(statement.body, /not an approval/);
   assert.ok(statement.body.includes(`npm run signal -- ${issue} approved`));
   assert.ok(statement.body.includes(`npm run signal -- ${issue} changes_requested --message`));
@@ -728,9 +728,10 @@ test('a push after the statement leaves it stale: the next clear gate on the new
   assert.match(world.comments.get(gateClearKey(issue, NEXT))?.body ?? '', /for head `b{40}`/);
   assert.equal([...world.comments.keys()].filter((key) => key.startsWith('gate-clear-')).length, 2);
   // The advisory counts came from the review loop's last review, which was on the first head: the statement for the new head does not claim them.
-  assert.match(world.comments.get(gateClearKey(issue))?.body ?? '', /Advisory findings in the last review: none/);
+  assert.match(world.comments.get(gateClearKey(issue))?.body ?? '', /Advisory findings in the \[last review\]\(#pullrequestreview-1\): none/);
   assert.match(world.comments.get(gateClearKey(issue, NEXT))?.body ?? '', /Advisory findings: not known for this head/);
-  assert.doesNotMatch(world.comments.get(gateClearKey(issue, NEXT))?.body ?? '', /Advisory findings in the last review/);
+  assert.doesNotMatch(world.comments.get(gateClearKey(issue, NEXT))?.body ?? '', /Advisory findings in the/);
+  assert.doesNotMatch(world.comments.get(gateClearKey(issue, NEXT))?.body ?? '', /pullrequestreview/, 'the statement for the new head links no older head\'s review (#718)');
 });
 
 test('a gate-clear statement that cannot be posted stops the run at decision_comment: a counted step failure, not a silent skip', { timeout: 120_000 }, async () => {

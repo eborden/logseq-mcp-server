@@ -363,7 +363,7 @@ test('happy path: check, claim, session, PR, then the PR and the issue In review
 
   const result = await runIssue(FAKE_QUEUE, issue);
 
-  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD_SHA, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, prBody: { source: 'fallback', unmet: 2, reason: 'no_comment' } });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: issue, branch: `claude/${issue}`, headSha: HEAD_SHA, pr: issue + PR_OFFSET, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, lastReviewId: 1, prBody: { source: 'fallback', unmet: 2, reason: 'no_comment' } });
   assert.equal(world.reviews, 1, 'one review, and no fixer: a clean first review clears the gate');
   assert.deepEqual(world.order, ['claim', 'session', 'guard', 'push', 'openPr', 'addToBoard', 'setStatus:pr', 'setStatus:issue']);
   assert.deepEqual(world.counters, { claims: 1, sessions: 1, guards: 1, pushes: 1, prs: 1, adds: 1, prWrites: 1, issueWrites: 1, comments: 0 });
@@ -775,7 +775,8 @@ test('the real activities against the fake gh and claude: the PR is In review, a
 
   const result: unknown = await client.workflow.getHandle(issueWorkflowId(stack.input.issueNumber)).result();
 
-  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: 201, branch: 'claude/201', headSha: (result as { headSha: string }).headSha, pr: 1001, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, prBody: { source: 'fallback', unmet: 0, reason: 'template_unavailable' } });
+  assert.deepEqual(result, { outcome: 'gate_clear', issueNumber: 201, branch: 'claude/201', headSha: (result as { headSha: string }).headSha, pr: 1001, fixRounds: 0, reviewsOnHead: 1, advisory: 0, advisoryOmitted: 0, lastReviewId: (result as { lastReviewId: number }).lastReviewId, prBody: { source: 'fallback', unmet: 0, reason: 'template_unavailable' } });
+  assert.equal(Number.isInteger((result as { lastReviewId: unknown }).lastReviewId), true, 'the id of the posted review travels in the result');
   const state = await stack.fake.state();
   assert.equal(state.board.find((item) => item.number === stack.input.issueNumber)?.status, 'In review');
   assert.equal(state.board.find((item) => item.number === 1001)?.status, 'In review');
