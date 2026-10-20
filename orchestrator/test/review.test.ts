@@ -971,6 +971,45 @@ test('the reviewer: when the diff cannot be read, findings that cannot be placed
   assert.deepEqual(await clean.run(clean.activities.postSessionReview, { base: 'no-such-branch' }), { reviewId: 5001, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 });
 });
 
+test('the reviewer: a diff with a malformed quoted file header is an unreadable diff (DiffUnreadable with findings), never a skipped file (#746)', async () => {
+  // A `git` first on PATH that answers `git diff` with a header git never writes (`\q` is not an escape git uses) and runs the real git otherwise.
+  const realGit = (await execFileAsync('sh', ['-c', 'command -v git'])).stdout.trim();
+  const binDir = join(scenarioDir, 'fake-git-bin');
+  await mkdir(binDir);
+  await writeFile(
+    join(binDir, 'git'),
+    `#!/bin/sh\nfor arg in "$@"; do\n  if [ "$arg" = diff ]; then\n    printf '%s\\n' 'diff --git "a\\qb.txt" "a\\qb.txt"' '+++ "a\\qb.txt"' '@@ -0,0 +1 @@' '+x'\n    exit 0\n  fi\ndone\nexec ${JSON.stringify(realGit)} "$@"\n`,
+    { mode: 0o755 },
+  );
+  const savedPath = process.env['PATH'];
+  const withFakeGit = async <T>(run: () => Promise<T>): Promise<T> => {
+    process.env['PATH'] = `${binDir}:${savedPath ?? ''}`;
+    try {
+      return await run();
+    } finally {
+      if (savedPath === undefined) {
+        delete process.env['PATH'];
+      } else {
+        process.env['PATH'] = savedPath;
+      }
+    }
+  };
+
+  const s = await scenario();
+  await s.script(1, WRITE_FINDINGS);
+  await s.run(s.activities.runReviewerSession);
+  const failed = await withFakeGit(() => failureOf(s.run(s.activities.postSessionReview)));
+  assert.equal(failed.type, 'DiffUnreadable');
+  assert.equal(failed.nonRetryable, true);
+  assert.ok(!failed.message.includes('SECRET-FINDING-TEXT'));
+  assert.equal((await s.fake.callsMatching('/pulls/77/reviews')).filter((call) => call.argv.includes('POST')).length, 0, 'nothing was posted: the bad file is not skipped into advisory findings that hold no gate');
+
+  const clean = await scenario();
+  await clean.script(1, `printf '{"summary":"Nothing found.","findings":[],"acceptedThreadIds":[]}' > review-findings.json`);
+  await clean.run(clean.activities.runReviewerSession);
+  assert.deepEqual(await withFakeGit(() => clean.run(clean.activities.postSessionReview)), { reviewId: 5001, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 });
+});
+
 test('a committed directory named like the fixer replies file is a classified stop too', async () => {
   const s = await scenario(undefined, { 'fixer-replies.json/x': 'x' });
   await s.script(1, `printf '{"replies":[]}' > fixer-replies.json`);
