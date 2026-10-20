@@ -211,10 +211,90 @@ export type ChangedLines = ReadonlyMap<string, readonly (readonly [number, numbe
 
 const HUNK = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
+/** A diff header whose C-quoted name is not what git writes. Thrown, never guessed at: the diff cannot be trusted to place a finding. */
+export class MalformedDiffHeaderError extends Error {
+  constructor(reason: string) {
+    super(`malformed quoted file name in a diff header: ${reason}`);
+    this.name = 'MalformedDiffHeaderError';
+  }
+}
+
+/** The single-letter escapes of git's `quote_c_style`, besides `\\` and `\"`. */
+const C_ESCAPES: Readonly<Record<string, string>> = { a: '\x07', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v' };
+
+/**
+ * Reads the file name of a `+++ ` header (the text after `+++ `). An unquoted name is the text up to a tab (git adds a trailing
+ * tab to a name with a space). A name git writes C-quoted (it holds a double quote, a backslash or a control character, and with
+ * `core.quotePath` on, a non-ASCII byte) starts with `"`: it is decoded as git writes it, strictly. Exactly `\\`, `\"`, `\a`, `\b`,
+ * `\f`, `\n`, `\r`, `\t`, `\v` and three-digit octal escapes up to `\377` are accepted; the octal escapes are bytes, and the bytes of
+ * the whole name must be valid UTF-8. A missing closing quote, an unescaped quote inside, any other escape, a short or too large
+ * octal escape, a raw control character, a trailing backslash, text after the closing quote (a tab is the only thing allowed) or invalid UTF-8 throws
+ * `MalformedDiffHeaderError`. Pure, no I/O.
+ */
+export function parseDiffHeaderName(text: string): string {
+  if (!text.startsWith('"')) {
+    return text.split('\t')[0] ?? '';
+  }
+  const bytes: number[] = [];
+  const encoder = new TextEncoder();
+  let index = 1;
+  for (;;) {
+    if (index >= text.length) {
+      throw new MalformedDiffHeaderError('no closing quote');
+    }
+    const char = text[index] as string;
+    if (char === '"') {
+      index += 1;
+      break;
+    }
+    if (char !== '\\') {
+      if (/[\u0000-\u001f\u007f]/.test(char)) {
+        throw new MalformedDiffHeaderError('a raw control character, which git writes as an escape');
+      }
+      const codePoint = text.codePointAt(index) as number;
+      const whole = String.fromCodePoint(codePoint);
+      bytes.push(...encoder.encode(whole));
+      index += whole.length;
+      continue;
+    }
+    const next = text[index + 1];
+    if (next === undefined) {
+      throw new MalformedDiffHeaderError('a backslash ends the header');
+    }
+    if (next === '\\' || next === '"') {
+      bytes.push(next.charCodeAt(0));
+      index += 2;
+    } else if (Object.prototype.hasOwnProperty.call(C_ESCAPES, next)) {
+      bytes.push((C_ESCAPES[next] as string).charCodeAt(0));
+      index += 2;
+    } else if (/^[0-7]{3}$/.test(text.slice(index + 1, index + 4))) {
+      const value = parseInt(text.slice(index + 1, index + 4), 8);
+      if (value > 0xff) {
+        throw new MalformedDiffHeaderError('an octal escape above \\377');
+      }
+      bytes.push(value);
+      index += 4;
+    } else {
+      throw new MalformedDiffHeaderError('an escape git does not write');
+    }
+  }
+  const rest = text.slice(index);
+  if (rest !== '' && !rest.startsWith('\t')) {
+    throw new MalformedDiffHeaderError('text after the closing quote');
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes));
+  } catch {
+    throw new MalformedDiffHeaderError('the bytes are not valid UTF-8');
+  }
+}
+
 /**
  * Parses `git diff -U0 --no-prefix --no-renames` into the lines each file changes on its new side. GitHub accepts an
  * inline comment only on a line the diff shows; with no context lines that is exactly these. The hunk's counts are
- * followed, so a changed line that reads `++ x` (shown as `+++ x`) is not taken for a file header. Pure, no I/O.
+ * followed, so a changed line that reads `++ x` (shown as `+++ x`) is not taken for a file header. A file name git writes
+ * C-quoted in a header is decoded to the raw path (#746), so a finding on it matches; a quoted name that is not what git writes
+ * throws `MalformedDiffHeaderError`. Pure, no I/O.
  */
 export function changedLines(diff: string): ChangedLines {
   const files = new Map<string, [number, number][]>();
@@ -231,7 +311,7 @@ export function changedLines(diff: string): ChangedLines {
       continue;
     }
     if (line.startsWith('+++ ')) {
-      const path = line.slice(4).split('\t')[0] ?? '';
+      const path = parseDiffHeaderName(line.slice(4));
       current = path === '/dev/null' ? undefined : (files.get(path) ?? []);
       if (current !== undefined) {
         files.set(path, current);
@@ -252,7 +332,7 @@ export function changedLines(diff: string): ChangedLines {
 }
 
 /** Why a finding opened no thread: it is listed in the review body instead. */
-export type AdvisoryReason = 'file_not_in_diff' | 'name_not_matched' | 'thread_cap' | 'thread_failed' | 'no_changed_line';
+export type AdvisoryReason = 'file_not_in_diff' | 'thread_cap' | 'thread_failed' | 'no_changed_line';
 
 export interface AdvisoryFinding extends Finding {
   readonly reason: AdvisoryReason;
@@ -282,9 +362,7 @@ export function splitFindings(findings: readonly Finding[], changed: ChangedLine
   for (const finding of findings) {
     const ranges = changed?.get(finding.path);
     if (ranges === undefined) {
-      // git writes a name with a double quote or a backslash C-quoted in a diff header, so `changed` never holds it under
-      // the raw name: say that, not that the file is unchanged. Known gap, tracked in #746 (a test pins it).
-      advisory.push({ ...finding, reason: /["\\]/.test(finding.path) ? 'name_not_matched' : 'file_not_in_diff' });
+      advisory.push({ ...finding, reason: 'file_not_in_diff' });
     } else if (ranges.some(([from, to]) => finding.line >= from && finding.line <= to)) {
       inline.push(finding);
     } else if (fileLevel.length < MAX_FILE_THREADS) {
@@ -326,7 +404,6 @@ export const MAX_ADVISORY_CHARS = 20_000;
 
 const REASON_TEXT: Readonly<Record<AdvisoryReason, string>> = {
   file_not_in_diff: 'the file is not changed by this commit',
-  name_not_matched: 'its name has a double quote or a backslash, which git writes quoted in a diff, so this review cannot tell whether the commit changes the file (#746)',
   thread_cap: `the review is at its cap of ${MAX_FILE_THREADS} file-level threads`,
   thread_failed: 'GitHub refused a thread for it',
   no_changed_line: 'GitHub refused a file-level thread for it, and its file has no changed line to place it on',
