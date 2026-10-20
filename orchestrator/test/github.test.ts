@@ -1106,6 +1106,29 @@ test('listTakenIssues does not read the branch of a PR from an author who is not
   assert.deepEqual(await github.listTakenIssues(), { taken: [31], untrustedPullRequests: 1 });
 });
 
+test('listTakenIssues holds an issue that an open PR closes on a differently named branch', async () => {
+  const { github } = await setup((state) => {
+    state.pulls = [
+      rawOpenPr(101, 'feature/atlas', { body: 'Adds the importer.\n\nCloses #40' }),
+      rawOpenPr(102, 'feature/other', { body: 'Fixes #41 and resolves #42' }),
+      rawOpenPr(103, 'claude/30', { body: 'Closes #31' }),
+      rawOpenPr(104, 'feature/plain', { body: 'See #50 for context' }),
+    ];
+  });
+  assert.deepEqual(await github.listTakenIssues(), { taken: [30, 31, 40, 41, 42], untrustedPullRequests: 0 });
+});
+
+test('listTakenIssues does not let a PR from an author who is not trusted hold an issue by its Closes line', async () => {
+  const { github } = await setup((state) => {
+    state.pulls = [
+      rawOpenPr(101, 'feature/atlas', { author_association: 'NONE', body: 'Closes #40' }),
+      rawOpenPr(102, 'claude/31', { author_association: 'CONTRIBUTOR', body: 'Closes #41' }),
+      rawOpenPr(103, 'feature/other', { body: 'Closes #42' }),
+    ];
+  });
+  assert.deepEqual(await github.listTakenIssues(), { taken: [42], untrustedPullRequests: 2 });
+});
+
 test('listTakenIssues with nothing under way answers an empty list', async () => {
   const { github } = await setup(() => {});
   assert.deepEqual(await github.listTakenIssues(), { taken: [], untrustedPullRequests: 0 });

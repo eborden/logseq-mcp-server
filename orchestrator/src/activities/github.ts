@@ -592,7 +592,8 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
 
   /**
    * The issues that already have work under way on GitHub (#722): an open PR whose head branch is `claude/<n>` (or
-   * `claude/<n>-<slug>`), or a remote branch of that name. Only numbers come out. A PR from an author who is not trusted
+   * `claude/<n>-<slug>`) or that closes the issue (`Closes #N`) on any branch, or a remote branch of that name, so it
+   * agrees with `openPrsFor` (the claim path). Only numbers come out. A PR from an author who is not trusted
    * is counted and neither its branch name nor its `Closes #N` is read, as `openPrsFor` does. Each list is bounded at
    * MAX_TAKEN_PAGES pages. A longer list fails the call (`output_too_large`), as `listAll` does: missing entries would make
    * an issue look eligible, so an incomplete read must not look like a complete one (BR-0003). A failed read fails the
@@ -608,6 +609,12 @@ function operations(config: GhConfig, gh: GhCli, sleep: (ms: number) => Promise<
       const match = CLAUDE_BRANCH_ISSUE.exec(name);
       if (match !== null) {
         taken.add(Number(match[1]));
+      }
+    }
+    // `prs.items` holds trusted PRs only (`parseOpenPr` drops the rest), so an untrusted PR's `Closes #N` holds nothing.
+    for (const pr of prs.items) {
+      for (const issue of pr.closes) {
+        taken.add(issue);
       }
     }
     return {
