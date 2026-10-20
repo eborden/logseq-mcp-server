@@ -27,6 +27,13 @@ test('every activity factory the worker imports is called, so its activities are
   }
 });
 
+test('the queue watcher activities are registered, with a Temporal client connection of the worker that is closed with it (#723)', () => {
+  assert.match(source, /createQueueActivities\(\{ client: new Client\(/);
+  assert.match(source, /\.\.\.queue\b/);
+  assert.match(source, /Connection\.connect\(/);
+  assert.match(source, /await clientConnection\.close\(\)/);
+});
+
 test('the remote implementer is registered with the remote session activity', () => {
   assert.match(source, /createRemoteImplementerActivities\(/);
   assert.match(source, /\.\.\.remoteImplementer\b/);
