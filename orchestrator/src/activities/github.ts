@@ -375,12 +375,14 @@ function parseReplyInput(raw: unknown): ReplyToThreadInput {
   };
 }
 
-const THREAD_PATH = /^[A-Za-z0-9._@+-][A-Za-z0-9._@+/ -]*$/;
+// A path that reaches a thread is already a file of the diff (the reviewer path checked it), and it only travels in a JSON
+// body, so any character is fine but a control one. Brackets, parentheses, `~`, `#`, `=` and non-ASCII letters are all real file names.
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 function parseAddThreadInput(raw: unknown): AddReviewThreadInput {
   const input = inputObject(raw, 'addReviewThread input');
-  const path = inputText(input, 'path', THREAD_PATH, 300);
-  if (path.split('/').some((part) => part === '..' || part === '')) {
+  const path = inputText(input, 'path', undefined, 300);
+  if (CONTROL_CHARACTER.test(path) || path.split('/').some((part) => part === '..' || part === '')) {
     return refuse('path must be a relative path of the repository');
   }
   const line = input.get('line');

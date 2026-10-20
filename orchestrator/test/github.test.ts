@@ -563,6 +563,16 @@ test('addReviewThread with a line opens a thread on that line of the new side, a
   assert.ok(typeof sent === 'object' && sent !== null && 'line' in sent && sent.line === 30 && 'side' in sent && sent.side === 'RIGHT' && 'subject_type' in sent && sent.subject_type === 'line');
 });
 
+test('addReviewThread takes any path of the repository: brackets, parentheses, ~, #, =, commas and non-ASCII letters are file names', async () => {
+  const { fake, github } = await setup((state) => {
+    state.pulls = [rawOpenPr(7, 'claude/7')];
+  });
+  for (const [index, path] of ['routes/[id].ts', 'a (copy)/b~1#2=3,4.txt', 'docs/caf\u00e9/\u65e5\u672c\u8a9e.md', 'src/a b/c.ts'].entries()) {
+    assert.deepEqual(await github.addReviewThread({ ...THREAD_INPUT, path, key: `finding-7-r0-abc-${index}` }), { posted: true, level: 'file' }, path);
+  }
+  assert.equal((await fake.callsMatching('/pulls/7/comments')).filter((call) => call.argv.includes('POST')).length, 4);
+});
+
 test('addReviewThread is not fooled by a stranger planting its key, and writes nothing and resolves nothing', async () => {
   const { fake, github } = await setup((state) => {
     state.pulls = [rawOpenPr(7, 'claude/7')];
@@ -580,6 +590,9 @@ test('addReviewThread refuses a path that leaves the repository, a bad line, a s
     { ...THREAD_INPUT, path: '/etc/passwd' },
     { ...THREAD_INPUT, path: 'a//b' },
     { ...THREAD_INPUT, path: 'a\nb' },
+    { ...THREAD_INPUT, path: 'a\u0000b' },
+    { ...THREAD_INPUT, path: 'a'.repeat(301) },
+    { ...THREAD_INPUT, path: 'a/../b' },
     { ...THREAD_INPUT, line: 0 },
     { ...THREAD_INPUT, line: 1.5 },
     { ...THREAD_INPUT, commitId: 'abc123' },
