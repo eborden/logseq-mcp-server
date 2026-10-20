@@ -281,7 +281,7 @@ function fakeActivities(worlds: Map<number, World>) {
         w.reviews += 1;
       }
       w.reviewedHead = input.headSha;
-      return { reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0 };
+      return { reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 };
     },
     getGateStatus: async (pr: number) => {
       const w = world(pr - PR_OFFSET);
@@ -712,6 +712,7 @@ async function realStack(name: string, issue: number, configure: (state: ReturnT
     listReviewThreads: github.listReviewThreads,
     replyToThread: github.replyToThread,
     postReview: github.postReview,
+    addReviewThread: github.addReviewThread,
     repo: fake.config.repo,
     claude: { ...loadClaudeConfig({}), claudeBin: FAKE_CLAUDE },
   });

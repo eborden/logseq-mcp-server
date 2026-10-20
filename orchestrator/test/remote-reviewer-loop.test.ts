@@ -50,7 +50,7 @@ function fakeActivities() {
     },
     postSessionReview: async () => {
       current?.calls.push('postSessionReview');
-      return { reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0 };
+      return { reviewId: 1, posted: true, comments: 0, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 };
     },
     runRemoteReviewerSession: async (input: { issue: number }) => {
       const w = pick(input.issue);
@@ -62,7 +62,7 @@ function fakeActivities() {
     },
     postRemoteSessionReview: async () => {
       current?.calls.push('postRemoteSessionReview');
-      return { reviewId: 2, posted: true, comments: 1, advisory: 0, omitted: 0 };
+      return { reviewId: 2, posted: true, comments: 1, advisory: 0, omitted: 0, fileLevel: 0, nearest: 0 };
     },
     minimizeFindingsComment: async (input: { nodeId: string }) => {
       current?.calls.push('minimizeFindingsComment');

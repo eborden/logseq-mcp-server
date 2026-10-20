@@ -228,6 +228,7 @@ function reviewActivities(world: World) {
       world.replies.push(input);
       return { posted: true };
     },
+    addReviewThread: async () => ({ posted: true, level: 'file' as const }),
     postReview: async (input) => {
       world.reviews.push(input.commitId);
       return { reviewId: 5000 + world.reviews.length, posted: true };

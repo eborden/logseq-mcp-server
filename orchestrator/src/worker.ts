@@ -57,6 +57,7 @@ async function main(): Promise<void> {
     listReviewThreads: github.listReviewThreads,
     replyToThread: github.replyToThread,
     postReview: github.postReview,
+    addReviewThread: github.addReviewThread,
     repo: ghConfig.repo,
     claude: claudeConfig,
     // The remote reviewer (#674) runs only when the remote session activity does.
