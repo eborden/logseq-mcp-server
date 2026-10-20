@@ -159,6 +159,11 @@ const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u20
  * behind control characters. Plain `<` in review text (a generic type) becomes `&lt;`: the cost of closing HTML.
  */
 export function sanitiseText(text: string): string {
+  return neutralise(text).trim();
+}
+
+/** `sanitiseText` without the final trim, so a file path keeps a leading or trailing space it really has. */
+function neutralise(text: string): string {
   return text
     .replace(/\r\n?/g, '\n')
     .replace(CONTROL, '')
@@ -178,8 +183,22 @@ export function sanitiseText(text: string): string {
     // A raw URL must not autolink (a zero-width space after the scheme's colon, and in `www.`).
     .replace(/\b([A-Za-z][A-Za-z0-9+.-]{1,31}):\/\//g, '$1:\u200b//')
     .replace(/\bwww\./gi, (match) => `${match.slice(0, 3)}\u200b.`)
-    .replace(/```[ \t]*suggestion/gi, '``` suggestion')
-    .trim();
+    .replace(/```[ \t]*suggestion/gi, '``` suggestion');
+}
+
+/**
+ * A file path as an inline code span that no path can break out of. The path is first neutralised like any session text
+ * (no hidden marker, no mention, no autolink), then wrapped in a fence of backticks one longer than the longest run in it,
+ * padded with a space on each side when it starts or ends with a backtick or a space (CommonMark strips one space each
+ * side). `suffix` (the `:line` of a finding) goes inside the span, after the path. Only for display: the path used to match
+ * the diff and to open a thread is the raw one.
+ */
+export function pathCodeSpan(path: string, suffix = ''): string {
+  const content = `${neutralise(path)}${suffix}`;
+  const longest = Math.max(0, ...(content.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = '`'.repeat(longest + 1);
+  const pad = /^[ `]|[ `]$/.test(content) ? ' ' : '';
+  return `${fence}${pad}${content}${pad}${fence}`;
 }
 
 // ---- changed lines --------------------------------------------------------------------------------------------
@@ -289,12 +308,12 @@ export function nearestChangedLine(ranges: readonly (readonly [number, number])[
 
 /** The first comment of a file-level thread: the path and the original line are in the text, because the thread has no line (#714). */
 export function fileThreadBody(finding: Finding): string {
-  return `Finding on \`${finding.path}:${finding.line}\`, a line this commit does not change, so it is raised on the file.\n\n${finding.body}`;
+  return `Finding on ${pathCodeSpan(finding.path, `:${finding.line}`)}, a line this commit does not change, so it is raised on the file.\n\n${finding.body}`;
 }
 
 /** The first comment of a thread placed on the nearest changed line: it says that it is placed there and where it belongs (#714). */
 export function nearestThreadBody(finding: Finding, placedAt: number): string {
-  return `Finding on \`${finding.path}:${finding.line}\`, a line this commit does not change. A file-level thread could not be created, so it is placed on line ${placedAt}, the nearest changed line of this file. It belongs on line ${finding.line}.\n\n${finding.body}`;
+  return `Finding on ${pathCodeSpan(finding.path, `:${finding.line}`)}, a line this commit does not change. A file-level thread could not be created, so it is placed on line ${placedAt}, the nearest changed line of this file. It belongs on line ${finding.line}.\n\n${finding.body}`;
 }
 
 /** The most the advisory findings add to a review body, so the body stays far under GitHub's limit. */
@@ -322,7 +341,7 @@ export function advisorySection(advisory: readonly (Finding & { readonly reason?
   let listed = 0;
   for (const finding of advisory) {
     const why = finding.reason === undefined ? '' : ` (${REASON_TEXT[finding.reason]})`;
-    const entry = `\n- \`${finding.path}:${finding.line}\`${why}\n${finding.body.split('\n').map((row) => `  > ${row}`).join('\n')}`;
+    const entry = `\n- ${pathCodeSpan(finding.path, `:${finding.line}`)}${why}\n${finding.body.split('\n').map((row) => `  > ${row}`).join('\n')}`;
     if (size + entry.length > MAX_ADVISORY_CHARS) {
       break;
     }
@@ -388,10 +407,15 @@ function parseJson(content: string): unknown {
   }
 }
 
-const PATH = /^[A-Za-z0-9._@+-][A-Za-z0-9._@+/ -]*$/;
+// A path is checked by its structure, not by a list of characters: a file of the repository may be named with brackets,
+// parentheses, `~`, `#`, `=` or a non-ASCII letter. A control character (the C0 and C1 ranges, line and paragraph
+// separators, and the characters that reorder or hide text) is refused. Everywhere the path is printed into markdown it goes
+// through `pathCodeSpan`, which cannot be broken out of, so the spelling of a path never decides what a body renders.
+const PATH_CONTROL = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2028\u2029\u2066-\u2069\ufeff]/;
 
 function parsePath(raw: unknown, what: string): string {
-  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_PATH_CHARS || !PATH.test(raw) || raw.split('/').some((part) => part === '..' || part === '')) {
+  // A leading slash makes the first segment empty, and `a//b` an empty one in the middle: both are refused with `..`.
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_PATH_CHARS || PATH_CONTROL.test(raw) || raw.split('/').some((part) => part === '..' || part === '')) {
     return malformed(`${what} must be a relative path of the repository`);
   }
   return raw;

@@ -24,6 +24,7 @@ import {
   FindingsTooLargeError,
   MalformedFindingsError,
   MAX_FINDINGS,
+  MAX_PATH_CHARS,
   MAX_OUTPUT_FILE_BYTES,
   MAX_FILE_THREADS,
   advisorySection,
@@ -34,6 +35,7 @@ import {
   parseFixerOutput,
   parseReviewStepInput,
   parseReviewerOutput,
+  pathCodeSpan,
   sanitiseText,
   splitFindings,
 } from '../src/review-types.ts';
@@ -83,12 +85,88 @@ test('a reviewer file is parsed into a typed value, and a file that is not in th
     ['an absolute path', reviewerFile({ findings: [{ path: '/etc/passwd', line: 1, body: 'x' }] })],
     ['a path with an empty part', reviewerFile({ findings: [{ path: 'a//b', line: 1, body: 'x' }] })],
     ['a path with a newline', reviewerFile({ findings: [{ path: 'a\nb', line: 1, body: 'x' }] })],
+    ['a path with a tab', reviewerFile({ findings: [{ path: 'a\tb.ts', line: 1, body: 'x' }] })],
+    ['a path with a NUL', reviewerFile({ findings: [{ path: 'a\u0000b.ts', line: 1, body: 'x' }] })],
+    ['a path with DEL', reviewerFile({ findings: [{ path: 'a\u007fb.ts', line: 1, body: 'x' }] })],
+    ['a path with a C1 control character', reviewerFile({ findings: [{ path: 'a\u0085b.ts', line: 1, body: 'x' }] })],
+    ['a path with a reordering character', reviewerFile({ findings: [{ path: 'a\u202eb.ts', line: 1, body: 'x' }] })],
+    ['a path with a line separator', reviewerFile({ findings: [{ path: 'a\u2028b.ts', line: 1, body: 'x' }] })],
+    ['a path that climbs out in the middle', reviewerFile({ findings: [{ path: 'src/../../secret', line: 1, body: 'x' }] })],
+    ['a path with a trailing slash', reviewerFile({ findings: [{ path: 'src/', line: 1, body: 'x' }] })],
+    ['an empty path', reviewerFile({ findings: [{ path: '', line: 1, body: 'x' }] })],
+    ['a path over the bound', reviewerFile({ findings: [{ path: `src/${'x'.repeat(MAX_PATH_CHARS)}`, line: 1, body: 'x' }] })],
+    ['a path that is not text', reviewerFile({ findings: [{ path: 7, line: 1, body: 'x' }] })],
     ['an empty body', reviewerFile({ findings: [{ path: 'a.ts', line: 1, body: '' }] })],
     ['a thread id with a slash', reviewerFile({ acceptedThreadIds: ['PRRT/1'] })],
     ['a thread id that is a number', reviewerFile({ acceptedThreadIds: [1] })],
   ];
   for (const [name, content] of bad) {
     assert.throws(() => parseReviewerOutput(content), MalformedFindingsError, name);
+  }
+});
+
+// Synthetic names only. Each is a real way to spell a file of a repository (#719).
+const ODD_PATHS = ['src/routes/[id].ts', 'src/a(b)~c#d=e.ts', 'src/caf\u00e9/\u00fcber.ts', 'docs/a b.md', 'src/`tick`.ts', 'src/a&b+c,d;e!f$g%h^i{j}.ts', 'x'.repeat(MAX_PATH_CHARS)];
+
+test('a finding on a path of any spelling is accepted: the path is checked by structure, not by a character list (#719)', () => {
+  for (const path of ODD_PATHS) {
+    const parsed = parseReviewerOutput(reviewerFile({ findings: [{ path, line: 3, body: 'x' }] }));
+    assert.deepEqual(parsed.findings, [{ path, line: 3, body: 'x' }], `${path} is kept exactly as written, so it still matches the diff`);
+  }
+});
+
+/** The content of the first inline code span of `markdown` and what follows it, read by the CommonMark rule: a run of N backticks closes at the next run of exactly N. */
+function firstCodeSpan(markdown: string): { content: string; rest: string } | undefined {
+  const open = /`+/.exec(markdown);
+  if (open === null) {
+    return undefined;
+  }
+  const size = open[0].length;
+  const from = open.index + size;
+  for (const run of markdown.slice(from).matchAll(/`+/g)) {
+    if (run[0].length === size) {
+      let content = markdown.slice(from, from + run.index).replace(/\n/g, ' ');
+      if (content.startsWith(' ') && content.endsWith(' ') && content.trim() !== '') {
+        content = content.slice(1, -1);
+      }
+      return { content, rest: markdown.slice(from + run.index + size) };
+    }
+  }
+  return undefined;
+}
+
+test('a path holding backticks renders inside its code span and cannot break out of it (#719)', () => {
+  for (const path of ['src/`a`.ts', 'src/``b``.ts', 'src/a```b.ts', '`', '`lead.ts', 'trail.ts`', 'a/` ``` `/b.ts', ' spaced.ts ', 'src/`x`.ts`', 'src/a`b``c```d.ts']) {
+    const span = firstCodeSpan(`Finding on ${pathCodeSpan(path, ':7')} then more`);
+    assert.deepEqual(span, { content: `${path}:7`, rest: ' then more' }, JSON.stringify(path));
+  }
+  assert.equal(pathCodeSpan('src/a.ts', ':7'), '`src/a.ts:7`', 'a plain path keeps the plain single-backtick span');
+});
+
+test('a path cannot make a code span carry a marker, a mention, a tag or a link, whatever it holds (#719)', () => {
+  const hostile = 'a/<!-- orchestrator-finding:k -->/@alice/<img src=x>/[t](https:\/\/h.example)/https://h.example/www.h.example.ts';
+  const span = pathCodeSpan(hostile, ':1');
+  assert.ok(!span.includes('<!--') && !span.includes('<img') && !/@(?=[a-z])/.test(span) && !span.includes('](') && !span.includes('://'), span);
+  const direct = pathCodeSpan('src/a.ts<!--', ':1');
+  assert.ok(!direct.includes('<!--'));
+});
+
+test('every site that prints a path into markdown keeps it in a code span that holds (#719)', () => {
+  for (const path of ['src/`a`.ts', 'src/``b``.ts', 'src/routes/[id].ts', 'src/a(b)~c#d=e.ts', 'src/caf\u00e9.ts', '`edge']) {
+    const finding = { path, line: 40, body: 'Handle an empty file.' };
+    const shown = `${path}:40`;
+    const file = firstCodeSpan(fileThreadBody(finding));
+    assert.deepEqual(file, { content: shown, rest: file?.rest ?? '' }, `file-level thread: ${JSON.stringify(path)}`);
+    assert.ok(file?.rest.startsWith(', a line this commit does not change, so it is raised on the file.') && file.rest.endsWith('\n\nHandle an empty file.'));
+    const nearest = firstCodeSpan(nearestThreadBody(finding, 6));
+    assert.deepEqual(nearest?.content, shown, `thread on the nearest line: ${JSON.stringify(path)}`);
+    assert.ok(nearest?.rest.startsWith(', a line this commit does not change. A file-level thread could not be created, so it is placed on line 6,') && nearest.rest.endsWith('\n\nHandle an empty file.'));
+    const advisory = advisorySection([{ ...finding, reason: 'file_not_in_diff' }, { path: 'src/other.ts', line: 2, body: 'second' }]);
+    const entry = advisory.text.split('\n- ')[1] ?? '';
+    const listed = firstCodeSpan(entry);
+    assert.deepEqual(listed?.content, shown, `advisory list: ${JSON.stringify(path)}`);
+    assert.ok(listed?.rest.startsWith(' (the file is not changed by this commit)\n  > Handle an empty file.'), 'the reason and the body follow the span, unbroken');
+    assert.ok(advisory.text.includes('`src/other.ts:2`'), 'the next entry is untouched');
   }
 });
 
@@ -361,6 +439,7 @@ async function scenario(configure: (state: FakeState) => void = () => undefined,
   await git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
   // `baseFiles` are on the base branch already, so a commit can change them (an empty `committed` entry removes every line).
   for (const [name, content] of Object.entries(baseFiles)) {
+    await mkdir(dirname(join(repo, name)), { recursive: true });
     await writeFile(join(repo, name), content);
     await git(repo, 'add', name);
     await git(repo, 'commit', '-q', '-m', `base ${name}`);
@@ -573,6 +652,40 @@ test('the reviewer: a finding on a file the commit does not change stays advisor
   assert.equal((await threadPosts(s)).length, 0, 'no call to open a thread');
   const review = await postedReviewBody(s);
   assert.ok(review.body.includes('`untouched.txt:2` (the file is not changed by this commit)') && review.body.includes('OFF-FILE finding'));
+});
+
+test('the reviewer: findings on paths with brackets, parentheses, ~ # =, a non-ASCII letter or backticks are placed like any other (#719)', async () => {
+  const bracket = 'src/routes/[id].ts';
+  const symbols = 'src/a(b)~c#d=e.ts';
+  const accent = 'src/café.ts';
+  const ticks = 'src/`x`.ts';
+  const s = await scenario(
+    (state) => {
+      state.dynamicGate = true;
+    },
+    { [bracket]: WIDE_COMMITTED, [symbols]: WIDE_COMMITTED, [accent]: WIDE_COMMITTED },
+    { [bracket]: WIDE_BASE, [symbols]: WIDE_BASE, [accent]: WIDE_BASE },
+  );
+  await s.script(
+    1,
+    findingsScript([
+      { path: bracket, line: 5, body: 'INLINE-BRACKET' },
+      { path: symbols, line: 20, body: 'FILE-SYMBOLS' },
+      { path: accent, line: 20, body: 'FILE-ACCENT' },
+      { path: ticks, line: 2, body: 'ADVISORY-TICKS' },
+    ]),
+  );
+  await s.run(s.activities.runReviewerSession);
+  assert.deepEqual(await s.run(s.activities.postSessionReview), { reviewId: 5001, posted: true, comments: 1, fileLevel: 2, nearest: 0, advisory: 1, omitted: 0 });
+
+  const review = await postedReviewBody(s);
+  assert.deepEqual(review.comments.map((comment) => `${comment.path}:${comment.line}`), [`${bracket}:5`], 'the path is sent to GitHub as it is');
+  const threads = await threadPosts(s);
+  assert.deepEqual(threads.map((thread) => thread.path), [symbols, accent]);
+  assert.equal(firstCodeSpan(threads[0]?.body ?? '')?.content, `${symbols}:20`);
+  assert.equal(firstCodeSpan(threads[1]?.body ?? '')?.content, `${accent}:20`);
+  assert.equal(firstCodeSpan(review.body.slice(review.body.indexOf('\n- ')))?.content, `${ticks}:2`, 'a path with backticks is one code span in the advisory list');
+  assert.ok(review.body.includes('``src/`x`.ts:2``'), 'its fence is longer than its longest run of backticks');
 });
 
 test('the reviewer: when GitHub refuses the file-level thread, the finding goes on the nearest changed line of its file and says so', async () => {
