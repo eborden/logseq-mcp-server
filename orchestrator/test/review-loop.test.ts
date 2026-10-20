@@ -133,6 +133,8 @@ class World {
   readonly counters = { reviewerSessions: 0, reviews: 0, fixerSessions: 0, guards: 0, pushes: 0, replies: 0, comments: 0 };
   readonly attempts: Record<string, number> = {};
   readonly commentKeys = new Map<string, string>();
+  /** Comments on the PR (its number), kept apart from the issue's (#715). */
+  readonly prCommentKeys = new Map<string, string>();
   readonly loseOnce = new Set<LostStep>();
   readonly reviewerRounds = new Map<number, string[]>();
   readonly postedRounds = new Set<number>();
@@ -215,6 +217,15 @@ function fakeActivities() {
       return { changed: true, status };
     },
     commentIssue: async (input: { issue: number; key: string; body: string }) => {
+      if (input.issue >= PR_OFFSET) {
+        // A comment on the PR: counted apart from the issue's (#715), and once per key like the real activity.
+        const prWorld = world(input.issue - PR_OFFSET);
+        const postedOnPr = !prWorld.prCommentKeys.has(input.key);
+        if (postedOnPr) {
+          prWorld.prCommentKeys.set(input.key, input.body);
+        }
+        return { commentId: 2, posted: postedOnPr };
+      }
       const w = world(input.issue);
       w.attempt('commentIssue');
       const posted = !w.commentKeys.has(input.key);
@@ -455,6 +466,32 @@ test('without a person resolving the thread, the run ends waiting for threads to
   assert.deepEqual([...w.commentKeys.keys()], [`waiting-threads-${issue + PR_OFFSET}`]);
   const comment = w.commentKeys.get(`waiting-threads-${issue + PR_OFFSET}`) ?? '';
   assert.ok(comment.includes('Only a person resolves a review thread') && comment.includes('T0_0'));
+  // The same on the PR (#715): one statement for the head, naming what holds the gate, and saying it is not an approval.
+  const prKey = `gate-held-${issue + PR_OFFSET}-${fixHead(0)}`;
+  assert.deepEqual([...w.prCommentKeys.keys()], [prKey]);
+  const prComment = w.prCommentKeys.get(prKey) ?? '';
+  assert.match(prComment, /Gate not clear/);
+  assert.match(prComment, /not an approval/);
+  assert.ok(prComment.includes(fixHead(0)) && prComment.includes('T0_0') && prComment.includes('1 open review thread'));
+});
+
+test('a stop leaves one line on the PR with the reason and the step, besides the issue comment (#715)', { timeout: 120_000 }, async () => {
+  await ensureFakeWorker();
+  const { issue, world: w } = newWorld((world) => {
+    oneFindingFirst(world);
+    world.accepts = true;
+    world.humanResolves = true;
+    world.recordReviewOn = (round, head) => (round >= 1 ? HEAD0 : head);
+  });
+
+  const stopped = await stoppedWith(issue, FAKE_QUEUE);
+
+  assert.equal(stopped.reason, 'ReviewNotCounted');
+  assert.deepEqual([...w.prCommentKeys.keys()], ['stopped-pr-gate-ReviewNotCounted']);
+  const line = w.prCommentKeys.get('stopped-pr-gate-ReviewNotCounted') ?? '';
+  assert.ok(line.includes('`gate`') && line.includes('`ReviewNotCounted`') && line.includes(`#${issue}`));
+  assert.match(line, /not an approval/);
+  assert.equal(line.split('\n').length, 1, 'one line');
 });
 
 test('a review on an older commit does not clear the gate after a new push', { timeout: 120_000 }, async () => {
@@ -606,6 +643,8 @@ test('advisory findings of the last review are in the result and in the waiting 
   assert.deepEqual([result.advisory, result.advisoryOmitted], [2, 1], 'clear, with 3 findings no thread holds');
   assert.ok(other.outcome === 'waiting_for_threads');
   assert.equal(other.advisory, 3);
+  assert.equal(waiting.world.prCommentKeys.size, 1, 'one gate statement on the PR for the waiting run');
+  assert.equal(clear.world.prCommentKeys.size, 0, 'the review loop posts no statement when the gate is clear: the decision stage does');
   assert.ok((waiting.world.commentKeys.get(`waiting-threads-${waiting.issue + PR_OFFSET}`) ?? '').includes('3 advisory findings'));
 });
 
@@ -912,6 +951,13 @@ test('real activities: a finding, a fix, a reply, an accepting closing review: t
   assert.equal(thread.length, 1);
   assert.equal(thread[0]?.isResolved, false, 'nothing resolved the thread');
   assert.ok(thread[0]?.comments.some((comment) => comment.body.includes(SECRET_REPLY)), 'the reply is in the thread, posted by an activity');
+  // The statement for the held gate (#715) is on the PR, once, from ids and counts: no session text.
+  const prStatements = ((state.comments?.['1001'] ?? []) as { body: string }[]).filter((comment) => comment.body.includes('orchestrator-comment:gate-held-'));
+  assert.equal(prStatements.length, 1);
+  assert.ok(prStatements[0]?.body.includes('Gate not clear') && prStatements[0].body.includes(result.headSha));
+  for (const secret of [SECRET_FINDING, SECRET_SUMMARY, SECRET_REPLY]) {
+    assert.ok(!(prStatements[0]?.body ?? '').includes(secret), 'no session text in the statement');
+  }
   // The fix really was pushed (the guard ran, the session could not push) and the head on origin is the one reviewed.
   const remote = await execFileAsync('git', ['ls-remote', '--heads', stack.bare, 'refs/heads/claude/401']);
   assert.ok(remote.stdout.startsWith(result.headSha));

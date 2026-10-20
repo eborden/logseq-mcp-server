@@ -413,10 +413,11 @@ test('a failing run posts pending then failure, comments once with counts, and s
   assert.deepEqual(await stoppedWith(issue), { step: 'host_integration', reason: 'IntegrationFailed' });
 
   assert.deepEqual(world.statusWrites, ['a:pending:no counts', 'a:failure:80 passed, 2 failed']);
-  assert.deepEqual([...world.comments.keys()], ['stopped-host_integration-IntegrationFailed']);
+  assert.deepEqual([...world.comments.keys()], ['stopped-host_integration-IntegrationFailed', 'stopped-pr-host_integration-IntegrationFailed']);
   const comment = world.comments.get('stopped-host_integration-IntegrationFailed');
   assert.match(comment?.body ?? '', /fail \(80 passed, 2 failed\)/);
   assert.equal(comment?.target, issue, 'the comment is on the issue');
+  assert.equal(world.comments.get('stopped-pr-host_integration-IntegrationFailed')?.target, issue + PR_OFFSET, 'the one-line stop is on the PR too (#715)');
   assert.deepEqual(world.runs, [world.head1], 'a failing check is not run again');
   assert.equal(world.boardWrites.includes('pr:Done'), false);
 });

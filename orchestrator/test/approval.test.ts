@@ -42,6 +42,8 @@ const WORKFLOWS_PATH = fileURLToPath(new URL('../src/workflows/index.ts', import
 const SRC_DIR = fileURLToPath(new URL('../src/', import.meta.url));
 const HEAD = 'a'.repeat(40);
 const PR_OFFSET = 1000;
+/** The key of the gate-clear statement for the default head (#715). */
+const gateClearKey = (issue: number, head = HEAD): string => `gate-clear-${issue + PR_OFFSET}-${head}`;
 
 // ---- the pure parts ----------------------------------------------------------------------------------------------
 
@@ -442,7 +444,7 @@ test('a timeout comments on the PR and stops: it never approves, never moves any
   const result = await resultOf(issue);
 
   assert.deepEqual(result, { outcome: 'decision_timeout', issueNumber: issue, pr: issue + PR_OFFSET, headSha: HEAD, ignoredSignals: 0, prBody: { source: 'unknown', unmet: 0 } });
-  assert.deepEqual([...world.comments.keys()], [`decision-timeout-${issue + PR_OFFSET}`]);
+  assert.deepEqual([...world.comments.keys()], [gateClearKey(issue), `decision-timeout-${issue + PR_OFFSET}`]);
   assert.equal(world.comments.get(`decision-timeout-${issue + PR_OFFSET}`)?.target, issue + PR_OFFSET);
   assert.match(world.comments.get(`decision-timeout-${issue + PR_OFFSET}`)?.body ?? '', /A timeout never approves/);
   assert.equal(world.counters.getPrChanges, 0);
@@ -483,7 +485,7 @@ test('a duplicate, a different later word and a malformed payload change nothing
 
   assert.equal(result.outcome, 'merged');
   assert.equal(result.outcome === 'merged' ? result.ignoredSignals : undefined, 4);
-  assert.deepEqual([...world.comments.keys()], [`decision-${issue + PR_OFFSET}`]);
+  assert.deepEqual([...world.comments.keys()], [gateClearKey(issue), `decision-${issue + PR_OFFSET}`]);
   assert.match(world.comments.get(`decision-${issue + PR_OFFSET}`)?.body ?? '', /\*\*approved\*\*, dated 2025-03-04/);
   assert.equal(world.counters.getPrChanges, 1);
   assert.equal(world.counters.closeIssue, 1);
@@ -572,10 +574,10 @@ test('a result lost after the decision comment, a Done move or the close is retr
 
   assert.equal(result.outcome, 'merged');
   assert.equal(lost.world.loseOnce.size, 0, 'every loss really happened');
-  assert.deepEqual([...lost.world.comments.keys()], [key(lost.issue)]);
+  assert.deepEqual([...lost.world.comments.keys()], [gateClearKey(lost.issue), key(lost.issue)]);
   assert.deepEqual(lost.world.statusWrites.filter((write) => write.endsWith('Done')), ['pr:Done', 'issue:Done']);
   assert.equal(lost.world.issueOpen, false);
-  assert.equal(lost.world.counters.commentCalls, 2, 'the decision comment ran twice (the lost attempt and its retry), the other comment never');
+  assert.equal(lost.world.counters.commentCalls, 3, 'the gate-clear statement once, and the decision comment twice (the lost attempt and its retry)');
   assert.equal(handle.workflowId, issueWorkflowId(lost.issue));
 });
 
@@ -651,6 +653,77 @@ test('the history carries identifiers, counts and the maintainer own message: no
   assert.equal(history.includes('atlas-secret-name'), false, 'paths stay inside the activity: the workflow sees counts');
 });
 
+// ---- the gate-clear statement on the PR (#715) --------------------------------------------------------------------
+
+test('a run that reaches gate clear leaves one statement on the PR for that head: counts, the signal command, and "not an approval"', { timeout: 120_000 }, async () => {
+  const { issue, world } = newWorld();
+  const handle = await startRun(issue);
+  await until('the gate-clear statement', () => world.comments.has(gateClearKey(issue)));
+  await handle.signal(maintainerDecisionSignal, APPROVED);
+  await until('the decision comment', () => world.comments.has(`decision-${issue + PR_OFFSET}`));
+  world.merged = true;
+  await resultOf(issue);
+
+  const statement = world.comments.get(gateClearKey(issue));
+  assert.ok(statement);
+  assert.equal(statement.target, issue + PR_OFFSET, 'the statement is on the PR');
+  assert.ok(statement.gateReadsAtPost >= 2, 'it was posted only after the gate read clear');
+  assert.match(statement.body, /for head `a{40}`/);
+  assert.match(statement.body, /1 review on the head, 0 unresolved review threads, 0 fix rounds used/);
+  assert.match(statement.body, /host\/integration: not asked for in this run/);
+  assert.match(statement.body, /Advisory findings in the last review: none/);
+  assert.match(statement.body, /not an approval/);
+  assert.ok(statement.body.includes(`npm run signal -- ${issue} approved`));
+  assert.ok(statement.body.includes(`npm run signal -- ${issue} changes_requested --message`));
+  assert.ok(statement.body.includes(`\`${issueWorkflowId(issue)}\``), 'the workflow id');
+  assert.equal([...world.comments.keys()].filter((key) => key.startsWith('gate-clear-')).length, 1, 'exactly one statement for the head');
+});
+
+test('a lost result after the statement is retried and the statement is still one: the key makes the repeat harmless', { timeout: 120_000 }, async () => {
+  const { issue, world } = newWorld((w) => {
+    // `newWorld` has already counted up to this run's issue number when it configures the world.
+    w.loseOnce.add(`commentIssue:${gateClearKey(nextIssue)}`);
+  });
+  await startRun(issue, { decisionTimeoutMs: 2_000 });
+
+  const result = await resultOf(issue);
+
+  assert.equal(result.outcome, 'decision_timeout');
+  assert.equal(world.loseOnce.size, 0, 'the loss really happened');
+  assert.deepEqual([...world.comments.keys()], [gateClearKey(issue), `decision-timeout-${issue + PR_OFFSET}`]);
+  assert.equal(world.counters.commentCalls, 3, 'the statement ran twice (the lost attempt and its retry), the timeout comment once');
+});
+
+test('no statement while the gate is not clear, one the moment it is', { timeout: 120_000 }, async () => {
+  const { issue, world } = newWorld((w) => {
+    w.clearFromRead = 6;
+  });
+  await startRun(issue);
+  await until('some unclear reads', () => world.gateReads >= 4);
+  assert.equal(world.comments.has(gateClearKey(issue)), false, 'a held gate says nothing');
+  await until('the statement', () => world.comments.has(gateClearKey(issue)));
+  assert.ok((world.comments.get(gateClearKey(issue))?.gateReadsAtPost ?? 0) >= 6);
+  world.merged = true;
+  await resultOf(issue);
+});
+
+test('a push after the statement leaves it stale: the next clear gate on the new head posts its own, and each names its head', { timeout: 120_000 }, async () => {
+  const NEXT = 'b'.repeat(40);
+  const { issue, world } = newWorld();
+  const handle = await startRun(issue);
+  await until('the first statement', () => world.comments.has(gateClearKey(issue)));
+  world.prHead = NEXT;
+  await until('the statement for the new head', () => world.comments.has(gateClearKey(issue, NEXT)));
+  await handle.signal(maintainerDecisionSignal, APPROVED);
+  await until('the decision comment', () => world.comments.has(`decision-${issue + PR_OFFSET}`));
+  world.merged = true;
+  await resultOf(issue);
+
+  assert.match(world.comments.get(gateClearKey(issue))?.body ?? '', /for head `a{40}`/);
+  assert.match(world.comments.get(gateClearKey(issue, NEXT))?.body ?? '', /for head `b{40}`/);
+  assert.equal([...world.comments.keys()].filter((key) => key.startsWith('gate-clear-')).length, 2);
+});
+
 // ---- the invariants, read from the code ----------------------------------------------------------------------------
 
 async function sourceFiles(root: string): Promise<{ name: string; text: string }[]> {
@@ -669,7 +742,7 @@ async function sourceFiles(root: string): Promise<{ name: string; text: string }
 test('the decision code never merges, labels, approves a review or resolves a thread, and only the GitHub activities write', async () => {
   const sources = await sourceFiles(SRC_DIR);
   assert.deepEqual(forbiddenCalls(sources), []);
-  for (const name of ['approval-types.ts', 'signal.ts', 'workflows/decision.ts']) {
+  for (const name of ['approval-types.ts', 'issue-types.ts', 'signal.ts', 'workflows/decision.ts']) {
     assert.ok(sources.some((file) => file.name === name), `${name} is scanned`);
   }
   // The only new write to GitHub is closing the issue a merged PR was meant to close, and it names no label or merge.

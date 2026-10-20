@@ -292,8 +292,8 @@ if (argv[0] === 'api') {
   }
   if ((match = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(path))) {
     if (method === 'POST') {
-      // Like GitHub: commenting on an issue that does not exist is a 404. The comment is by the token's own account.
-      if (state.issues[match[1]] === undefined) {
+      // Like GitHub: commenting on an issue that does not exist is a 404, and a pull request is an issue too (#715). The comment is by the token's own account.
+      if (state.issues[match[1]] === undefined && !state.pulls.some((pr) => String(pr.number) === match[1])) {
         respond({ stdout: http(404, { message: 'Not Found' }), stderr: 'gh: Not Found (HTTP 404)\n', exit: 1 });
       }
       const comments = (state.comments[match[1]] ??= []);

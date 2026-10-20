@@ -180,6 +180,10 @@ function fakeActivities() {
       threads: worldOf(pr - PR_OFFSET).openThread ? [{ id: 'PRRT_1', path: 'src/a.ts', line: 1, trusted: true, comments: [{ id: 1, trusted: true, body: 'a made-up remark' }] }] : [],
     }),
     commentIssue: async (input: { issue: number; key: string; body: string }) => {
+      if (input.issue >= PR_OFFSET) {
+        // A comment on the PR (#715): this suite follows the issue's comments only.
+        return { commentId: 2, posted: true };
+      }
       const w = worldOf(input.issue);
       const posted = !w.comments.has(input.key);
       w.comments.set(input.key, input.body);

@@ -21,6 +21,10 @@
 // to Done and the closed check with one comment saying no decision was recorded, and a PR closed unmerged stops the run.
 // A decision binds to the head the gate reads clear, not to the head the maintainer saw when they sent it.
 //
+// The first time the gate is clear for a head, the run posts ONE gate-clear statement on the PR (#715): counts and ids, the
+// signal command, and the words "not an approval". A push makes it stale (it names its head); the next clear gate on a new head
+// posts a new one. The statement is not a decision and changes nothing the gate requires.
+//
 // A timeout never approves. At the decision timeout the run comments on the PR and ends `decision_timeout`.
 //
 // The inbox keeps the FIRST well-formed decision. A malformed payload and every later signal change nothing; they are
@@ -53,8 +57,8 @@ import { createHostIntegrationGate } from './host-integration.ts';
 import { reviewLoop } from './review-loop.ts';
 import type { HostFailureSummary } from '../host-integration-policy.ts';
 import { DEFAULT_MAX_FIX_ROUNDS } from '../review-policy.ts';
-import { BOARD_CONFIRM_READS, BOARD_CONFIRM_WAIT, ISSUE_STEP_TIMEOUT, issueBranch, issueWorkflowId } from '../issue-types.ts';
-import type { IssueRunResult, IssueStep, IssueWorkflowInput, StopReason } from '../issue-types.ts';
+import { BOARD_CONFIRM_READS, BOARD_CONFIRM_WAIT, ISSUE_STEP_TIMEOUT, gateClearComment, gateClearCommentKey, issueBranch, issueWorkflowId } from '../issue-types.ts';
+import type { GateHostLine, IssueRunResult, IssueStep, IssueWorkflowInput, StopReason } from '../issue-types.ts';
 import type { BoardItemRef, SettableStatus } from '../types.ts';
 
 const github = proxyActivities<
@@ -104,6 +108,9 @@ export interface DecisionContext {
   readonly fixRounds?: number;
   /** Where the PR body came from (#708), carried into a host failure review round. */
   readonly bodySource?: 'session' | 'fallback' | 'unknown';
+  /** Advisory findings of the review loop's last review (#715), for the gate-clear statement. Counts only. Default 0. */
+  readonly advisory?: number;
+  readonly advisoryOmitted?: number;
   /** Runs one activity call; a failure of it ends the run at `name` (issue.ts). */
   readonly step: <T>(name: IssueStep, call: () => Promise<T>) => Promise<T>;
   /** Ends the run with one comment on the issue and a Failed workflow (issue.ts). */
@@ -137,6 +144,9 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
   // A failure on a fixture run goes to one remote fixer round of the review loop, which counts against `maxFixRounds` with the rounds
   // the review loop already used. Local executor: no fixer, every failure stops for a person as before.
   let fixRoundsUsed = context.fixRounds ?? 0;
+  // The advisory counts of the last review, for the gate-clear statement (#715). A host failure round posts a newer review.
+  let advisory = context.advisory ?? 0;
+  let advisoryOmitted = context.advisoryOmitted ?? 0;
   const maxFixRounds = input.maxFixRounds ?? DEFAULT_MAX_FIX_ROUNDS;
   const fixHostFailure =
     input.executor === 'remote'
@@ -147,6 +157,10 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
           const looped = await reviewLoop({ input, pr, branch: issueBranch(issue), headSha: failedHead, step, stop, startRound: fixRoundsUsed, hostFailure: summary, ...(context.bodySource === undefined ? {} : { bodySource: context.bodySource }) });
           // The loop reports the rounds it used; a round ran either way, so it is counted at least once.
           fixRoundsUsed = 'fixRounds' in looped ? looped.fixRounds : fixRoundsUsed + 1;
+          if ('advisory' in looped) {
+            advisory = looped.advisory;
+            advisoryOmitted = looped.advisoryOmitted;
+          }
           return true;
         }
       : undefined;
@@ -157,6 +171,8 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
   let decision: MaintainerDecision | undefined;
   let head = '';
   let merged = false;
+  /** Heads the gate-clear statement was posted for in this run (#715). The comment's key makes a repeat harmless as well. */
+  const statedFor = new Set<string>();
   for (;;) {
     // Only a decision already in hand BEFORE this pass's gate read may be used on it: one that arrived during the read
     // is checked against a fresh read.
@@ -177,9 +193,11 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
     // A head that the review settled (a review on it, no open thread) is the one the host check is for, once per head.
     // The status is read for the gate's own head, so a pass on an earlier head never clears a later one.
     let judged: GateCounts = gate;
+    let host: GateHostLine = hostGate === undefined ? { kind: 'off' } : { kind: 'not_required' };
     if (hostGate !== undefined && gate.reviewsOnHead >= 1 && gate.unresolvedThreads === 0 && (await hostGate.required(gate.headSha))) {
       const status = await step('host_integration', () => github.getHostIntegration({ sha: gate.headSha }));
       judged = { ...gate, hostIntegration: status.state };
+      host = { kind: 'checked', state: status.state, ...(status.counts === undefined ? {} : { counts: status.counts }) };
     }
     if (!gateClear(judged)) {
       if (left <= 0) {
@@ -189,6 +207,13 @@ export async function decisionStage(context: DecisionContext): Promise<IssueRunR
       continue;
     }
     head = gate.headSha;
+    // The exit statement (#715): ONE comment on the PR the first time the gate is clear for this head, from counts and ids
+    // only. The key carries the head, so a retry posts once and a later push gets its own. A failure to post stops the run.
+    if (!statedFor.has(head)) {
+      const facts = { workflowId, issue, pr, headSha: head, fixRounds: fixRoundsUsed, reviewsOnHead: gate.reviewsOnHead, unresolvedThreads: gate.unresolvedThreads, host, advisory, advisoryOmitted };
+      await step('decision_comment', () => github.commentIssue({ issue: pr, key: gateClearCommentKey(pr, head), body: gateClearComment(facts) }));
+      statedFor.add(head);
+    }
     if (heldBefore !== undefined) {
       decision = heldBefore;
       break;
