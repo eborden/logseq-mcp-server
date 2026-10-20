@@ -1095,7 +1095,6 @@ test('listTakenIssues names the issues with an open PR or a claude branch, ascen
 
   assert.deepEqual(await github.listTakenIssues(), {
     taken: [7, 8, 12, 30],
-    notRead: { pullRequests: false, branches: false },
     untrustedPullRequests: 0,
   });
 });
@@ -1104,27 +1103,44 @@ test('listTakenIssues does not read the branch of a PR from an author who is not
   const { github } = await setup((state) => {
     state.pulls = [rawOpenPr(101, 'claude/30', { author_association: 'NONE' }), rawOpenPr(102, 'claude/31')];
   });
-  assert.deepEqual(await github.listTakenIssues(), { taken: [31], notRead: { pullRequests: false, branches: false }, untrustedPullRequests: 1 });
+  assert.deepEqual(await github.listTakenIssues(), { taken: [31], untrustedPullRequests: 1 });
 });
 
 test('listTakenIssues with nothing under way answers an empty list', async () => {
   const { github } = await setup(() => {});
-  assert.deepEqual(await github.listTakenIssues(), { taken: [], notRead: { pullRequests: false, branches: false }, untrustedPullRequests: 0 });
+  assert.deepEqual(await github.listTakenIssues(), { taken: [], untrustedPullRequests: 0 });
 });
 
-test('listTakenIssues reads at most 5 pages of each list and says when it left some out', async () => {
+test('listTakenIssues fails when the open PR list is longer than 5 pages, and returns no list', async () => {
   const { fake, github } = await setup((state) => {
     state.pulls = Array.from({ length: 520 }, (_, index) => rawOpenPr(1000 + index, `claude/${index + 1}`));
+  });
+
+  const failure = await failureOf(github.listTakenIssues());
+
+  assert.equal(failure.type, 'TooLarge');
+  assert.match(failure.message, /pull requests: more than 500 entries, which is more than one call reads/);
+  assert.equal((await fake.callsMatching('pulls?state=open')).length, 5);
+});
+
+test('listTakenIssues fails when the branch list is longer than 5 pages, and returns no list', async () => {
+  const { fake, github } = await setup((state) => {
+    state.pulls = [rawOpenPr(101, 'claude/30')];
     state.refs = Array.from({ length: 530 }, (_, index) => ({ ref: `refs/heads/claude/${index + 1001}` }));
   });
 
-  const result = await github.listTakenIssues();
+  const failure = await failureOf(github.listTakenIssues());
 
-  assert.deepEqual(result.notRead, { pullRequests: true, branches: true });
-  assert.equal(result.taken.length, 1000, 'only what was read');
-  assert.equal(result.taken[0], 1);
-  assert.equal((await fake.callsMatching('pulls?state=open')).length, 5);
+  assert.equal(failure.type, 'TooLarge');
+  assert.match(failure.message, /branches: more than 500 entries, which is more than one call reads/);
   assert.equal((await fake.callsMatching('matching-refs')).length, 5);
+});
+
+test('listTakenIssues answers a list one short of the 5-page bound', async () => {
+  const { github } = await setup((state) => {
+    state.pulls = Array.from({ length: 499 }, (_, index) => rawOpenPr(1000 + index, `claude/${index + 1}`));
+  });
+  assert.equal((await github.listTakenIssues()).taken.length, 499);
 });
 
 test('listTakenIssues fails when a read fails, and returns no list', async () => {
