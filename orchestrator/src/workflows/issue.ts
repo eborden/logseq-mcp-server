@@ -65,6 +65,8 @@ import {
   pullRequestTitle,
   stopComment,
   stopCommentKey,
+  stopPrComment,
+  stopPrCommentKey,
 } from '../issue-types.ts';
 import type { IssueRunResult, IssueStep, PrBodyReport, SkipReason, StopReason } from '../issue-types.ts';
 import type { BoardItemRef, SessionExitStatus, SettableStatus } from '../types.ts';
@@ -129,6 +131,16 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
           throw commentError;
         }
         // The stop matters more than the comment: the run still ends Failed, with the reason in its failure.
+      }
+      // The same stop, in one line, on the PR when there is one (#715): a reader of the PR sees why it is not moving.
+      if (pr !== undefined) {
+        try {
+          await github.commentIssue({ issue: pr, key: stopPrCommentKey(step, reason), body: stopPrComment(workflowId, step, reason, issue) });
+        } catch (commentError) {
+          if (isCancellation(commentError)) {
+            throw commentError;
+          }
+        }
       }
     }
     throw ApplicationFailure.nonRetryable(`stopped at ${step}: ${reason}`, ISSUE_STOPPED_FAILURE, step, reason, pr);
@@ -253,6 +265,6 @@ export async function issueWorkflow(rawInput: unknown): Promise<IssueRunResult> 
   if (input.awaitDecision === false) {
     return { ...looped, prBody };
   }
-  const decided = await decisionStage({ input, pr: opened.number, inbox, step, stop, ...(opened.bodySource === undefined ? {} : { bodySource: opened.bodySource }), ...('fixRounds' in looped ? { fixRounds: looped.fixRounds } : {}) });
+  const decided = await decisionStage({ input, pr: opened.number, inbox, step, stop, ...(opened.bodySource === undefined ? {} : { bodySource: opened.bodySource }), ...('fixRounds' in looped ? { fixRounds: looped.fixRounds } : {}), ...('advisory' in looped ? { advisory: looped.advisory, advisoryOmitted: looped.advisoryOmitted } : {}) });
   return { ...decided, prBody };
 }

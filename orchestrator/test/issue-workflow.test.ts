@@ -112,6 +112,8 @@ class World {
   /** The order in which the side effects first happened. */
   readonly order: string[] = [];
   readonly commentKeys = new Map<string, string>();
+  /** Comments on the PR (its number), kept apart from the issue's (#715). */
+  readonly prCommentKeys = new Map<string, string>();
   /** Steps that do their side effect and then die before the result is recorded, once (a worker crash). */
   readonly loseOnce = new Set<LostStep>();
   /** A gate a test opens to let the session finish, so a second start can be tried while one run is open. */
@@ -286,6 +288,15 @@ function fakeActivities(worlds: Map<number, World>) {
       return { headSha: w.reviewedHead ?? '', reviewsOnHead: 1, unresolvedThreads: 0, clear: true };
     },
     commentIssue: async (input: { issue: number; key: string; body: string }) => {
+      if (input.issue >= PR_OFFSET) {
+        // A comment on the PR: counted apart from the issue's (#715), and once per key like the real activity.
+        const prWorld = world(input.issue - PR_OFFSET);
+        const postedOnPr = !prWorld.prCommentKeys.has(input.key);
+        if (postedOnPr) {
+          prWorld.prCommentKeys.set(input.key, input.body);
+        }
+        return { commentId: 2, posted: postedOnPr };
+      }
       const w = world(input.issue);
       w.attempt('commentIssue');
       const posted = !w.commentKeys.has(input.key);

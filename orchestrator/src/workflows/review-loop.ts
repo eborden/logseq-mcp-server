@@ -36,7 +36,7 @@ import { onExecutor } from './executor.ts';
 import { gateClear } from '../gate.ts';
 import { failureReason, guardCounts } from './failure-reason.ts';
 import { GUARD_REFUSALS } from './remote-implementer.ts';
-import { FIXER_PUSH_REJECTED, ISSUE_STEP_TIMEOUT, findingsCommentNotHiddenComment, fixerPushRejectedDetail, issueWorkflowId, waitingForThreadsComment } from '../issue-types.ts';
+import { FIXER_PUSH_REJECTED, ISSUE_STEP_TIMEOUT, findingsCommentNotHiddenComment, fixerPushRejectedDetail, gateHeldComment, gateHeldCommentKey, issueWorkflowId, waitingForThreadsComment } from '../issue-types.ts';
 import type { IssueRunResult, IssueStep, IssueWorkflowInput, StopReason } from '../issue-types.ts';
 import {
   DEFAULT_MAX_FIX_ROUNDS,
@@ -238,6 +238,10 @@ export async function reviewLoop(context: ReviewLoopContext): Promise<IssueRunRe
           key: `waiting-threads-${pr}`,
           body: waitingForThreadsComment(issueWorkflowId(input.issueNumber), pr, open.length, acceptedOpen, posted.advisory, posted.omitted),
         }),
+      );
+      // The same on the PR (#715), keyed by the head: a reader of the PR sees what holds the gate. A failure to post is a step failure.
+      await step('threads', () =>
+        reviewGithub.commentIssue({ issue: pr, key: gateHeldCommentKey(pr, head), body: gateHeldComment(issueWorkflowId(input.issueNumber), pr, head, open.length, acceptedOpen) }),
       );
       return { outcome: 'waiting_for_threads', issueNumber: input.issueNumber, branch, headSha: head, pr, fixRounds: round, acceptedThreadIds: acceptedOpen, openThreads: open.length, advisory: posted.advisory, advisoryOmitted: posted.omitted, ...hiddenField() };
     }
