@@ -29,6 +29,8 @@ import {
   MAX_FILE_THREADS,
   advisorySection,
   changedLines,
+  MalformedDiffHeaderError,
+  parseDiffHeaderName,
   fileThreadBody,
   isRepoPath,
   nearestChangedLine,
@@ -362,26 +364,86 @@ test('the advisory section lists what fits, says it is advisory, and counts what
   assert.ok(many.text.includes(`${many.omitted} more advisory`));
 });
 
-test('a file whose name git writes quoted in a diff is advisory for an honest reason, not "the file is not changed" (known gap, #746)', () => {
-  // `git diff` writes `+++ "src/a\"b.ts"` for a name with a double quote or a backslash, even with core.quotePath=false, so
-  // `changedLines` never holds such a file under its raw name. Pins today's behaviour; the fix (#746) flips it to inline.
-  const diff = ['diff --git "src/a\\"b.ts" "src/a\\"b.ts"', '--- "src/a\\"b.ts"', '+++ "src/a\\"b.ts"', '@@ -1,0 +1 @@', '+x', '+++ src/plain.ts', '@@ -1,0 +1 @@', '+y'].join('\n');
+test('a file whose name git writes C-quoted in a diff is placed under its raw name (#746)', () => {
+  // `git diff` writes `+++ "src/a\"b.ts"` for a name with a double quote or a backslash, even with core.quotePath=false.
+  const diff = [
+    'diff --git "src/a\\"b.ts" "src/a\\"b.ts"',
+    '--- "src/a\\"b.ts"',
+    '+++ "src/a\\"b.ts"',
+    '@@ -1,0 +1 @@',
+    '+x',
+    '+++ "src/a\\\\b.ts"',
+    '@@ -1,0 +1 @@',
+    '+y',
+    '+++ "src/a\\tb.ts"',
+    '@@ -4,0 +5,2 @@',
+    '+z',
+    '+z',
+    '+++ src/plain.ts',
+    '@@ -1,0 +1 @@',
+    '+y',
+  ].join('\n');
   const changed = changedLines(diff);
-  assert.deepEqual([...changed.keys()], ['"src/a\\"b.ts"', 'src/plain.ts'], 'the quoted header is the key, quotes included');
+  assert.deepEqual([...changed.keys()], ['src/a"b.ts', 'src/a\\b.ts', 'src/a\tb.ts', 'src/plain.ts'], 'each quoted header is decoded to the raw path');
   const split = splitFindings(
     [
       { path: 'src/a"b.ts', line: 1, body: 'x' },
       { path: 'src/a\\b.ts', line: 1, body: 'x' },
+      { path: 'src/a\tb.ts', line: 6, body: 'x' },
+      { path: 'src/a\tb.ts', line: 9, body: 'x' },
       { path: 'src/missing.ts', line: 1, body: 'x' },
       { path: 'src/plain.ts', line: 1, body: 'x' },
     ],
     changed,
   );
-  assert.deepEqual(split.advisory.map((finding) => `${finding.path}:${finding.reason}`), ['src/a"b.ts:name_not_matched', 'src/a\\b.ts:name_not_matched', 'src/missing.ts:file_not_in_diff']);
-  assert.deepEqual(split.inline.map((finding) => finding.path), ['src/plain.ts']);
-  const text = advisorySection(split.advisory).text;
-  assert.ok(text.includes('its name has a double quote or a backslash, which git writes quoted in a diff, so this review cannot tell whether the commit changes the file (#746)'));
-  assert.equal(text.split('the file is not changed by this commit').length - 1, 1, 'only the file that is really absent says it is not changed');
+  assert.deepEqual(split.inline.map((finding) => `${finding.path}:${finding.line}`), ['src/a"b.ts:1', 'src/a\\b.ts:1', 'src/a\tb.ts:6', 'src/plain.ts:1']);
+  assert.deepEqual(split.fileLevel.map((finding) => `${finding.path}:${finding.line}`), ['src/a\tb.ts:9'], 'an unchanged line of a quoted-name file takes a file-level thread');
+  assert.deepEqual(split.advisory.map((finding) => `${finding.path}:${finding.reason}`), ['src/missing.ts:file_not_in_diff']);
+  assert.ok(!advisorySection(split.advisory).text.includes('quoted'), 'no advisory reason about a quoted name is left');
+});
+
+test('parseDiffHeaderName decodes what git writes: letter escapes, a trailing tab, and octal escapes as UTF-8 bytes', () => {
+  assert.equal(parseDiffHeaderName('plain.ts'), 'plain.ts');
+  assert.equal(parseDiffHeaderName('with space.ts\t'), 'with space.ts', 'an unquoted name ends at the tab git adds');
+  assert.equal(parseDiffHeaderName('"a\\"b"'), 'a"b');
+  assert.equal(parseDiffHeaderName('"a\\\\b"'), 'a\\b');
+  assert.equal(parseDiffHeaderName('"a\\tb\\nc\\ra\\ab\\bc\\fd\\ve"'), 'a\tb\nc\ra\x07b\bc\fd\ve');
+  assert.equal(parseDiffHeaderName('"a b\\"c.ts"\t'), 'a b"c.ts', 'a tab after the closing quote is allowed');
+  assert.equal(parseDiffHeaderName('"caf\\303\\251.ts"'), 'café.ts', 'two octal escapes are the two UTF-8 bytes of one letter');
+  assert.equal(parseDiffHeaderName('"\\342\\202\\254\\"\\360\\237\\230\\200"'), '€"\u{1f600}', 'three- and four-byte sequences, mixed with an escaped quote');
+  assert.equal(parseDiffHeaderName('"\\001x\\177"'), '\u0001x\u007f', 'a control byte git writes as octal');
+  assert.equal(parseDiffHeaderName('"naïve\\"s.ts"'), 'naïve"s.ts', 'a raw non-ASCII letter (core.quotePath=false) stays');
+  assert.equal(parseDiffHeaderName('"\\357\\273\\277x"'), '﻿x', 'a byte order mark in a name is kept, not stripped');
+  assert.equal(parseDiffHeaderName('""'), '');
+});
+
+test('parseDiffHeaderName refuses a quoted name that git does not write, rather than guessing', () => {
+  const malformed = [
+    ['an unterminated quote', '"a.ts'],
+    ['a lone quote', '"'],
+    ['a trailing backslash', '"a.ts\\'],
+    ['a trailing backslash before the quote', '"a.ts\\"'],
+    ['an unescaped quote inside', '"a"b.ts"'],
+    ['text after the closing quote', '"a.ts"x'],
+    ['a space after the closing quote', '"a.ts" '],
+    ['an unknown escape', '"a\\qb.ts"'],
+    ['a hex escape', '"a\\x41.ts"'],
+    ['a unicode escape', '"a\\u0041.ts"'],
+    ['a one-digit octal escape', '"a\\1b.ts"'],
+    ['a two-digit octal escape', '"a\\12b.ts"'],
+    ['a non-octal digit', '"a\\389.ts"'],
+    ['an octal escape above 377', '"a\\400.ts"'],
+    ['a lone continuation byte', '"a\\200b.ts"'],
+    ['a truncated UTF-8 sequence', '"a\\303.ts"'],
+    ['an overlong UTF-8 sequence', '"a\\300\\200.ts"'],
+    ['an encoded surrogate', '"a\\355\\240\\200.ts"'],
+    ['a byte that is never UTF-8', '"a\\377.ts"'],
+    ['a raw control character', '"a\tb.ts"'],
+  ] as const;
+  for (const [what, text] of malformed) {
+    assert.throws(() => parseDiffHeaderName(text), MalformedDiffHeaderError, what);
+  }
+  assert.throws(() => changedLines(['+++ "a\\qb.ts"', '@@ -0,0 +1 @@', '+x'].join('\n')), MalformedDiffHeaderError, 'changedLines does not skip the file or guess');
 });
 
 test('a fixer file: replies are typed, and a reply to something that is not a thread id is refused', () => {
