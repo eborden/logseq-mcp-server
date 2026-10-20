@@ -27,6 +27,7 @@ import {
   rawGateReview,
   rawIssue,
   rawOpenPr,
+  rawThread,
   recordedSleep,
 } from './github-support.ts';
 import type { Fake, FakeState } from './github-support.ts';
@@ -530,6 +531,74 @@ test('postReview refuses an empty body, a short commit id, a bad key and too man
     assert.equal((await failureOf(github.postReview(bad as never))).type, 'InvalidInput');
   }
   assert.equal((await fake.calls()).length, 0);
+});
+
+// ---- addReviewThread (#714) -------------------------------------------------------------------------------------
+
+const THREAD_INPUT = { pr: 7, commitId: HEAD, path: 'orchestrator/src/x.ts', key: 'finding-7-r0-abc-1', body: 'A finding on a line this commit does not change.' };
+
+test('addReviewThread opens a file-level thread as one REST review comment, with no line, and a retry finds it by its key', async () => {
+  const { fake, github } = await setup((state) => {
+    state.pulls = [rawOpenPr(7, 'claude/7')];
+  });
+
+  const first = await github.addReviewThread(THREAD_INPUT);
+  const second = await github.addReviewThread(THREAD_INPUT);
+
+  assert.deepEqual(first, { posted: true, level: 'file' });
+  assert.deepEqual(second, { posted: false, level: 'file' });
+  const posts = (await fake.callsMatching('/pulls/7/comments')).filter((call) => call.argv.includes('POST'));
+  assert.equal(posts.length, 1, 'the second call wrote nothing');
+  const sent: unknown = JSON.parse(posts[0]?.stdin ?? '');
+  assert.deepEqual(sent, { commit_id: HEAD, path: THREAD_INPUT.path, body: `${THREAD_INPUT.body}\n\n<!-- orchestrator-finding:finding-7-r0-abc-1 -->`, subject_type: 'file' });
+});
+
+test('addReviewThread with a line opens a thread on that line of the new side, and says "line" when it finds one again', async () => {
+  const { fake, github } = await setup((state) => {
+    state.pulls = [rawOpenPr(7, 'claude/7')];
+  });
+  assert.deepEqual(await github.addReviewThread({ ...THREAD_INPUT, line: 30 }), { posted: true, level: 'line' });
+  assert.deepEqual(await github.addReviewThread({ ...THREAD_INPUT }), { posted: false, level: 'line' }, 'the key is the finding, whichever way it was placed');
+  const sent: unknown = JSON.parse((await fake.callsMatching('/pulls/7/comments')).filter((call) => call.argv.includes('POST'))[0]?.stdin ?? '');
+  assert.ok(typeof sent === 'object' && sent !== null && 'line' in sent && sent.line === 30 && 'side' in sent && sent.side === 'RIGHT' && 'subject_type' in sent && sent.subject_type === 'line');
+});
+
+test('addReviewThread is not fooled by a stranger planting its key, and writes nothing and resolves nothing', async () => {
+  const { fake, github } = await setup((state) => {
+    state.pulls = [rawOpenPr(7, 'claude/7')];
+    state.threads = { '7': [rawThread('PRRT_7_1', [{ id: 701, association: 'NONE', body: 'x\n<!-- orchestrator-finding:finding-7-r0-abc-1 -->' }])] };
+  });
+  assert.equal((await github.addReviewThread(THREAD_INPUT)).posted, true);
+  const all = (await fake.calls()).map((call) => call.argv.join(' ') + (call.stdin ?? '')).join('\n');
+  assert.ok(!/resolveReviewThread|mutation|merge|label|approve/i.test(all));
+});
+
+test('addReviewThread refuses a path that leaves the repository, a bad line, a short commit id and an empty body before any call', async () => {
+  const { fake, github } = await setup(() => undefined);
+  for (const bad of [
+    { ...THREAD_INPUT, path: '../secret' },
+    { ...THREAD_INPUT, path: '/etc/passwd' },
+    { ...THREAD_INPUT, path: 'a//b' },
+    { ...THREAD_INPUT, path: 'a\nb' },
+    { ...THREAD_INPUT, line: 0 },
+    { ...THREAD_INPUT, line: 1.5 },
+    { ...THREAD_INPUT, commitId: 'abc123' },
+    { ...THREAD_INPUT, body: '  ' },
+    { ...THREAD_INPUT, key: 'has space' },
+    { ...THREAD_INPUT, pr: 0 },
+  ]) {
+    assert.equal((await failureOf(github.addReviewThread(bad as never))).type, 'InvalidInput');
+  }
+  assert.equal((await fake.calls()).length, 0);
+});
+
+test('addReviewThread: a 422 from GitHub is a non-retryable client error, for the caller to answer', async () => {
+  const { github } = await setup((state) => {
+    state.pulls = [rawOpenPr(7, 'claude/7')];
+    state.refuseThreads = 'file';
+  });
+  const failure = await failureOf(github.addReviewThread(THREAD_INPUT));
+  assert.deepEqual([failure.type, failure.nonRetryable], ['GitHubClientError', true]);
 });
 
 // ---- checkIssue and commentIssue (#629) -------------------------------------------------------------------------
