@@ -11,7 +11,7 @@ The server reads one config file, `~/.logseq-mcp/config.json`, once at startup. 
 
 | Setting | Default | What it does |
 |---|---|---|
-| `apiUrl` | `http://127.0.0.1:12315` | Where LogSeq's HTTP API listens. An absolute `http` or `https` URL with a host, or the server stops at startup with a configuration error. Trailing slashes are dropped |
+| `apiUrl` | `http://127.0.0.1:12315` | Where LogSeq's HTTP API listens. An absolute `http` or `https` URL with a host, or the server stops at startup with a configuration error. Whitespace, control characters, a query and a fragment are refused. Trailing slashes are dropped |
 | `authToken` | none, required | The token you generated in LogSeq. It may not contain whitespace or control characters (a trailing newline from a copy is refused at startup) |
 | `timeoutMs` | `30000` | How long each LogSeq API call may take before it fails with a timeout error. A whole number of milliseconds from 1 to 2147483647. The limit applies per call, not per tool run |
 | `tips` | `true` | Whether four tools (`find_blocks`, `get_page`, `explore_timeline`, `find_pages`) add a trailing `meta.tips` block suggesting a next call. Set `false` to drop them |

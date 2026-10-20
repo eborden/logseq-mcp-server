@@ -46,9 +46,11 @@ async fn mock_logseq(answers: Vec<Value>) -> MockLogseq {
                 }
             };
             recorded.lock().unwrap().push(serde_json::from_str(&body).unwrap());
-            let reply = answer.to_string();
+            // `{"__http_status": 500}` stands for a server error with an empty body.
+            let status = answer.get("__http_status").and_then(Value::as_u64).unwrap_or(200);
+            let reply = if status == 200 { answer.to_string() } else { String::new() };
             let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                "HTTP/1.1 {status} Mock\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
                 reply.len()
             );
             socket.write_all(response.as_bytes()).await.unwrap();
@@ -305,4 +307,11 @@ async fn an_unreadable_page_list_at_the_suggestion_lookup_is_a_response_error_an
     let logseq = mock_logseq(vec![json!([]), json!([]), json!("not a page list")]).await;
     let error = get_page_outline(&client(&logseq), "Alce").await.unwrap_err();
     assert!(matches!(error, ToolError::Response(_)), "{error}");
+}
+
+#[tokio::test]
+async fn an_http_error_at_the_suggestion_lookup_is_the_error_and_not_a_missing_page() {
+    let logseq = mock_logseq(vec![json!([]), json!([]), json!({"__http_status": 500})]).await;
+    let error = get_page_outline(&client(&logseq), "Alce").await.unwrap_err();
+    assert_eq!(error.to_string(), "HTTP 500: Internal Server Error");
 }
