@@ -55,7 +55,7 @@ import {
 import type { BoardLookup, OpenPr } from '../github-parse.ts';
 import { PR_TEMPLATE_PATH, choosePrBody, parsePrTemplate, parseTemplateFile } from '../pr-template.ts';
 import type { ChosenPrBody, PrTemplateRead } from '../pr-template.ts';
-import { FindingsTooLargeError } from '../review-types.ts';
+import { FindingsTooLargeError, isRepoPath } from '../review-types.ts';
 import { findKeyedComment, findNeedsInputAnswer, findPrBody, hasFindingsComment, prBodyMarker } from '../findings-comment.ts';
 import type { FindingsCandidate } from '../findings-comment.ts';
 import type { RemoteGithub } from './remote-session.ts';
@@ -331,7 +331,11 @@ function parseReviewComment(raw: unknown, index: number): ReviewComment {
   if (side !== 'LEFT' && side !== 'RIGHT') {
     return refuse(`comments[${index}].side must be LEFT or RIGHT`);
   }
-  return { path: inputText(comment, 'path', undefined, 1024), line, side, body: inputText(comment, 'body', undefined, MAX_TEXT_CHARS) };
+  const path = inputText(comment, 'path', undefined, 1024);
+  if (!isRepoPath(path)) {
+    return refuse(`comments[${index}].path must be a relative path of the repository`);
+  }
+  return { path, line, side, body: inputText(comment, 'body', undefined, MAX_TEXT_CHARS) };
 }
 
 function parsePostReviewInput(raw: unknown): PostReviewInput {
@@ -394,13 +398,12 @@ function parseReplyInput(raw: unknown): ReplyToThreadInput {
 }
 
 // A path that reaches a thread is already a file of the diff (the reviewer path checked it), and it only travels in a JSON
-// body, so any character is fine but a control one. Brackets, parentheses, `~`, `#`, `=` and non-ASCII letters are all real file names.
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
-
+// body, so it is checked by structure with the same `isRepoPath` as the finding parser and the review comments (#719), not
+// by a list of characters. Brackets, parentheses, `~`, `#`, `=` and non-ASCII letters are all real file names.
 function parseAddThreadInput(raw: unknown): AddReviewThreadInput {
   const input = inputObject(raw, 'addReviewThread input');
   const path = inputText(input, 'path', undefined, 300);
-  if (CONTROL_CHARACTER.test(path) || path.split('/').some((part) => part === '..' || part === '')) {
+  if (!isRepoPath(path)) {
     return refuse('path must be a relative path of the repository');
   }
   const line = input.get('line');

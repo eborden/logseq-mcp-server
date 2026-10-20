@@ -191,10 +191,13 @@ function neutralise(text: string): string {
  * (no hidden marker, no mention, no autolink), then wrapped in a fence of backticks one longer than the longest run in it,
  * padded with a space on each side when it starts or ends with a backtick or a space (CommonMark strips one space each
  * side). `suffix` (the `:line` of a finding) goes inside the span, after the path. Only for display: the path used to match
- * the diff and to open a thread is the raw one.
+ * the diff and to open a thread is the raw one, and the text shown can differ from it (`<` is written `&lt;`, a zero-width
+ * space follows an `@` or a URL scheme's colon, three backticks and `suggestion` get a space between), so a reader must not
+ * copy a name from a span. A line break or tab is shown as a space, so the helper is safe on its own and does not rely on
+ * the parser.
  */
 export function pathCodeSpan(path: string, suffix = ''): string {
-  const content = `${neutralise(path)}${suffix}`;
+  const content = `${neutralise(path).replace(/[\n\t]/g, ' ')}${suffix}`;
   const longest = Math.max(0, ...(content.match(/`+/g) ?? []).map((run) => run.length));
   const fence = '`'.repeat(longest + 1);
   const pad = /^[ `]|[ `]$/.test(content) ? ' ' : '';
@@ -249,7 +252,7 @@ export function changedLines(diff: string): ChangedLines {
 }
 
 /** Why a finding opened no thread: it is listed in the review body instead. */
-export type AdvisoryReason = 'file_not_in_diff' | 'thread_cap' | 'thread_failed' | 'no_changed_line';
+export type AdvisoryReason = 'file_not_in_diff' | 'name_not_matched' | 'thread_cap' | 'thread_failed' | 'no_changed_line';
 
 export interface AdvisoryFinding extends Finding {
   readonly reason: AdvisoryReason;
@@ -279,7 +282,9 @@ export function splitFindings(findings: readonly Finding[], changed: ChangedLine
   for (const finding of findings) {
     const ranges = changed?.get(finding.path);
     if (ranges === undefined) {
-      advisory.push({ ...finding, reason: 'file_not_in_diff' });
+      // git writes a name with a double quote or a backslash C-quoted in a diff header, so `changed` never holds it under
+      // the raw name: say that, not that the file is unchanged. Known gap, tracked in #746 (a test pins it).
+      advisory.push({ ...finding, reason: /["\\]/.test(finding.path) ? 'name_not_matched' : 'file_not_in_diff' });
     } else if (ranges.some(([from, to]) => finding.line >= from && finding.line <= to)) {
       inline.push(finding);
     } else if (fileLevel.length < MAX_FILE_THREADS) {
@@ -321,6 +326,7 @@ export const MAX_ADVISORY_CHARS = 20_000;
 
 const REASON_TEXT: Readonly<Record<AdvisoryReason, string>> = {
   file_not_in_diff: 'the file is not changed by this commit',
+  name_not_matched: 'its name has a double quote or a backslash, which git writes quoted in a diff, so this review cannot tell whether the commit changes the file (#746)',
   thread_cap: `the review is at its cap of ${MAX_FILE_THREADS} file-level threads`,
   thread_failed: 'GitHub refused a thread for it',
   no_changed_line: 'GitHub refused a file-level thread for it, and its file has no changed line to place it on',
@@ -408,14 +414,33 @@ function parseJson(content: string): unknown {
 }
 
 // A path is checked by its structure, not by a list of characters: a file of the repository may be named with brackets,
-// parentheses, `~`, `#`, `=` or a non-ASCII letter. A control character (the C0 and C1 ranges, line and paragraph
-// separators, and the characters that reorder or hide text) is refused. Everywhere the path is printed into markdown it goes
-// through `pathCodeSpan`, which cannot be broken out of, so the spelling of a path never decides what a body renders.
-const PATH_CONTROL = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2028\u2029\u2066-\u2069\ufeff]/;
+// parentheses, `~`, `#`, `=` or a non-ASCII letter. What is refused is what is not a file name a reader can see (#719).
+// Everywhere the path is printed into markdown it goes through `pathCodeSpan`, which cannot be broken out of, so the
+// spelling of a path never decides what a body renders.
+//   \p{Cc}  control characters: C0, DEL, C1 (a newline and a tab too)
+//   \p{Cf}  format characters, which are invisible or reorder text: zero-width space, word joiner and the invisible
+//           operators U+2060 to U+2064, the bidi marks and isolates, the Arabic letter mark U+061C, soft hyphen U+00AD,
+//           U+180E, BOM U+FEFF, the interlinear annotation marks, and the assigned tag characters
+//   \p{Zl}\p{Zp}  line and paragraph separators
+//   \p{Cs}  a lone surrogate: not valid text, and JSON-encoded it makes GitHub answer 422 and fail the whole review
+//   U+E0000 to U+E007F  the whole tag block, its unassigned code points too (invisible text)
+// U+200C and U+200D (zero-width non-joiner and joiner) are the one exception inside \p{Cf}: file names in Persian and
+// several Indic scripts need them. The cost is that a path can still carry one of those two invisible joiners.
+const PATH_UNSEEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\u{E0000}-\u{E007F}]/u;
+const PATH_JOINERS = /[\u200c\u200d]/g;
+
+/**
+ * Whether `path` is a relative path of the repository by structure: not blank, no control or invisible character, no
+ * leading slash, and no empty, `.` or `..` segment. The length bound is the caller's (a finding allows 300, a review
+ * comment 1024). The finding parser, the thread input and the review-comment input all use this one check, so what one
+ * accepts the others do not refuse (#719).
+ */
+export function isRepoPath(path: string): boolean {
+  return path.trim() !== '' && !PATH_UNSEEN.test(path.replace(PATH_JOINERS, '')) && !path.split('/').some((part) => part === '' || part === '.' || part === '..');
+}
 
 function parsePath(raw: unknown, what: string): string {
-  // A leading slash makes the first segment empty, and `a//b` an empty one in the middle: both are refused with `..`.
-  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_PATH_CHARS || PATH_CONTROL.test(raw) || raw.split('/').some((part) => part === '..' || part === '')) {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_PATH_CHARS || !isRepoPath(raw)) {
     return malformed(`${what} must be a relative path of the repository`);
   }
   return raw;

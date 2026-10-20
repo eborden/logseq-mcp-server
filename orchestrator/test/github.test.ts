@@ -481,6 +481,12 @@ test('openPr passes a title and body full of shell characters through untouched 
 
 // ---- postReview -----------------------------------------------------------------------------------------------
 
+/**
+ * Paths that are not a path of the repository by structure (#719): blank, a `.` segment, and a name made of what a reader
+ * cannot see. The finding parser (`test/review.test.ts`), the thread input and the review comments all refuse every one.
+ */
+const NOT_REPO_PATHS = [' ', ' ', '　', '.', 'a/./b', 'a/b/.', 'a​b.ts', 'a⁠b.ts', 'a⁤b.ts', 'a؜b.ts', 'a­b.ts', 'a\u{E0041}b.ts', 'a\u{E0000}b.ts', 'a\u{E007F}b.ts', 'a\ud800b.ts', 'a\udc00b.ts', 'a\u0085b.ts', 'a b.ts'];
+
 const REVIEW_INPUT = {
   pr: 7,
   commitId: HEAD,
@@ -531,6 +537,18 @@ test('postReview refuses an empty body, a short commit id, a bad key and too man
     assert.equal((await failureOf(github.postReview(bad as never))).type, 'InvalidInput');
   }
   assert.equal((await fake.calls()).length, 0);
+});
+
+test('postReview refuses a comment on a path that is not a path of the repository, with the same check as the thread and the finding parser (#719)', async () => {
+  const { fake, github } = await setup(() => undefined);
+  for (const path of ['../secret', '/etc/passwd', 'a//b', 'a/./b', ...NOT_REPO_PATHS]) {
+    assert.equal((await failureOf(github.postReview({ ...REVIEW_INPUT, comments: [{ path, line: 1, side: 'RIGHT', body: 'x' }] } as never))).type, 'InvalidInput', JSON.stringify(path));
+  }
+  assert.equal((await fake.calls()).length, 0);
+  for (const [index, path] of ['routes/[id].ts', 'a (copy)/b~1#2=3,4.txt', 'docs/café/日本語.md', 'src/م‌ن.ts'].entries()) {
+    const input = { ...REVIEW_INPUT, idempotencyKey: `run-1-round-${index + 1}`, comments: [{ path, line: 1, side: 'RIGHT' as const, body: 'x' }] };
+    assert.equal((await github.postReview(input)).posted, true, path);
+  }
 });
 
 // ---- addReviewThread (#714) -------------------------------------------------------------------------------------
@@ -593,6 +611,7 @@ test('addReviewThread refuses a path that leaves the repository, a bad line, a s
     { ...THREAD_INPUT, path: 'a\u0000b' },
     { ...THREAD_INPUT, path: 'a'.repeat(301) },
     { ...THREAD_INPUT, path: 'a/../b' },
+    ...NOT_REPO_PATHS.map((path) => ({ ...THREAD_INPUT, path })),
     { ...THREAD_INPUT, line: 0 },
     { ...THREAD_INPUT, line: 1.5 },
     { ...THREAD_INPUT, commitId: 'abc123' },

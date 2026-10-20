@@ -30,6 +30,7 @@ import {
   advisorySection,
   changedLines,
   fileThreadBody,
+  isRepoPath,
   nearestChangedLine,
   nearestThreadBody,
   parseFixerOutput,
@@ -105,8 +106,47 @@ test('a reviewer file is parsed into a typed value, and a file that is not in th
   }
 });
 
+/** The code points of `from` to `to`, inclusive, as one-character strings. */
+function codePoints(from: number, to: number): string[] {
+  return Array.from({ length: to - from + 1 }, (_, index) => String.fromCodePoint(from + index));
+}
+
+test('a path is refused for each class of control or invisible character, at both ends of each range, and its neighbours stay accepted (#719)', () => {
+  // Every range is walked whole where it is small, and pinned at both ends and one past each end where it is not.
+  const refused = [
+    ...codePoints(0x00, 0x1f), // C0
+    ...codePoints(0x7f, 0x9f), // DEL and C1
+    '\u00ad', '\u061c', '\u180e', // soft hyphen, Arabic letter mark, Mongolian vowel separator
+    '\u200b', '\u200e', '\u200f', // zero-width space, left-to-right and right-to-left marks
+    ...codePoints(0x2028, 0x202e), // line and paragraph separators, bidi embeddings and overrides
+    ...codePoints(0x2060, 0x2064), ...codePoints(0x2066, 0x206f), // word joiner and invisible operators, isolates and deprecated format characters
+    '\ufeff', ...codePoints(0xfff9, 0xfffb), // BOM, interlinear annotation
+    ...codePoints(0xe0000, 0xe007f), // the whole tag block, assigned or not
+    '\ud800', '\udbff', '\udc00', '\udfff', // lone surrogates
+  ];
+  for (const character of refused) {
+    const path = `a${character}b.ts`;
+    assert.throws(() => parseReviewerOutput(reviewerFile({ findings: [{ path, line: 1, body: 'x' }] })), MalformedFindingsError, `U+${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}`);
+    assert.equal(isRepoPath(path), false, `isRepoPath refuses ${JSON.stringify(path)}`);
+  }
+  // Neighbours of the ranges are ordinary text; so are the joiners that Persian and Indic names need.
+  for (const character of [' ', '~', '\u00a0', '\u00a1', '\u00ac', '\u00ae', '\u0645', '\u200a', '\u200c', '\u200d', '\u2027', '\u202f', '\u2030', '\u205f', '\u2070', '\ufdfd', '\ufffc', '\ufffd', '\u{1f600}', '\u{e0100}']) {
+    const path = `src/a${character}b.ts`;
+    const parsed = parseReviewerOutput(reviewerFile({ findings: [{ path, line: 1, body: 'x' }] }));
+    assert.equal(parsed.findings[0]?.path, path, `U+${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()} is accepted and kept`);
+  }
+  // Blank and `.` paths and segments are not names of a file.
+  for (const path of [' ', '\u00a0', '\u3000', '.', './a.ts', 'a/./b', 'a/.', '..', 'a/..', 'a/../b', '', '/', '/a', 'a/', 'a//b']) {
+    assert.throws(() => parseReviewerOutput(reviewerFile({ findings: [{ path, line: 1, body: 'x' }] })), MalformedFindingsError, JSON.stringify(path));
+  }
+  // `.` inside a name is fine: dotfiles, extensions and `...`.
+  for (const path of ['.github/pull_request_template.md', 'a/.hidden', 'a/...', 'a/b.c.d']) {
+    assert.equal(parseReviewerOutput(reviewerFile({ findings: [{ path, line: 1, body: 'x' }] })).findings[0]?.path, path);
+  }
+});
+
 // Synthetic names only. Each is a real way to spell a file of a repository (#719).
-const ODD_PATHS = ['src/routes/[id].ts', 'src/a(b)~c#d=e.ts', 'src/caf\u00e9/\u00fcber.ts', 'docs/a b.md', 'src/`tick`.ts', 'src/a&b+c,d;e!f$g%h^i{j}.ts', 'x'.repeat(MAX_PATH_CHARS)];
+const ODD_PATHS = ['src/routes/[id].ts', 'src/a(b)~c#d=e.ts', 'src/caf\u00e9/\u00fcber.ts', 'docs/a b.md', ' a.ts', 'a b/ c .ts', 'src/`tick`.ts', 'src/a&b+c,d;e!f$g%h^i{j}.ts', 'src/\u0645\u200c\u0646.ts', 'src/\u{1f600}.ts', 'src/a"b.ts', 'src/a\\b.ts', 'x'.repeat(MAX_PATH_CHARS)];
 
 test('a finding on a path of any spelling is accepted: the path is checked by structure, not by a character list (#719)', () => {
   for (const path of ODD_PATHS) {
@@ -144,11 +184,42 @@ test('a path holding backticks renders inside its code span and cannot break out
 });
 
 test('a path cannot make a code span carry a marker, a mention, a tag or a link, whatever it holds (#719)', () => {
-  const hostile = 'a/<!-- orchestrator-finding:k -->/@alice/<img src=x>/[t](https:\/\/h.example)/https://h.example/www.h.example.ts';
+  const hostile = 'a/<!-- orchestrator-review:k --> <!-- orchestrator-finding:k -->/@alice/<img src=x>/[t](https://h.example)/https://h.example/www.h.example.ts';
   const span = pathCodeSpan(hostile, ':1');
-  assert.ok(!span.includes('<!--') && !span.includes('<img') && !/@(?=[a-z])/.test(span) && !span.includes('](') && !span.includes('://'), span);
-  const direct = pathCodeSpan('src/a.ts<!--', ':1');
-  assert.ok(!direct.includes('<!--'));
+  assert.ok(!span.includes('<!--') && !span.includes('-->') && !span.includes('<img') && !/@(?=[a-z])/.test(span) && !span.includes('](') && !span.includes('://') && !span.includes('www.'), span);
+  assert.ok(!`Finding on ${span}`.includes('<!-- orchestrator-review:k -->'), 'the full marker form is not in the text, so the body cannot forge a marker');
+  // It still closes where it should, with the whole neutralised path inside it and the text after it untouched.
+  const read = firstCodeSpan(`before ${span} after`);
+  assert.deepEqual(read?.rest, ' after');
+  assert.equal(read?.content, `${neutralisedForTest(hostile)}:1`);
+  assert.ok(!pathCodeSpan('src/a.ts<!--', ':1').includes('<!--'));
+});
+
+/** What a path should read as inside a span: `<` and `-->` rewritten, a zero-width space after `@`, `](`, `://` and `www`. */
+function neutralisedForTest(path: string): string {
+  return path.replace(/</g, '&lt;').replace(/-->/g, '--&gt;').replace(/@(?=[A-Za-z0-9])/g, '@​').replace(/\]\(/g, ']​(').replace(/:\/\//g, ':​//').replace(/www\./g, 'www​.');
+}
+
+test('a path holding a suggestion fence is rewritten like any session text and its span still closes (#719)', () => {
+  // `sanitiseText` writes a space into three backticks and `suggestion` so no "apply suggestion" button can be made. A path
+  // can hold that text, so the span carries the rewritten path: the fence stays longer than its longest run of backticks.
+  for (const path of ['src/```suggestion.ts', 'src/````suggestion/a.ts', 'src/```  Suggestion.ts', '```suggestion']) {
+    const read = firstCodeSpan(`Finding on ${pathCodeSpan(path, ':5')} then more`);
+    assert.equal(read?.content, `${path.replace(/```[ \t]*suggestion/gi, '``` suggestion')}:5`, JSON.stringify(path));
+    assert.equal(read?.rest, ' then more');
+    assert.ok(!read?.content.includes('```suggestion'), 'the exact opener of a suggestion block is not in the span');
+  }
+  // The same rewrite, through the three sites.
+  const finding = { path: 'src/```suggestion.ts', line: 9, body: 'x' };
+  for (const text of [fileThreadBody(finding), nearestThreadBody(finding, 2), advisorySection([{ ...finding, reason: 'file_not_in_diff' }]).text]) {
+    assert.equal(firstCodeSpan(text.slice(text.indexOf('`')))?.content, 'src/``` suggestion.ts:9', text);
+  }
+});
+
+test('a path with a line break or tab, handed straight to the helper, cannot split its paragraph (#719)', () => {
+  const span = pathCodeSpan('a\n\nb\tc', ':1');
+  assert.ok(!span.includes('\n') && !span.includes('\t'), JSON.stringify(span));
+  assert.equal(firstCodeSpan(span)?.content, 'a  b c:1');
 });
 
 test('every site that prints a path into markdown keeps it in a code span that holds (#719)', () => {
@@ -289,6 +360,28 @@ test('the advisory section lists what fits, says it is advisory, and counts what
   assert.ok(many.listed > 0 && many.listed < 20 && many.listed + many.omitted === 20);
   assert.ok(many.text.length < 21_000);
   assert.ok(many.text.includes(`${many.omitted} more advisory`));
+});
+
+test('a file whose name git writes quoted in a diff is advisory for an honest reason, not "the file is not changed" (known gap, #746)', () => {
+  // `git diff` writes `+++ "src/a\"b.ts"` for a name with a double quote or a backslash, even with core.quotePath=false, so
+  // `changedLines` never holds such a file under its raw name. Pins today's behaviour; the fix (#746) flips it to inline.
+  const diff = ['diff --git "src/a\\"b.ts" "src/a\\"b.ts"', '--- "src/a\\"b.ts"', '+++ "src/a\\"b.ts"', '@@ -1,0 +1 @@', '+x', '+++ src/plain.ts', '@@ -1,0 +1 @@', '+y'].join('\n');
+  const changed = changedLines(diff);
+  assert.deepEqual([...changed.keys()], ['"src/a\\"b.ts"', 'src/plain.ts'], 'the quoted header is the key, quotes included');
+  const split = splitFindings(
+    [
+      { path: 'src/a"b.ts', line: 1, body: 'x' },
+      { path: 'src/a\\b.ts', line: 1, body: 'x' },
+      { path: 'src/missing.ts', line: 1, body: 'x' },
+      { path: 'src/plain.ts', line: 1, body: 'x' },
+    ],
+    changed,
+  );
+  assert.deepEqual(split.advisory.map((finding) => `${finding.path}:${finding.reason}`), ['src/a"b.ts:name_not_matched', 'src/a\\b.ts:name_not_matched', 'src/missing.ts:file_not_in_diff']);
+  assert.deepEqual(split.inline.map((finding) => finding.path), ['src/plain.ts']);
+  const text = advisorySection(split.advisory).text;
+  assert.ok(text.includes('its name has a double quote or a backslash, which git writes quoted in a diff, so this review cannot tell whether the commit changes the file (#746)'));
+  assert.equal(text.split('the file is not changed by this commit').length - 1, 1, 'only the file that is really absent says it is not changed');
 });
 
 test('a fixer file: replies are typed, and a reply to something that is not a thread id is refused', () => {
