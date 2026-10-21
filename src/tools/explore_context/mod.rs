@@ -1400,6 +1400,36 @@ mod tests {
         assert_eq!(ids(blocks_of(one_page, false, Some(10))), [1, 2, 3, 4]);
     }
 
+    /// A block of page 10 under `parent` (the page itself for a top-level block), after `left` (the page for the first).
+    fn linked(id: i64, parent: i64, left: i64) -> Value {
+        json!({"id": id, "uuid": format!("u{id}"), "page": {"id": 10}, "parent": {"id": parent}, "left": {"id": left}})
+    }
+
+    /// Document order is 1, 3, 4, 7, 6 (1 has the children 3 and 4; 7 comes before 6, whatever their db ids), listed here
+    /// with a child before its parent and a later sibling before an earlier one.
+    fn shuffled_page() -> Vec<Value> {
+        vec![linked(4, 1, 3), linked(6, 10, 7), linked(3, 1, 1), linked(7, 10, 1), linked(1, 10, 10)]
+    }
+
+    #[test]
+    fn a_single_page_s_blocks_are_in_document_order_whatever_order_they_were_fetched_in() {
+        let ids = |blocks: Vec<Value>| blocks.iter().map(|b| b["id"].as_i64().unwrap()).collect::<Vec<_>>();
+        assert_eq!(ids(blocks_of(shuffled_page(), false, Some(10))), [1, 3, 4, 7, 6]);
+    }
+
+    #[test]
+    fn max_blocks_keeps_the_first_blocks_of_the_page_and_the_cursor_reads_on_in_that_order() {
+        let mut list = list_of(0, 0, 0, 1);
+        list.blocks = blocks_of(shuffled_page(), false, Some(10));
+        let limits = caps(3, 50, 50);
+        let first = first_page(&list, limits);
+        assert_eq!(ids_of(&first)[0], [1, 3, 4]);
+        let next = page_after(&list, limits, first.next_cursor.as_deref());
+        assert_eq!(ids_of(&next)[0], [7, 6]);
+        assert!(next.next_cursor.is_none());
+        assert!(!codes(&next).contains(&"cursor_stale"), "{:?}", codes(&next));
+    }
+
     fn tuples() -> Vec<Backlink> {
         vec![
             Backlink { page: json!({"id": 20, "name": "bob"}), blocks: vec![block(201, 20), block(202, 20)] },
