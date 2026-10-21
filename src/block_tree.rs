@@ -124,7 +124,7 @@ fn reference_id(block: &Map<String, Value>, key: &str) -> Option<i64> {
 /// leaf) and a 1-based `level`, after the keys the pull gave (`children` first, since it is made
 /// with the node, then `level`). Siblings are in the order of the `:block/left` chain. A block whose
 /// parent is not among `blocks` and is not a page in `page_ids` is treated as a root, so it is not
-/// lost, under the page its `page` names, else its parent; a block with neither is dropped.
+/// lost, under the page its `page` names, else its parent; a block with neither is dropped (#661). A block in a parent cycle is made a root of its page.
 ///
 /// Every page in `page_ids` has an entry, `[]` for a page with no blocks. A block whose own `id`
 /// is missing counts as id 0; every block the pull gives has one.
@@ -170,6 +170,37 @@ pub fn build_block_trees_ordered(blocks: Vec<Map<String, Value>>, page_ids: &[i6
                 roots_of.entry(page_id).or_default().push(i);
             }
         }
+    }
+
+    // A parent cycle has no top, so no root reaches it (#661). Walk what the roots reach, then make the first block
+    // of each unreached group a root of its page, taking it out of its parent's children so the cycle breaks there.
+    let mut reached = vec![false; nodes.len()];
+    let mark = |start: usize, reached: &mut Vec<bool>, children_of: &HashMap<i64, Vec<usize>>| {
+        let mut stack = vec![start];
+        while let Some(i) = stack.pop() {
+            if std::mem::replace(&mut reached[i], true) {
+                continue;
+            }
+            stack.extend(children_of.get(&ids[i]).into_iter().flatten().copied());
+        }
+    };
+    for root in roots_of.values().flatten() {
+        mark(*root, &mut reached, &children_of);
+    }
+    for i in 0..nodes.len() {
+        if reached[i] {
+            continue;
+        }
+        let node = nodes[i].as_ref().expect("no node is taken yet");
+        let Some(page_id) = reference_id(node, "page") else { continue };
+        if let Some(siblings) = reference_id(node, "parent").and_then(|parent| children_of.get_mut(&parent)) {
+            siblings.retain(|&sibling| sibling != i);
+        }
+        if !roots_of.contains_key(&page_id) {
+            page_order.push(page_id);
+        }
+        roots_of.entry(page_id).or_default().push(i);
+        mark(i, &mut reached, &children_of);
     }
 
     // `attach`: each node is in exactly one sibling list, so each is taken once
@@ -370,8 +401,11 @@ mod tests {
     fn a_block_that_is_its_own_parent_or_in_a_cycle_does_not_loop() {
         let trees = build_block_trees(flat(vec![block(1, 10, 1, 1)]), &[10]);
         assert_eq!(trees[&10].len(), 1);
-        // 2 and 3 are each other's parent: neither is a root, so both are lost (a cycle has no top to start from)
+        // 2 and 3 are each other's parent: the first is made a root (#661), so neither is lost
         let trees = build_block_trees(flat(vec![block(2, 10, 3, 3), block(3, 10, 2, 2)]), &[10]);
-        assert!(trees[&10].is_empty());
+        assert_eq!(trees[&10].len(), 1);
+        assert_eq!(trees[&10][0]["id"], 2);
+        assert_eq!(trees[&10][0]["children"][0]["id"], 3);
+        assert_eq!(trees[&10][0]["children"][0]["children"].as_array().unwrap().len(), 0);
     }
 }
