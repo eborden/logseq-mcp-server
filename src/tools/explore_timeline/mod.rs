@@ -895,7 +895,7 @@ mod tests {
         let weeks = by(GroupBy::Week, false);
         assert_eq!(
             weeks.iter().map(|entry| entry.get("period").or(entry.get("date")).unwrap().clone()).collect::<Vec<_>>(),
-            [json!("2025-W01"), json!("2025-W03"), json!(null)]
+            [json!("2025-W02"), json!("2025-W03"), json!(null)]
         );
         assert_eq!(weeks[0]["blocks"].as_array().unwrap().len(), 2);
         // slim blocks name their page, since the entry names none

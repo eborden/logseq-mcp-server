@@ -99,23 +99,34 @@ fn utc_days(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468 + (day - 1)
 }
 
-/// The week of a `YYYYMMDD` date as `YYYY-WW`. Not ISO weeks: week 1 is the first 7
-/// days of the year, whatever weekday they start on. `None` for a date whose month or day digits are
-/// missing (fewer than seven digits): it has no week. A 7- or 9-digit date does get one, from the
-/// characters at the same places (LogSeq's journal days always have eight digits).
+/// The ISO 8601 week of a `YYYYMMDD` date as `YYYY-WW`: weeks run Monday to Sunday, week 1 holds the
+/// year's first Thursday, and the year is the ISO week-year (20241230 is `2025-W01`). `None` for a date
+/// whose month or day digits are missing (fewer than seven digits): it has no week. A 7- or 9-digit date
+/// does get one, from the characters at the same places (LogSeq's journal days always have eight digits).
 pub fn week_identifier(date: i64) -> Option<String> {
     let text: Vec<char> = date.to_string().chars().collect();
     // `substring(from, to)`
     let part = |from: usize, to: usize| -> String { text.iter().skip(from).take(to - from).collect() };
-    let year = part(0, 4);
-    let week = match (parse_int(&year), parse_int(&part(4, 6)), parse_int(&part(6, 8))) {
-        (Some(y), Some(month), Some(day)) => {
-            let day_of_year = utc_days(y, month, day) - utc_days(y, 1, 1);
-            Some(day_of_year.div_euclid(7) + 1)
-        }
-        _ => None,
-    };
-    Some(format!("{year}-W{:0>2}", week?))
+    let (y, month, day) = (parse_int(&part(0, 4))?, parse_int(&part(4, 6))?, parse_int(&part(6, 8))?);
+    let days = utc_days(y, month, day);
+    // 1970-01-01 was a Thursday; the Thursday of this date's Monday-to-Sunday week decides the week-year
+    let thursday = days - (days + 3).rem_euclid(7) + 3;
+    let (week_year, _, _) = civil_from_days(thursday);
+    let week = (thursday - utc_days(week_year, 1, 1)).div_euclid(7) + 1;
+    Some(format!("{week_year:0>4}-W{week:0>2}"))
+}
+
+/// The inverse of `utc_days`: `(year, month, day)` of a count of days since 1970-01-01.
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z - era * 146_097;
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let mp = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    (year_of_era + era * 400 + i64::from(month <= 2), month, day)
 }
 
 /// The month of a date as `YYYYMM`.
@@ -187,26 +198,34 @@ mod tests {
         assert_eq!(entries[2].page, Value::Null);
     }
 
-    /// A week computed independently of the code under test, with no date arithmetic in it: counting the days of the
-    /// year, from 0, in sevens.
-    fn counted_week(year: i64, month: i64, day: i64) -> String {
-        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-        let lengths = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        let day_of_year: i64 = lengths[..(month - 1) as usize].iter().sum::<i64>() + day - 1;
-        format!("{year}-W{:02}", day_of_year / 7 + 1)
+    #[test]
+    fn weeks_run_monday_to_sunday_and_the_year_is_the_iso_week_year() {
+        // #660: 2024-12-30 is a Monday, 2025-12-29 a Monday, 2021-01-03 a Sunday
+        let weeks = [
+            (20241229, "2024-W52"), (20241230, "2025-W01"), (20250101, "2025-W01"), (20250105, "2025-W01"),
+            (20250106, "2025-W02"), (20251228, "2025-W52"), (20251229, "2026-W01"), (20251231, "2026-W01"),
+            (20260101, "2026-W01"), (20260104, "2026-W01"), (20260105, "2026-W02"), (20210103, "2020-W53"),
+            (20201231, "2020-W53"), (20240229, "2024-W09"),
+        ];
+        for (date, week) in weeks {
+            assert_eq!(week_identifier(date).as_deref(), Some(week), "{date}");
+        }
     }
 
     #[test]
-    fn every_day_of_two_years_falls_in_the_week_that_counting_gives() {
-        for year in [2024, 2025] {
-            let leap = year % 4 == 0;
-            let lengths = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-            for (m, length) in lengths.iter().enumerate() {
-                for day in 1..=*length {
-                    let date = year * 10_000 + (m as i64 + 1) * 100 + day;
-                    assert_eq!(week_identifier(date), Some(counted_week(year, m as i64 + 1, day)), "{date}");
-                }
+    fn a_run_of_seven_days_from_a_monday_shares_a_week_and_the_next_monday_starts_another() {
+        // 2024-01-01 is a Monday
+        let start = utc_days(2024, 1, 1);
+        let key = |days: i64| {
+            let (y, m, d) = civil_from_days(days);
+            week_identifier(y * 10_000 + m * 100 + d).unwrap()
+        };
+        for week in 0..156 {
+            let monday = start + week * 7;
+            for offset in 1..7 {
+                assert_eq!(key(monday + offset), key(monday), "day {offset} of week {week}");
             }
+            assert_ne!(key(monday + 7), key(monday));
         }
     }
 
@@ -215,12 +234,12 @@ mod tests {
         // #249: 2025-03-09 is the day the clocks go forward in New York, 2025-04-06 in Sydney they go back
         assert_eq!(week_identifier(20250308).as_deref(), Some("2025-W10"));
         assert_eq!(week_identifier(20250309).as_deref(), Some("2025-W10"));
-        assert_eq!(week_identifier(20250310).as_deref(), Some("2025-W10"));
+        assert_eq!(week_identifier(20250310).as_deref(), Some("2025-W11"));
         assert_eq!(week_identifier(20250312).as_deref(), Some("2025-W11"));
-        assert_eq!(week_identifier(20250408).as_deref(), Some("2025-W14"));
+        assert_eq!(week_identifier(20250408).as_deref(), Some("2025-W15"));
         assert_eq!(week_identifier(20250409).as_deref(), Some("2025-W15"));
         assert_eq!(week_identifier(20250101).as_deref(), Some("2025-W01"));
-        assert_eq!(week_identifier(20251231).as_deref(), Some("2025-W53"));
+        assert_eq!(week_identifier(20251231).as_deref(), Some("2026-W01"));
     }
 
     #[test]
@@ -237,7 +256,7 @@ mod tests {
         assert_eq!(week_identifier(2025011).as_deref(), Some("2025-W01"));
         assert_eq!(week_identifier(202501011).as_deref(), Some("2025-W01"));
         // a month past 12 or a day past the month's end rolls over
-        assert_eq!(week_identifier(20251301).as_deref(), Some("2025-W53"));
+        assert_eq!(week_identifier(20251301).as_deref(), Some("2026-W01"));
         assert_eq!(week_identifier(20250230), week_identifier(20250302));
     }
 }
