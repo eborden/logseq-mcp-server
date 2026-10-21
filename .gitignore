@@ -49,3 +49,6 @@ tests/fixtures/graph/journals/20[3-9][0-9]_*
 
 # Python bytecode from the wheel builder tests (scripts/pypi)
 __pycache__/
+
+# Temporal orchestrator (#626): the dev server's SQLite history. orchestrator/node_modules is covered by node_modules/ above.
+orchestrator/.temporal/

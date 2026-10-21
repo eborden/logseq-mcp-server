@@ -1,0 +1,967 @@
+# Orchestrator
+
+A Temporal-based orchestrator for the issue-to-PR loop (parent plan #625). It lives beside the Rust server and has its own `package.json`, lockfile and `tsconfig.json`, so Temporal's dependencies stay out of the root tooling. Nothing here is part of the MCP server.
+
+The first slice (#626) proved the engine runs here and survives a crash (`helloWorkflow`, kept as the engine check). `IssueWorkflow` (#629) is the first real workflow: it takes one Ready issue to an open PR that is In review on the board, and (#630) reviews that PR, runs a bounded fix loop and stops at "gate clear, waiting for the maintainer". See "IssueWorkflow" and "The review loop" below.
+
+## What v1 does not do
+
+- No webhook and no UI for the maintainer's decision: it is a signal sent by a CLI (`npm run signal`, #631). The merge is always the maintainer's.
+- No scheduler unless you create one: a person starts each run (`npm run run-issue`), or creates the queue watcher's schedule (`npm run queue -- create`, #723, "The queue watcher" and "Running the queue" below), which starts runs for eligible Ready issues up to a cap. Nothing creates that schedule by itself.
+- No Postgres, Docker or extra task queues. One task queue, `orchestrator`.
+- It never merges, never applies `golden-change`, never resolves a review thread and never moves a board item to Ready or Backlog. The one board move into In review that skips a step is a PR's own first one (Backlog to In review, #635).
+
+## Setup
+
+Needs Node 22.12 or newer.
+
+```bash
+cd orchestrator
+npm ci
+npm run typecheck
+```
+
+## Run it
+
+Three terminals, all inside `orchestrator/`.
+
+```bash
+npm run start-server    # terminal 1: Temporal dev server on 127.0.0.1:7233, history in .temporal/dev.sqlite
+npm run worker          # terminal 2: polls the "orchestrator" task queue
+npm run run-hello       # terminal 3: starts one run and waits for it
+```
+
+`start-server` runs in the foreground and stays up until you press Ctrl-C (or send SIGTERM), which stops it cleanly. Leave that terminal open: the worker and the client both need the server running, and fail with a connection error if nothing listens on `127.0.0.1:7233`.
+
+`run-hello` takes options after `--`, for example `npm run run-hello -- --name Alice --work-ms 15000`. The second activity writes its line and then wraps up for `--work-ms` (default 10 seconds), which leaves time to crash the worker after the write. Each activity appends one line to a temp file (`--log-file`, default `orchestrator-hello.log` in your temp directory), and `run-hello` prints the lines for its run.
+
+### Try a crash by hand
+
+1. Start the server and the worker, then `npm run run-hello`.
+2. While it waits, kill the worker with `kill -9 <pid>`. Ctrl-C is a graceful shutdown, so use SIGKILL to simulate a crash.
+3. Start the worker again. The same run finishes, after the dead worker's activity times out (3 seconds without a heartbeat) and is retried.
+4. The log holds one `greet` line and one `farewell` line for the run, not two of either. The retried `farewell` finds its line already there and writes nothing.
+
+Running `run-hello` again with the same `--run-key` attaches to the open run, or prints the result of a completed one without running it again. A failed run may start again under the same key.
+
+### The server
+
+`start-server` runs `temporal server start-dev` through the SDK's launcher (`@temporalio/testing`), with a SQLite file so history survives a restart. It uses an installed `temporal` CLI when `TEMPORAL_CLI_PATH` points at one. Otherwise the SDK downloads and caches the CLI binary on first start (from `temporal.download`), and that needs network access. No installer script is run.
+
+### The crash test
+
+```bash
+npm run test:crash   # starts its own in-memory server and workers, SIGKILLs one after farewell wrote its line, checks the retry wrote nothing
+npm run test:server  # runs start-server as a child process: it must stay up, accept a connection and exit 0 on SIGTERM
+npm run test:unit    # no server needed: activity idempotency (repeat, overlap, partial line, stale lock), input parsing, workflow bundling, `runClaudeSession` against a fake `claude`, the GitHub activities against a fake `gh`, the brief builder, `runImplementerSession`, and the diff guard and the branch activities against throwaway repositories with a local bare origin
+npm run test:workflow  # starts its own in-memory server: IssueWorkflow with fake activities (each side effect counted, each step's result lost once), and with the real activities against the fake gh and claude; every task replays the whole history
+```
+
+`test:crash` and `test:server` start servers on free ports, so they do not touch `.temporal/dev.sqlite`. Both need the Temporal CLI, and both fail (never skip) when it is missing. If the SDK cannot download it, check the network (a VPN can break the download) or install the CLI and set `TEMPORAL_CLI_PATH` to it. On a failed assertion `test:server` stops its child with SIGTERM first, so the `temporal` process does not outlive the test.
+
+## Configuration
+
+Read once at startup in `src/config.ts`. A bad value fails fast, naming the variable. All are optional.
+
+| Variable | Default | Used by |
+|---|---|---|
+| `TEMPORAL_ADDRESS` | `127.0.0.1:7233` | worker, client |
+| `TEMPORAL_NAMESPACE` | `default` | worker, client |
+| `TASK_QUEUE` | `orchestrator` | worker, client |
+| `TEMPORAL_PORT` | `7233` | start-server |
+| `TEMPORAL_DB_FILE` | `.temporal/dev.sqlite` | start-server |
+| `TEMPORAL_CLI_PATH` | unset (SDK downloads one) | start-server, `test:server`, `test:crash` |
+| `CLAUDE_BIN` | `claude` | `runClaudeSession` (tests set it to `test/fake-claude.sh`) |
+| `CLAUDE_PERMISSION_MODE` | `acceptEdits` | `runClaudeSession`; one of `acceptEdits`, `auto`, `manual`, `dontAsk`, `plan`, `bypassPermissions` (see "Permission modes") |
+| `CLAUDE_PERMISSION_PROMPTS` | `none` | `runClaudeSession`; `none` (a prompt is denied at once) or `host` (the CLI's own default) |
+| `CLAUDE_ALLOWED_TOOLS` | the list in `DEFAULT_ALLOWED_TOOLS` (`src/config.ts`) | `runClaudeSession`; comma-separated tool rules such as `Edit,Bash(git status *)`, replaces the default list |
+| `CLAUDE_DISALLOWED_TOOLS` | the list in `DEFAULT_DISALLOWED_TOOLS` | `runClaudeSession`; comma-separated tool rules that are denied whatever an allow rule says. What you set is added to the default list and never replaces it |
+| `CLAUDE_SETTING_SOURCES` | `project` | `runClaudeSession`; comma-separated, from `user`, `project`, `local` (`--setting-sources`). The default leaves the host user's settings and hooks out |
+| `REMOTE_ROUTINE_IMPLEMENTER`, `REMOTE_ROUTINE_REVIEWER`, `REMOTE_ROUTINE_FIXER` | unset | `runRemoteSession` (#672): the id (`trig_...`) of each role's routine. Setting any of the six remote variables turns the activity on, and then all six are required |
+| `REMOTE_ROUTINE_IMPLEMENTER_TOKEN`, `REMOTE_ROUTINE_REVIEWER_TOKEN`, `REMOTE_ROUTINE_FIXER_TOKEN` | unset | **Secrets.** The bearer token of each routine (see "Remote sessions") |
+| `REMOTE_REPO_DIR` | the worker's directory | `runRemoteSession`: the working copy whose git config holds the session markers (an absolute path) |
+| `ORCHESTRATOR_ALLOW_BYPASS_PERMISSIONS` | unset | `runClaudeSession`; must be `yes-skip-all-permission-checks` for `bypassPermissions` to be accepted. Never set it for the workflow |
+
+The only secrets are the three routine tokens of the remote sessions: they are read once at startup, handed to the fire client and nowhere else, and never logged or put in a result, an error message or the workflow history. Workflow history is stored, so a run carries identifiers only, never graph data (BR-0001).
+
+## How the crash guarantee works
+
+Temporal runs an activity at least once: a worker can die after the side effect and before the server hears about it. So the workflow decides the order and the bounds, and each activity is safe to run again.
+
+- **Bounded.** Every activity has a start-to-close timeout and a retry policy with a maximum number of attempts (`src/workflows/hello.ts`). `farewell` also has a heartbeat timeout, so a dead worker is noticed in seconds.
+- **Idempotent.** Each activity appends `<runKey> <step> ...` only if that exact line is not already there (`src/activities/hello.ts`). The check and the append run under one lock file, so two overlapping attempts (a stalled worker whose attempt was retried elsewhere) cannot both write, and a line cut short by a kill never counts as done. A lock left behind by a killed worker is broken after 1.5 seconds. The remaining gap: a holder that stalls for more than that between taking the lock and writing could be overtaken. The lock is held for milliseconds, and v1 accepts that.
+- **Deterministic workflow.** The workflow file has no clock, I/O or randomness. The run key and the work duration come in as input.
+- **Parsed at the boundary.** Activity input is parsed into a typed value first (`src/hello-types.ts`). A bad input is a non-retryable failure.
+
+## IssueWorkflow (#629)
+
+`issueWorkflow` (`src/workflows/issue.ts`) takes one Ready issue to an open PR that is In review on the board. The steps below are the first half of the loop; the second half (the reviewer, the fix loop and the merge gate, #630) is "The review loop" below, and the merge is the maintainer's.
+
+**What it does, in order.** Each step is an activity with a timeout and a bounded retry; the workflow code has no I/O and no clock.
+
+1. `checkIssue`: the trusted-author read, answered as numbers (text never enters the history). A closed issue ends the run as `skipped`.
+2. `claimIssue`: moves Ready to In progress unless a PR or a `claude/` branch exists. The workflow acts on `proceed`, never on `claimed` alone, so a retry of its own claim (`claimed: false, already_in_progress, proceed: true`) carries on. `proceed: false` ends the run as `skipped` (`open_pr`, `claude_branch` or `already_past_in_progress`), with no comment.
+3. `getBoardStatus` until the board shows In progress (3 reads, 5 s apart). The claim does not read its own write back, so the workflow does.
+4. `runImplementerSession`: reads the issue (trusted authors only), builds the brief (`src/brief.ts`) and runs one `claude -p` session on the branch `claude/<n>` in a worktree. It returns a branch, a SHA and a status. Only `success` goes on.
+5. `guardBranch`: what the session changed, over **the same range the push publishes**. It reads two lists with `git log --raw` and `git diff --raw` (names and modes, `-z`, `--no-renames` so a rename is seen at both ends): HISTORY, `origin/<base>..<sha>`, is every commit reachable from the head and not already on the base, which is exactly the set `git push` of the branch sends; NET, `origin/<base>...<sha>`, is the merge base to the head, the change the PR shows. A protected path or a special file in ANY commit of HISTORY refuses the branch, even if a later commit undoes it (a secret or a workflow added and removed is still published). NET decides whether there is anything to push (empty is refused) and whether it is too big (over 300 files is refused). A base that moved on, or that the branch was rebased or merged onto, adds nothing to either list that is not the session's own. The activity does not fetch: the worktree's `origin/<base>` is the one it started from, and a stale one can only widen HISTORY, never narrow it. The failure carries counts and no path. See "The protected set" below. Tests (`test/branch.test.ts`) cover a protected change in the first of two or three commits, one added and removed, a clean multi-commit branch, and a moved, rebased and merged base.
+6. `pushBranch`: the only push. The session cannot push (no push rule is allowed to it). The activity accepts only `claude/<number>`, never a refspec or an option, and runs exactly `git -c core.hooksPath=/dev/null push -u origin claude/<number>` (hooks off, because a session can write into the shared `.git/hooks`), then reads the remote back. Pushing an up-to-date branch changes nothing.
+7. `openPr`: the PR is opened by the workflow, not by the session. Its body is chosen inside the activity ("The PR body" below): the session's own posted body when it passes the template check, else one generated from the template, always with `Closes #<n>`. The session's account of the work is also its status comment on the issue.
+8. `addToBoard`, `setStatus` In review, then `getBoardStatus` for the PR, then `setStatus` In review and `getBoardStatus` for the issue. A PR the workflow opens is In review on the board with no manual step, and the workflow reads the board back instead of assuming the move.
+
+After step 8 the run goes on with the review loop (below) and then the maintainer's decision ("The maintainer's decision", below). Its result is `{ outcome: 'merged' | 'changes_requested' | 'decision_timeout' | 'merge_timeout', ... }`, `{ outcome: 'skipped', issueNumber, reason }`, or, with `awaitDecision: false` (the review loop's own tests), `{ outcome: 'gate_clear', ... }` or `{ outcome: 'waiting_for_threads', ... }`. A run that needs a person ends as a Failed workflow of type `IssueStopped` with the step and the reason as its details, after one comment on the issue (see "Recovering a stuck run").
+
+**What it never does.** Merge, apply `golden-change`, resolve a review thread, publish, tag or release, or move an item to Ready or Backlog. Its board writes are the claim (Ready to In progress), the PR's own first move (Backlog to In review, #635) and In progress to In review for the issue. The implementer session is told the same, and its permission lists (below) allow no push of any kind, no `gh pr`, no `gh api` and no merge. The only push is `pushBranch`, to `claude/<number>`.
+
+**Start a run.** One workflow per issue, by number. In `orchestrator/`, with `npm run start-server` and `npm run worker` running and `gh` authenticated (scopes `repo` and `project`) and the `claude` CLI on the worker's PATH:
+
+```bash
+npm run run-issue -- --issue 123                    # base main, repo dir = .., worktree <repo>/.claude/worktrees/issue-123
+npm run run-issue -- --issue 123 --base feature/x --wait   # PR against another base, and wait for the result
+npm run run-issue -- --issue 123 --resume           # re-gate the open PR of a stopped run, after a hand fix ("Resuming a stopped gate")
+```
+
+`run-issue` prints `{"status":"started",...}`, `{"status":"already_running",...}` or `{"status":"already_finished","closedAs":"COMPLETED"|"FAILED"|...}`. The last two are reported, not errors, and start nothing. `--resume` can also print `{"status":"refused","reason":"..."}` and exit 1 ("Resuming a stopped gate").
+
+**The claim and the retry rules.**
+
+- **The workflow ID is the claim.** The ID is `issue-<n>` (`issueWorkflowId`). The client starts with a conflict policy of FAIL and a reuse policy of REJECT_DUPLICATE (`src/issue-client.ts`): while a run is open a second start is refused, and once a run has closed, whatever way, the ID cannot start again. `claimIssue` is read then write and cannot see another workflow, so this, not the board, keeps two runs off one issue.
+- **REJECT_DUPLICATE is a deliberate choice, for now.** A run that stopped and needs a person holds its ID, so starting it again takes a manual `temporal workflow delete --workflow-id issue-<n>`. That is a cheap human acknowledgement while the permission model is unproven (the first real runs have not happened). The duplicate-session risk is already blocked by the branch marker, so ALLOW_DUPLICATE_FAILED_ONLY is a candidate once the first runs behave; it is a one-line change in `src/issue-client.ts`, and the tests that pin the current policy would change with it.
+- **A failed premise is never retried.** An activity's retryable failures (a timeout, a 5xx from GitHub) are retried by its own bounded policy (3 attempts; `src/github-policy.ts`, `src/board-policy.ts`, `src/claude-session-policy.ts`). A permanent one (`NotFound`, `UntrustedAuthor`, `InvalidState`, `SessionTimeout`, `MalformedResult`, `ClaudeUnavailable`, `BriefTooLarge`) is not retried, and neither is a session that ends `error`, `interrupted`, `claimed` or `existing`: any of those means a person must look, and the workflow never starts a second session.
+- **Bounds.** The whole run is limited to 50 days (the workflow execution timeout: room for at most 10 days to wait for the decision (#631), 10 days for the merge, and two parks for a person's answer of at most 14 days each, #698). Before the gate nothing caps the run as a whole except the review loop's own 4 hour timer; each step, retries included, to 2 hours (`scheduleToCloseTimeout`). A step that hits its bound stops the run as `ActivityTimeout`. `runImplementerSession` has its own start-to-close of 75 minutes (`IMPLEMENTER_START_TO_CLOSE_MS`): the read of the issue can wait out three rate limits of ten minutes before the session starts, and the session has its own 30 minute limit, so the two cannot share the session activity's 35 minutes. The guard and the push have 5 minutes each (`BRANCH_ACTIVITY_OPTIONS`).
+- **One comment per stop.** The comment is fixed words and identifiers (workflow ID, step, reason, PR number), keyed by the step and the reason (`stopped-<step>-<reason>`), so the same stop does not post twice and a different reason at the same step does. No comment is posted when the reason is `UntrustedAuthor` (not ours to talk on) or `NotFound` (nowhere to post). If the comment itself cannot be posted the run still ends Failed with the reason in its failure. Once a PR is open, the stop also leaves one line on the PR (`stopped-pr-<step>-<reason>`, "The exit statements on the PR (#715)").
+- **A crash at any point.** Temporal replays the workflow and does not run a finished step again. A step that did its side effect and died before its result was recorded is run again, and each is safe to: `claimIssue` answers `proceed`, `runClaudeSession` starts no second session for a branch that exists, `guardBranch` only reads, `pushBranch` of an up-to-date branch changes nothing, `openPr` finds the open PR, `addToBoard` and `setStatus` write only what is missing, `commentIssue` finds its key. The tests lose the result of each step once and count the side effects.
+
+**The issue text and the history.** Temporal stores every activity input and result. The issue's body and comments therefore never pass through the workflow: `runImplementerSession` reads the issue and builds the brief inside the activity, and `checkIssue` answers counts. The history holds numbers, SHAs, statuses, branch names, the PR title, the body source (a word and a count) and local paths from the start input. The PR body's text is chosen and used inside `openPr`, so it never enters the history. The brief puts the issue and its trusted comments in one tagged block as escaped JSON, after the repo's rules (untrusted-content rule, privacy rule, `--body-file`, no merging, atomic commits with the Co-Authored-By line, a status comment at the end), so issue text cannot be read as part of the rules.
+
+**Recovering a stuck run.** A run that needs a person ends Failed with an `IssueStopped` failure: `temporal workflow show --workflow-id issue-<n>` shows its step and reason, and so does the comment on the issue. A closed run holds its ID. After you have fixed the cause, remove the closed run and start again: `temporal workflow delete --workflow-id issue-<n>` (it deletes the history, and it would terminate a run that is still open, so use it only on a closed one), then `npm run run-issue`. A restart is safe: the claim answers `already_in_progress`, a finished session is not run again, and the PR is found.
+
+| Step and reason | What happened | What to do |
+|---|---|---|
+| `check` `UntrustedAuthor` | The issue's author is not an OWNER, MEMBER or COLLABORATOR. Nothing was read or changed, and no comment was posted | Re-file the issue yourself, or ignore it |
+| `check` `NotFound` | The number is not an issue of the repo (a PR number is refused too) | Start it with the right number |
+| `check` or `claim` other | GitHub failed after its retries, or the item is not Ready (`InvalidState`) | Fix the board or the cause, then delete the run and start again |
+| `skipped` (`open_pr`, `claude_branch`, `already_past_in_progress`, `issue_closed`) | Nothing to do: a PR or branch already exists, the item is In review or Done, or the issue is closed. The run completed | To run it anyway, close the PR, delete the branch and move the item back to Ready (the maintainer's move), then delete the run and start again. A stopped review loop is not resumed this way: a restart ends here as `skipped` |
+| `confirm_claim` `BoardDisagrees` | The claim's write did not show on the board in 3 reads | Look at the board. Set In progress by hand if it is wrong, then delete the run and start again |
+| `session` `SessionTimeout`, `SessionError`, `MalformedResult` | The session ran past 30 minutes, ended in error or printed something that is not a result. The branch is marked `error` | Read the worktree and the issue comment, then "Recovering a stuck branch" (delete the branch to try again) before deleting the run |
+| `session` `ClaudeUnavailable` | The `claude` executable could not start. The branch and worktree were removed | Fix `CLAUDE_BIN` or PATH, then delete the run and start again |
+| `session` `SessionInterrupted`, `SessionClaimed`, `SessionExistingBranch` | A session started and never finished (a killed worker), or the branch exists and was not made by this workflow | "Recovering a stuck branch": make sure no `claude -p` is still running, then remove the worktree and branch |
+| `review_session`, `fix_session` `RemoteExecutorUnavailable` | The run asked for `executor: 'remote'` on a worker that has no remote session activity (the six `REMOTE_ROUTINE_*` variables are unset). The remote steps are not registered, so the run stops at the first one | Set the variables, or run with `--executor local` after deleting the closed run ("Recovering a stuck run") |
+| `session` `RemoteSessionClaimed`, `RemoteLaunchFailed`, `RemoteSessionTimedOut`, `RemoteSessionNoHead` | The remote implementer: the work was already taken (an open PR or a `claude/<n>` branch), the fire failed within its budget, the session pushed nothing or its push never settled within the cap (after the one second attempt), or it finished with no head. No PR was opened | "The remote implementer" and "Remote sessions": look at the session at claude.ai/code and at the branch, delete an orphan branch, then start again |
+| `session` `NeedsInput` | The remote implementer stopped for a person a third time in one run (a run parks at most twice), or its result named no needs-input comment to wait on. It pushed nothing. No guard, no PR | "Remote sessions", "The needs-input comment": answer on the issue, delete the run, rerun with the next `--attempt` |
+| `park` `NeedsInputTimeout` | The run parked for a person's answer and no trusted comment newer than the question came within the limit (`needsInputTimeoutMs`, default 7 days). The board item stays in *Needs Input* | "The park": answer on the issue, delete the run, rerun with the next `--attempt`, and move the board item back to *In progress* if you want the board to match |
+| `park` other | The park comment or the wait failed after its retries (GitHub fault) | Look at the cause, then delete the run and start again |
+| `guard` `ProtectedPath`, `SpecialFile`, `DiffTooLarge`, `EmptyDiff` (remote) | The guard refused the branch the remote session pushed. It was deleted from the remote and no PR was opened. The comment has counts only | Make the change yourself in a PR you write, or file a smaller issue |
+| `guard` `BranchMoved`, `BranchMissing`, `DeleteRejected`, `MalformedGitOutput` (remote) | The branch is not at the sha the session reported (or moved after the guard, with the PR already open), is gone, could not be deleted, or git's output could not be read. Nothing is deleted except on a refusal | "Recovering from an orphan remote branch" in "The remote implementer" |
+| `session` `BriefTooLarge`, `InvalidState` | The issue and its comments do not fit a prompt, or the issue is closed | Shorten the issue, or leave it closed |
+| `guard` `ProtectedPath`, `SpecialFile`, `DiffTooLarge`, `EmptyDiff` | Some commit of the branch changes a protected path or a symlink, submodule or file mode, or the branch changes more than 300 files, or nothing. Nothing was pushed. The comment has counts only | Look at `git log --raw origin/<base>..claude/<n>` in the worktree. If the change is wanted, make it yourself in a PR you write; to run the issue again, delete the branch ("Recovering a stuck branch"), then the run |
+| `push` `PushRejected`, `BranchMoved` | The remote refused the push (for example `claude/<n>` already exists with other history), or the branch is not at the commit the session ended at | Look at the remote branch and the local one, fix or delete the one that is wrong, then delete the run and start again: the finished session is not run again |
+| `open_pr` any | The branch was pushed but the PR was not opened (GitHub refused it, or failed after its retries) | Open the PR by hand or delete the run and start again: the finished session is not run again, the guard and the push repeat as no-ops |
+| `board_pr`, `board_issue` | The PR is open but the board did not show the move. The comment names the PR | Move the item by hand if you must, or delete the run and start again: the restart finds the open PR and writes only what is missing |
+| `review_session`, `fix_session` `SessionError`, `SessionInterrupted`, `SessionTimeout`, `MalformedResult` | A reviewer or fixer session failed or never finished. Its marker holds the state | The loop cannot be resumed: finish the PR by hand ("The review loop", Recovering) |
+| `review_session`, `fix_session` `MalformedFindings`, `FindingsTooLarge`; `review_post` `DiffUnreadable` | The session's file was refused (see "The review loop"). Nothing was posted | Read the file in the review worktree, then finish the PR by hand (a restart skips the loop) |
+| `review_post`, `threads`, `fix_reply` any | GitHub refused the review (for example an inline comment on a line the diff does not change, which GitHub rejects; the reviewer step places those as threads or advisory findings first) or the reply, or failed after its retries | Read the worker's log and finish the PR by hand: a restart skips the loop |
+| `fix_guard`, `fix_push` any | As `guard` and `push` above, for the fixer's commits (a `remote` run has no `fix_push`, and its refusal is `FixerPushRejected`: "The remote fixer") | As above, on `claude/<n>` |
+| `review_loop` `MaxRoundsReached`, `ReviewLoopTimeout`; `gate` `ReviewNotCounted`, `HeadMismatch` | See "The review loop" | The PR is the maintainer's, by hand |
+| `ActivityTimeout`, `ActivityFailed` at any step | The step hit its 2 hour bound, or failed in a way that was not classified | Read the worker's log, then as for the step |
+
+## The review loop (#630)
+
+`reviewLoop` (`src/workflows/review-loop.ts`) is the second half of `issueWorkflow`: CLAUDE.md "Code review" steps 1 to 5, as code. It starts when the PR is open and In review, and it never merges, never applies a label, never approves or requests changes and **never resolves a review thread**. No activity does, and `test/review-loop.test.ts` fails if any source file names a call that would.
+
+**What it does, in order, until it ends.**
+
+1. **Review.** `runReviewerSession`: a fresh `claude -p` session each time, never the author's, in a detached worktree of its own at the head commit (`<worktree>-review-<round>`). Its brief (`buildReviewerBrief`) holds the PR number, the linked issue (trusted authors only) and a pointer to CLAUDE.md, and the open threads as quoted data. It cannot call `gh` or push, so it writes one JSON file, `review-findings.json`, and `postSessionReview` reads it, parses it and posts ONE review through the existing `postReview` (event `COMMENT`, never `APPROVE` or `REQUEST_CHANGES`, with the findings as inline comments), keyed `review-<pr>-r<round>-<head>`.
+2. **Gate.** `getGateStatus`, then `gateClear` (`src/gate.ts`): at least one review on the head and no unresolved thread. A pure function; no model is involved. Zero threads with zero reviews on the head is **not** clear. If GitHub still shows an older head than the one just pushed, the gate is read again (3 reads, 5 s apart) and then the run stops as `HeadMismatch`.
+3. **Threads.** `listOpenThreads` answers ids and a trusted flag, no text. A thread is the fixer's to act on when its first comment is by an OWNER, MEMBER or COLLABORATOR and the reviewer has not accepted a reply on it. With none left, the run ends (below).
+4. **Fix.** At most `maxFixRounds` times (default 3): `runFixerSession` in the implementer's worktree, then `guardBranch` and `pushBranch` for the new commits (the session cannot push), then `postFixerReplies`, then back to step 1 on the new head. **That review is the closing review**: a push moves the head, a review on an older commit never counts for the gate, so a new one is always made on the new head before the gate is read.
+
+**How it ends.**
+
+| Outcome | Meaning |
+|---|---|
+| `gate_clear` | A review on the head, no unresolved thread. The run is **waiting for the maintainer**. Result: the PR, the head, the number of fix rounds, the reviews on the head, and `advisory` and `advisoryOmitted` (counts of the last review's advisory findings, which sit in its body and hold no thread; a finding that became a file-level thread is not one of them) |
+| `waiting_for_threads` | Every open thread is one the reviewer accepted a reply on (`acceptedThreadIds`) or one the loop may not act on (an untrusted author's). The run says so in one comment on the issue and ends (with `awaitDecision: false`; otherwise it holds at the gate, see "The maintainer's decision"). The result carries the same `advisory` and `advisoryOmitted` counts (of the last review), and the comment names them when there are any. **Only a person resolves a thread, so the gate stays not clear until the maintainer resolves them.** After that, the gate is clear (a review is on the head) |
+| stopped, `review_loop` `MaxRoundsReached` | Threads were still open for the fixer after `maxFixRounds` rounds. One comment, a Failed run, the PR is the maintainer's |
+| stopped, `review_loop` `ReviewLoopTimeout` | The loop took longer than `reviewLoopTimeoutMs` (default 4 hours): the running step is cancelled (its session is stopped), one comment, a Failed run |
+| stopped, `gate` `ReviewNotCounted` | No thread is open yet no review counts on the head (a review that landed on another commit, or was not counted). Looping would post review after review, so a person looks |
+| stopped, `gate` `HeadMismatch` | GitHub did not show the head the loop pushed, after 3 reads |
+| stopped at `review_session`, `review_post`, `threads`, `fix_session`, `fix_guard`, `fix_push`, `fix_reply` | A step failed: one comment keyed by step and reason, a Failed run, as in the first half |
+
+**Why the workflow does not resolve threads.** The issue's first draft had the reviewer session resolve the threads it accepts. Sessions are denied `gh api`, and the loop does not loosen that to give them a GraphQL mutation, so nothing in the orchestrator resolves a thread. The reviewer records the threads it accepts in its output, the workflow carries those ids in its result, and a person resolves them. This is an **open question for the maintainer** (below): if a run should clear its own gate, that needs a decision about who may resolve a thread and with which token.
+
+**Bounds** (all in `src/review-policy.ts`, importable from workflow code; the numbers are assumptions for the maintainer to confirm):
+
+- `DEFAULT_MAX_FIX_ROUNDS = 3`. The input may set `maxFixRounds` (1 to 10).
+- `DEFAULT_REVIEW_LOOP_TIMEOUT_MS = 4 hours` for the whole loop, enforced by a cancellable scope in `issue.ts`. The input may set `reviewLoopTimeoutMs` (1 second to 6 hours; the small values are for tests). The whole run is limited to 50 days (see "Bounds" above).
+- Each step, retries included, 2 hours (`ISSUE_STEP_TIMEOUT`); the reviewer and the fixer activities have the implementer's 75 minutes (`REVIEW_SESSION_ACTIVITY_OPTIONS`), with 3 attempts. A session is never run twice: its marker in the repo's git config (`orchestrator.reviewer-<pr>-r<round>`, `orchestrator.fixer-<pr>-r<round>`: `started`, then `success` or `error`) turns a retry into the finished result, `SessionInterrupted` or `SessionError`, and these are not retried.
+- The thread list, the gate and the posting use the GitHub activity timeouts and 3 attempts.
+
+**What comes back from a session is untrusted output.** The reviewer's and the fixer's files are read by the activity at the boundary (`src/review-types.ts`): a file that is missing, not a plain file (a symlink is refused), over 64000 bytes, not JSON, or not in the asked shape (at most 30 findings, 50 replies, 3000 characters per comment, 4000 for the summary, a relative path checked by structure (not blank, at most 300 characters, no control, separator, invisible or reordering character and no lone surrogate, except that the zero-width joiners U+200C and U+200D stay because some scripts need them, no leading slash, no `.`, `..` or empty segment; brackets, parentheses, `~`, `#`, `=`, spaces and non-ASCII letters are all fine, and one check, `isRepoPath`, is shared with the thread and review-comment inputs; a name git writes quoted in a diff (one with a double quote or a backslash) is decoded from its C-quoted header and placed like any other, and a quoted header that is not what git writes makes the diff unreadable (see `DiffUnreadable` below), #746; wherever a body prints a path it is in a code span with a fence longer than any backtick run in it, and the text shown is neutralised, so it can differ from the real name), a positive line, thread ids of a fixed alphabet) is **refused whole, never cut**, as `MalformedFindings` or `FindingsTooLarge`, and the run stops. What passes is sanitised before it is posted: control and reordering characters removed, `<!--` and `-->` written as entities (so text cannot forge the hidden idempotency markers), every `@name` mention broken with a zero-width space (in a code span too), HTML closed (`<` becomes `&lt;`), link and image targets cut off from their text, raw URLs and `www.` no longer autolinking, and the "suggestion" code block made inert. Review and reply text never reaches the workflow: the activities return counts, thread ids and review ids, and the history tests scan every string of a finished and of a failed run.
+
+**Trust.** Only an OWNER, MEMBER or COLLABORATOR's text reaches a brief. A thread whose first comment is by anyone else is left out and counted; a comment by anyone else inside a trusted thread is dropped. The comments that remain may have been written by an earlier session (a review comment, a fixer reply); the briefs say so, and quote and escape them as data in one tagged block (`<thread-data>`), so they cannot be read as instructions.
+
+**What the sessions may do** (README, "Permission modes", for the mechanism; both are unverified until the maintainer's drill):
+
+- The reviewer (`reviewerAllowedTools`): Read, Glob, Grep, read-only git (`status`, `diff`, `log`, `show`, `rev-parse`), and `Write(/review-findings.json)`. No commit, no `npm`, no `cargo`, no `gh`. It runs under the same deny list as the implementer. With `acceptEdits` it could edit files of its own throwaway worktree, which nobody reads or pushes.
+- The fixer: the implementer's allowed tools (it needs to edit, commit and run the checks), in the implementer's worktree on `claude/<n>`. It writes its replies to `fixer-replies.json` there (kept out of `git status` through `.git/info/exclude`). Its commits go through the same `guardBranch` and `pushBranch` as the implementer's.
+
+**Recovering: a stopped review loop is finished by hand.** There is no way to resume the review loop itself. By the time it runs, the PR is open, the issue is In review and the branch `claude/<n>` exists, so a restarted `issueWorkflow` ends at the claim as `skipped` (`already_past_in_progress` or `open_pr`) and never reaches `reviewLoop`; removing a session marker changes nothing. After a stop in the loop (`SessionError`, `SessionInterrupted`, `MalformedFindings`, `FindingsTooLarge`, `DiffUnreadable`, `HeadMismatch`, `ReviewNotCounted`, a GitHub refusal at `review_post`, `MaxRoundsReached`, `ReviewLoopTimeout`), the PR is the maintainer's. The same holds for every step after `board_issue`: the loop's steps, `host_integration` and the maintainer's decision steps (`decision_gate`, `decision_comment`, `merge_wait`, `board_done`, `issue_close`). The queue watcher's report gives no restart command for any of them ("Closed runs"); for a stop at `host_integration` or in a fix round (`fix_session`, `fix_guard`, `fix_push`, `fix_reply`) it names the re-gate of "Resuming a stopped gate" instead. For the stop in front of you: read the stop comment, look at the PR and its threads, and review, fix and resolve by hand. For `MalformedFindings` and `FindingsTooLarge` the refused file is still in the review worktree (`<worktree>-review-<round>`), for reading before you remove it with `git worktree remove --force`. Since #747 there is an entry point that skips the first half of a run, but it re-gates a head and runs none of the loop ("Resuming a stopped gate"): a person still reviews or fixes, and the loop's own steps have no restart. The session markers are `orchestrator.reviewer-<pr>-r<round>-<head>` and `orchestrator.fixer-<pr>-r<round>` in the repo's git config (a `remote` run's are `orchestrator.remote-reviewer-<pr>-r<round>-<head12>` and `orchestrator.remote-fixer-<pr>-r<round>`) (`git -C <repo> config --local --get-regexp '^orchestrator\.'` lists them).
+
+*To continue by hand:* read the stop comment (and `temporal workflow show --workflow-id issue-<n>`), then review the PR's head, fix what the open threads ask on `claude/<n>` and push, reply on the threads, resolve the answered ones (only a person does) and merge as for any PR. The run is already closed (Failed), so nothing else waits on it. For `ReviewNotCounted`, first check that the account whose token the orchestrator uses is an OWNER, MEMBER or COLLABORATOR of the repo.
+
+*To abandon it,* after stopping any `claude -p` still running (`pgrep -fl "claude -p"`): `git -C <repo> worktree remove --force <worktree>-review-<round>`, `git -C <repo> worktree prune`, `git -C <repo> config --local --unset <marker>` for each marker the list shows for the PR, close the PR, and delete the branch if it should go (`git -C <repo> push origin --delete claude/<n>`, then "Recovering a stuck branch"). Removing a marker resumes nothing: the run that read it is closed. Moving the issue back to Ready is the maintainer's. To run the issue again after that, delete the run (`temporal workflow delete --workflow-id issue-<n>`) and `npm run run-issue`.
+
+**What becomes a thread, and what stays advisory (#714).** GitHub rejects a whole review (422) when one inline comment is not on a line the PR changes, so before it posts, the activity runs `git diff -U0 origin/<base>...<head>` (in the repo, not in the session's worktree), parses the changed lines with a pure function (`changedLines`, `splitFindings` in `src/review-types.ts`) and sorts each finding:
+
+| Finding | Becomes | Holds the gate, and the fixer is handed it |
+|---|---|---|
+| On a changed line | An inline comment of the one review | Yes |
+| On an unchanged line of a file the PR changes | A **file-level thread** (`addReviewThread`, below), the path and the original line in its first comment | Yes |
+| On an unchanged line of a changed file, when GitHub does not take the file-level thread | A thread on the **nearest changed line** of that file (smallest distance, ties to the earlier line); its text says it is placed there and where it belongs | Yes |
+| On a file the PR does not change, or one with no changed line to fall back to, or past the cap of 10 file-level threads per review, or when GitHub refuses both threads (each with its own reason) | **Advisory**: listed in the review body with the reason | No: a body-only finding opens no thread. A person reading the review sees it; the loop does not |
+
+The file-level thread is opened by the worker, not by the cloud session, before the review is posted, so the review body can say what became of every finding (its counts line, and the advisory list with a reason each). It is one REST review comment with `subject_type: file` (`addReviewThread` in `src/activities/github.ts`; with a `line` it is a thread on that line). A GraphQL `addPullRequestReviewThread` would add to the viewer's pending review when no review is named, and a pending thread is invisible to the gate and the fixer, so the REST comment is used; that function is the one place to change if GitHub refuses it. Each thread's first comment carries a hidden marker keyed by round, head and a hash of the finding, and a retry looks for it in the open threads first, so a retry of the posting opens no second thread (an advisory finding is in the review body, which is itself keyed). After that the existing machinery applies unchanged: the thread is open, it holds the gate, the fixer is handed it (its `line` is null in the thread data and its brief says so), replies in it, the reviewer accepts and a person resolves. A thread GitHub refused (a non-retryable client error such as a 422, or an input the boundary refused) is never swallowed: it falls back, or it is advisory with its reason in the body (`thread_failed` for a second refusal, `no_changed_line` for a file with no line to fall back to). A failure that is not a refusal (a 5xx, a timeout, a 429, an exhausted rate limit, a failed read of the thread list) is not turned into an advisory finding: the activity fails and the workflow retries it, which is safe because a thread is found by its key. A thread's path is checked as a path of the repository (`isRepoPath`, the check the finding parser and the review comments share: not blank, no control or invisible character, no leading slash, no `.`, `..` or empty segment, at most 300 characters), not against a character list. If the diff cannot be read and the file has findings, the run stops as `DiffUnreadable` and posts nothing, because a review whose findings no thread holds could clear the gate; with no findings the review is still posted. The body list is capped at 20000 characters and says how many more were left out. The result carries counts only (`comments` inline, `fileLevel`, `nearest`, `advisory`, `omitted`), never the text. The reviewer brief asks for a changed line whenever one shows the problem, and an unchanged line only when none does. **UNVERIFIED:** that GitHub accepts `subject_type: file` for a changed file, and that the fixer's `/replies` route works on a file-level thread's first comment, were not run against real GitHub: the tests use the fake `gh`. Confirm both once on a throwaway PR.
+
+**A findings file is read only when the session wrote it.** The reviewer's worktree is a checkout of the PR's own tree, so before the session starts the activity removes any `review-findings.json` that tree carries (a link itself, not its target). After the session it refuses the file when it is missing, is not a plain file (a link is not followed), or is tracked by git (the PR's own file, not the session's). The fixer's replies file gets the same checks.
+
+**Reviewer read access.** The reviewer, like the implementer, is allowed bare `Read`, `Glob` and `Grep`, so a session steered by hostile issue or PR text could read host files outside its worktree and quote them in a finding, which is then posted publicly. The permission lists are risk reduction, not a boundary. The boundary is the dedicated OS user that runs the worker, which has no personal files, and the narrowly scoped GitHub token. The sanitiser covers only the output side: it neutralises mentions, links, images, raw URLs and hidden markers in what is posted, and it cannot know that a quoted line came from a file the session should not have read.
+
+**The token's account must count.** The gate counts only reviews by an OWNER, MEMBER or COLLABORATOR. If the orchestrator's `gh` token belongs to an account that is none of these on the repository, its own reviews never count and every run stops at `ReviewNotCounted`. The gate is read up to 3 times (5 s apart) before that stop, to allow for GitHub lagging a review it just accepted.
+
+**`test/review-loop.test.ts` checks the source for calls that resolve, approve, merge, label or write to the board.** The scan is in `test/invariants.ts`: GraphQL mutation names, REST routes, `gh` argv, method names and event names, read through comments, string concatenation, template literals and `join`, with board writes allowed only in `activities/github.ts`. A test adds each form to a scratch copy of the review activity to show it is caught. It is a text scan and a **tripwire, not a proof**: a name built at run time from data, or code outside `src/`, is invisible to it, and the permission model, the token's scopes and review are what hold the line.
+
+
+## The maintainer's decision (#631)
+
+After the review loop the run waits for the maintainer, with a signal, at no cost and across restarts. Nothing here merges, applies `golden-change`, or moves a board item into Ready or out of Backlog.
+
+**Send it.** `npm run signal -- <issue> approved|changes_requested [--message "<text>"]`. The CLI parses the arguments into the typed payload `{ decision, at, message? }` (`at` is today's local date, or `--date YYYY-MM-DD`; a message is at most 1000 characters), refuses when `issue-<n>` is not running, and sends the `maintainerDecision` signal. The workflow parses the payload again at its boundary. The message is the one piece of free text that reaches the workflow's history, because it travels in the signal.
+
+**What the run does, in order** (`src/workflows/decision.ts`):
+
+1. **Hold.** It reads the PR (`getPrState`) and the gate (`getGateStatus`, then `gateClear`) every `decisionPollMs` (default 1 hour) until the gate is clear. A PR the maintainer merged with no signal goes straight to step 6 after one comment saying no decision was recorded (`decisionRecorded: false`); a PR closed unmerged stops the run (`PrClosedUnmerged`). A decision that arrives before that is **held, not rejected**: it is kept, and used only on a clear gate. A decision that arrives and finds the gate open again (a thread was opened) waits again.
+2. **Wait.** On a clear gate with no decision, it waits for the signal until `decisionTimeoutMs` (default 7 days, 1 second to 10 days; an assumption for the maintainer to confirm) in all, held time included.
+3. **Comment.** One PR comment (key `decision-<pr>`): the decision, its date, the maintainer's message as a quote, the head commit, and, when the PR changes golden results, call ceilings, ADRs or business rules (counted by `getPrChanges`, no path leaves the activity), a sentence saying that the label or the OK is the maintainer's and the workflow applies nothing.
+4. **`changes_requested`** ends the run (`outcome: 'changes_requested'`). It does not touch the branch.
+5. **`approved`** goes on: it reads the PR (`getPrState`) every `decisionPollMs` until it is merged, up to `decisionTimeoutMs` more. A PR closed unmerged stops the run (`merge_wait`, `PrClosedUnmerged`), and so does a head that moved after the approval (`HeadMovedAfterApproval`: an approval does not survive a push). No merge in time is `outcome: 'merge_timeout'` with one comment on the PR.
+6. **Done.** On a merge it sets the PR and then its issue to Done with the #635 activities and reads each status back (`BoardDisagrees` if the board does not show it), then checks the issue is closed (`checkIssue`) and closes it if not (`closeIssue`: the one new write, `state: closed` with the reason `completed`, read back, an issue of a trusted author only). A PR merged into a branch other than the default does not close its issue, and the cause of #626 closing on its own was not established, so the run verifies instead of assuming. `outcome: 'merged'` says whether the run closed it (`issueClosedByRun`).
+
+**A decision binds to the head current when the gate clears**, not to the head the maintainer saw when they sent it; the comment names that head. A push after the comment stops the run (`HeadMovedAfterApproval`).
+
+**A merge wins over a decision.** If the PR is merged while a `changes_requested` is held, the run records that decision (its comment says the run does not change the branch again), then moves the PR and the issue to Done anyway, since the merge happened.
+
+**A timeout never approves.** With no decision by the limit the run comments on the PR (key `decision-timeout-<pr>`) and ends `outcome: 'decision_timeout'`.
+
+**A duplicate or malformed signal changes nothing.** The inbox keeps the first well-formed decision. Everything after it, and every payload that does not parse, is only counted (`ignoredSignals` in the result). So a second, different word cannot undo the first; to change a decision before it is used, start the review again by hand.
+
+**What changed for the review loop.** With the decision wait on, a loop that finds only threads it may not act on (`waiting_for_threads`) no longer ends the run: it comments once, then holds at the gate until the maintainer resolves them, so a decision signalled meanwhile is not lost. At the limit it ends `decision_timeout`. `awaitDecision: false` keeps the old endings.
+
+**Not done here.** A webhook, a UI, the merge, and the `golden-change` label.
+
+### The exit statements on the PR (#715)
+
+A reader of the PR could not tell whether it was ready to merge, because the run commented only on stops, the decision and timeouts. The run now says where its state changes, on the PR. Each statement is built from counts, SHAs, thread ids and fixed words (`gateClearComment`, `gateHeldComment`, `stopPrComment` in `src/issue-types.ts`): no review, thread or model text. Each says it is a gate result and **not an approval**. Each is keyed by the PR and the head, so a retry or replay posts it once, and a failure to post is a failed step (the run stops at that step), never a silent skip.
+
+| When | Where it is posted | Key | What it holds |
+|---|---|---|---|
+| The gate is clear for a head, the first time (`decision.ts`, only with the decision wait on) | the PR | `gate-clear-<pr>-<head>` | The head, reviews on the head, unresolved threads (0), fix rounds used, the `host/integration` state with its counts (or that it was not asked for or not required), the number of advisory findings of the last review, linked to that review by its id (`#pullrequestreview-<id>`; they sit in that review's body and hold no gate; the count and the link are said only when that review was on this head, otherwise the statement says the count is not known for this head and links nothing; the id travels with the counts as `lastReviewId` from the review loop's result to the decision stage, #718), the workflow ID, and how the maintainer decides: `npm run signal -- <issue> approved` or `changes_requested --message "..."` |
+| The loop ends `waiting_for_threads` (`review-loop.ts`) | the PR, besides the issue's own comment | `gate-held-<pr>-<head>` | The head, the open thread count, the accepted thread ids. With the decision wait on, it says the run keeps reading the gate and posts a gate-clear statement once a person resolves the threads and the gate is clear; with `awaitDecision: false` it says the run ends there and a new run is needed |
+| A stop, with a PR open (`issue.ts`) | the PR, besides the issue's stop comment | `stopped-pr-<step>-<reason>` | One line: the step and the reason, and that the detail is on the issue |
+
+A statement names its head (`for head <sha>`), so a push makes it visibly stale: the next clear gate on the new head posts a new one, and none is posted while the gate is not clear. The statement is not a decision and changes nothing the gate requires; the run still never approves, merges, labels or resolves. With `awaitDecision: false` the run ends before the decision stage, so no gate-clear statement is posted (the signal command would have nothing to reach).
+
+## The executor flag (#671)
+
+`executor` is a field of the run's input, `'local'` or `'remote'`, and says where the model sessions (implementer, reviewer, fixer) run. Absent means `local`. It is parsed with the rest of the input (`parseIssueWorkflowInput`), so any other value fails the run as `InvalidInput` before an activity, and the review loop gets it with the rest of the input.
+
+- `local` is v1, unchanged: the workflow calls `runImplementerSession`, `runReviewerSession` and `runFixerSession` exactly as before. The default does not change.
+- `remote` runs the **implementer** (#673, "The remote implementer" below), the **reviewer** (#674, "The remote reviewer" below) and the **fixer** (#675, "The remote fixer" below) remotely. On a worker without the remote session activity the run stops at the first remote step with `RemoteExecutorUnavailable`, one comment on the issue and no session started.
+
+**Turn it on.** `npm run run-issue -- --issue 123 --executor remote`. Any value other than `local` and `remote` is an error before a workflow starts. The one choice point is `onExecutor` in `src/workflows/executor.ts`.
+
+## The remote implementer (#673)
+
+With `executor: 'remote'` the implementer step runs a remote session, and **the order of the guard and the push changes**, because the session pushes its own `claude/<n>` branch and the worker cannot stop it (spike #645: a cloud session can push `claude/<n>`, a bare push runs no CI, and it cannot delete a remote branch). Code: `src/workflows/remote-implementer.ts`.
+
+| | `local` (v1, unchanged) | `remote` |
+|---|---|---|
+| 1 | `runImplementerSession`: `claude -p` on the worker | `runRemoteImplementerSession`: reads the issue, builds the brief inside the activity (so the issue text stays out of the history), calls `runRemoteSession` as role `implementer` with the attempt number |
+| 2 | `guardBranch` on the **local** branch | `guardRemoteBranch`: fetches `claude/<n>` and the base with fixed argv (hooks off), checks the fetched tip is the sha the session reported, runs the same HISTORY and NET checks, and reads the remote again: a tip that changed while it ran is refused |
+| 3 | `pushBranch`, the only push | **no push**: the session already pushed |
+| 4 | `openPr` | `openPr`, only on the sha the guard passed |
+
+**The remote implementer's brief** is `buildRemoteImplementerBrief` (`src/brief.ts`, #688), not the local `buildBrief`. It shares the rules and the issue data block with the local brief (one function, so a rule change reaches both) and differs in one place: it tells the session to push its own `claude/<n>` branch with a normal push (`git push -u origin claude/<n>`, never forced), tells it not to open a PR (the orchestrator guards the pushed branch and opens it), and does not say "you cannot push" or that skills are unavailable, which are false in a cloud session. The local brief is pinned byte for byte by `test/data/local-brief.snapshot.txt`.
+
+**A guard refusal** (`ProtectedPath`, `DiffTooLarge`, `EmptyDiff`, `SpecialFile`) deletes the remote branch with `deleteRemoteBranch` (`git -c core.hooksPath=/dev/null push origin --delete claude/<n>`, then it reads the remote back; a branch that is already gone is success, so a retry is safe), then stops the run at `guard` with the guard's reason, one keyed comment (`stopped-guard-<reason>`) holding the counts and the fact that the branch was deleted, and no PR. No path is in the comment. If the delete itself fails, the run stops at `guard` with the delete's reason (`DeleteRejected` or an activity failure) and the branch is still there: see below.
+
+**Head movement.** After the PR opens, the workflow reads the PR's head back; if it is not the guarded sha (the branch moved between the guard's last read and the PR's creation) the run stops at `guard` with `BranchMoved`, says in the comment that the PR is open on an unchecked commit, and does not delete the branch. A branch whose tip is not the sha the session reported (`BranchMoved`), or that is gone (`BranchMissing`), or that moved while the guard ran, stops the run at `guard`. It is **not** deleted: nothing says the branch is bad, only that it was not the one that was checked. No PR is opened on an unguarded sha.
+
+**The attempt counter** lives in the workflow. The first call passes attempt 1. A session that ended with no push at all (`timed_out`, no head) gets one more attempt, number 2, which fires a new session because the marker key carries the attempt ("Remote sessions" below); a second miss stops with `RemoteSessionTimedOut`. A session that stopped for a person (a needs-input comment) parks the run instead ("The park" below): the answer starts the next attempt number, and a park does not spend this no-push retry (the two budgets are separate, so a park before or after the retry leaves the other intact). A claim (`RemoteSessionClaimed`), a failed launch (`RemoteLaunchFailed`), a push that never settled (`RemoteSessionTimedOut`) and a finish with no head (`RemoteSessionNoHead`) stop at `session` with no second attempt. A guard refusal stops the run for a person, so the counter does not advance there. **Residual risk:** `timed_out` means the wait hit its cap, not that the session is dead, and a remote session cannot be stopped from here. Attempt 1 may still be running when attempt 2 fires, and both would push `claude/<n>`. The claim stops attempt 2 only when attempt 1 has already pushed (`branch_exists`). Check claude.ai/code and stop the old session before a re-run. The run input takes an optional `attempt` (a positive whole number, `--attempt <n>` on `run-issue`, default 1): the first attempt number of the remote implementer, with the in-run counter going on from there. **To recover from a guard refusal, delete the closed run and start it again with the next attempt number** (`npm run run-issue -- --issue <n> --executor remote --attempt 2`): the new key fires a fresh session and does not re-attach to the old one, and no marker is edited by hand. A re-run without `--attempt` starts at 1 and re-attaches to the first session's marker.
+
+**Recovering from an orphan remote branch.** The branch `claude/<n>` is left on the remote when a run stops at `guard` for head movement or when the delete failed, and when a worker dies between the session and the guard. Nothing opens a PR for it, and CI does not run on a bare push. A new run for the issue is refused by the claim (`branch_exists`) while it is there. To recover:
+1. Look at the branch (`git fetch origin claude/<n>`, then `git log origin/main..FETCH_HEAD`). It is the session's work, unchecked.
+2. If it is not wanted, delete it from your own credential: `git push origin --delete claude/<n>`.
+3. Delete the closed workflow run ("Recovering a stuck run") and start again with the next attempt number (`--attempt`, above), so the new run fires a fresh session.
+
+**What these tests do not cover.** A real remote session, a real worker, the LogSeq suite and a real `git push --delete` against GitHub (including branch-protection answers) are not run: the branch activities run against local bare repositories, and the session is a fake that pushes from a second clone.
+
+## Host integration (#647)
+
+`runHostIntegration` (`src/activities/host-integration.ts`) runs the integration suite on a PR head. The suite needs the LogSeq desktop app, which is macOS only, so this is the one activity that runs on the maintainer's Mac and the only one on the `host` task queue. It uses no model and no GitHub call. The issue workflow calls it at the gate when a run is started with `--host-integration` (#648, "The host integration check at the gate" below); without that flag nothing calls it.
+
+**What runs.** For `{ pr, headSha, base }`, in a throwaway detached worktree under the OS temp directory (`logseq-mcp-orchestrator-host/pr-<n>/tree`, never inside your working copy):
+
+1. remove what an earlier run of the same PR left (stop its instance, remove its worktree);
+2. `git fetch` the base and `refs/pull/<n>/head`, `git worktree add --detach` at `origin/<base>`, `git merge --no-edit <headSha>`. A merge conflict is the outcome `conflict` and no suite starts;
+3. `npm ci`, `cargo build --locked`, `npx tsx scripts/logseq-instance.ts start`, `npm run test:integration -- --reporter=json --outputFile=<file>`, and `npx tsx scripts/logseq-instance.ts stop` (in a `finally`: after a failure, a timeout and a cancellation too);
+4. `git status --porcelain -- tests/fixtures/graph` must be empty, or the outcome is `fixture_dirty`;
+5. remove the worktree and every output file.
+
+**The result** is `{ outcome: 'pass' | 'fail' | 'conflict' | 'fixture_dirty' | 'setup_error', passed, failed }`: one fixed word and two integers (from the JSON reporter's `numPassedTests` and `numFailedTests`). No test name, message or path is returned. The raw output of every command goes to a file in the run's directory, capped at 64 MiB per command, and is deleted with the worktree. Log lines carry a step name and an exit code only.
+
+**Bounds.** One deadline for the whole run (40 minutes), cut into a timeout per command, a heartbeat from start to end, and a start-to-close backstop of 50 minutes. A failing suite is returned as `fail` and never retried. A failure before the suite starts (fetch, worktree, install, build, instance start) is thrown once and retried once; the second attempt returns `setup_error`. A timeout returns `setup_error` and is not retried. A report-less suite (its global setup refused, or it crashed) is `setup_error`, never a pass.
+
+**The commands run the PR's code** (install scripts, `build.rs`, the tests) as the worker's user, so they get an allowlist of environment variables (`PATH`, `HOME`, `CARGO_HOME` and a few more) and not the worker's: no token reaches them, and no `LOGSEQ_MCP_CONFIG`. Send a branch here only after `guardBranch` accepted it. LogSeq starts only through `scripts/logseq-instance.ts`, which sandboxes the app's profile; the suite refuses port 12315 and never reads `~/.logseq-mcp/config.json`.
+
+**Turning it on.** The worker starts a second worker in the same process, for the `host` queue, only when `HOST_TASK_QUEUE` is set (`host`, `1` or `true`; anything else stops the worker at startup). It registers only `runHostIntegration` with `maxConcurrentActivityTaskExecutions: 1`: **one run at a time**, because one LogSeq instance serves one suite. Run exactly one such worker. **UNVERIFIED:** whether a `SIGINT` or `SIGTERM` waits for the running activity's cleanup (instance stop, worktree removal) before the process exits; neither worker sets `shutdownGraceTime`. The drill below checks it. Until then, treat Ctrl-C during a run as a crash and use the recovery below. `HOST_REPO_DIR` (an absolute path) names the working copy the worktrees are made from; without it the worker uses the directory it started in. Without `HOST_TASK_QUEUE` the worker is exactly as before.
+
+```bash
+HOST_TASK_QUEUE=host HOST_REPO_DIR=$HOME/src/logseq-mcp-server npm run worker
+```
+
+**Recovering.**
+
+- *A stuck worktree.* The next run of the same PR removes it first. By hand: `git -C <repo> worktree remove --force <tmp>/logseq-mcp-orchestrator-host/pr-<n>/tree`, then `git -C <repo> worktree prune`, then delete `<tmp>/logseq-mcp-orchestrator-host/pr-<n>`.
+- *A LogSeq instance left running* (the worker was killed with SIGKILL, so no `finally` ran). From the worktree, if it still exists: `npx tsx scripts/logseq-instance.ts stop`. The next run of the same PR does this itself. Otherwise `npx tsx scripts/logseq-instance.ts status` in the worktree shows it, and a second LogSeq app on its own profile can be quit by hand. Your own LogSeq is never touched.
+- *`fixture_dirty`.* Something wrote to the committed fixture. Find out what before running again; never commit a change LogSeq made to it (`tests/integration/setup.md`).
+
+## The host integration check at the gate (#648)
+
+With `hostIntegration: 'auto'` the run checks the PR head on the host before it lets the maintainer's decision through. The check is the integration suite of `runHostIntegration` (#647), the rule for when it is needed and the `host/integration` commit status are `src/integration-policy.ts` (#646), and the workflow side is `src/workflows/host-integration.ts`, called from the hold loop of `src/workflows/decision.ts`. **The default is `off`: with the field absent or `off` no new activity is called and the run is what it was.**
+
+**Turn it on.** `npm run run-issue -- --issue 123 --host-integration` sets `hostIntegration: 'auto'` in the run's input. It needs a worker polling the `host` queue (`HOST_TASK_QUEUE=host`, see "Host integration" above) on a machine with the LogSeq desktop app. Without one the check waits in the queue and the step ends at its 2 hour bound as `IntegrationTimeout`. It applies when the run waits for the decision (`awaitDecision` true, the default): with `awaitDecision: false` the run ends at the review loop and the check is not run.
+
+**What it does, in order**, for the head the gate shows, once a review is on it and no thread is open (the head the review loop settled, or a later head a person reviewed):
+
+1. `getHostIntegrationNeed`: the pure rule over the PR's changed files. A change under `src/`, `scripts/`, `tests/fixtures/` or `tests/integration/`, a `Cargo.*` file or the toolchain pin needs it, and so does a PR with more files than one call reads. `orchestrator/src/` is not `src/`. Only a boolean leaves the activity, never a path. If it is not needed the gate is as before and nothing is posted.
+2. `getHostIntegration` for the head. A `success` already on it ends here: the suite is not run again, so a replay of the run, or a worker restart inside it, does not run it twice. A new run cannot reach this step for a PR that is already In review (below).
+3. `postCommitStatus` `pending`, then `runHostIntegration` on the `host` queue (40 minute deadline, 50 minute backstop, two attempts, no retry of a test failure), then the result as the status: `pass` is `success`, `fail` is `failure`, and `conflict`, `fixture_dirty` and `setup_error` are `error`. The description is `<n> passed, <n> failed` or `no counts` (a conflict or a setup error ran no suite, so no counts are given).
+4. Anything but `pass` stops the run for a person (below), with one exception: a `fail` of a fixture run, with `executor: remote`, goes to a remote fixer ("A failed check goes to the remote fixer" below).
+5. The gate reads `getHostIntegration` for the gate's own head on every pass and holds unless it shows `success` (`gateClear` with its `hostIntegration` field). A status on another commit counts for nothing: after a push the new head has no status, so once a person has reviewed it the check runs again for that head (once per settled head, not after each fix push), and the old pass does not clear the gate.
+
+A pass does not replace the maintainer: the decision comment, the merge and everything after it are as before. Nothing here merges, applies a label or resolves a thread.
+
+**Stop reasons** (step `host_integration`; one keyed comment on the issue with the commit, the outcome word and the counts, no output of the suite):
+
+| Reason | Status written | What happened | What to do |
+|---|---|---|---|
+| `IntegrationFailed` | `failure` | The suite ran and some tests failed, and no fixer took it: the run is local, or the activity could not prove a fixture run, or no fix round is left, or the fixer pushed nothing | Fix the change in the PR by hand and push, have the new head reviewed, then `--resume` (below) |
+| `IntegrationConflict` | `error` | The head does not merge onto its base, so no suite ran | Merge or rebase the base into the branch and push, have the new head reviewed, then `--resume` |
+| `IntegrationFixtureDirty` | `error` | The suite ran but changed the committed fixture graph, so its result is not trusted | Find what wrote to `tests/fixtures/graph/` (never commit a change LogSeq made to it), fix the cause and push if it is in the PR |
+| `IntegrationSetupError` | `error` | The host could not set up or run the suite (fetch, install, build, instance start), or it produced no report | Read the host worker's log and "Host integration" above and fix the host |
+| `IntegrationTimeout` | `error` | The activity hit its bound (heartbeat, deadline or the 2 hour step limit), or no host worker took it | Check that the host worker is running and LogSeq is installed |
+| other (the failure's type word, `ActivityTimeout` or `ActivityFailed`) | Whatever the head already had (none, or an earlier result), except: `pending` if the post of the result failed, and the check's own result (normally `success`) if only the gate's read of the status failed | A GitHub call of the check failed after its retries: the changed-files read (`getHostIntegrationNeed`), a read of the head's status in the check, the `pending` post or the result's post, or the gate's read of the status after the check. The suite did not run, except for the last two, where it ran and only the post or the read failed | Look at the cause (GitHub, the token). Then read the head's `host/integration` status on GitHub: if it shows `success` there is nothing to run again |
+
+**A stop here is not restarted, and it is re-gated.** `host_integration` is a `resume` step of `STOP_STEP_RECOVERY` (`src/queue-types.ts`), not a `restart` step. By then the PR is open and the issue is In review, so a restart (delete the closed run, then `npm run run-issue`) reads In review at the claim and ends `skipped` as `already_past_in_progress`. It never reaches the check again, so it is not a way to check a new head. What does reach it is `npm run run-issue -- --issue <n> --resume` (add `--host-integration`), which re-gates the PR's current head with no session and no new PR ("Resuming a stopped gate" below). A queue watcher's report names that command in the skip's `instead`.
+
+What a person does after any stop in the table: do the "What to do" cell, push if the PR needed a change, have the new head reviewed (the gate wants a review on the head), then `--resume`. The run checks the head the PR now has, once: a head whose `host/integration` status already shows `success` is not run again. The status of the stopped run stays on the commit it checked, and a new head has none. A stop in the check's own fix round (`fix_session`, `fix_guard`, `fix_push`, `fix_reply`) is re-gated the same way. If you would rather run the suite yourself (`npx tsx scripts/logseq-instance.ts start`, `npm run test:integration`, then `stop`, as in `docs/development.md`), nothing in the orchestrator reads that result: the status on the PR stays as the stopped run wrote it.
+
+**What it does not do.** Run the suite anywhere but the host, post or log any suite output to GitHub (a comment or a commit status holds counts only), send anything but a `fail` of a proved fixture run to a fixer, or change the default to `auto` (a later change, after one real run). **UNVERIFIED:** a real run needs LogSeq and the host worker, and the tests use fakes for both.
+
+### A failed check goes to the remote fixer (#676)
+
+With `executor: remote` and `hostIntegration: auto`, a `fail` that carries a failure summary starts **one** remote fixer round instead of stopping the run.
+
+**What leaves the Mac, and why that is allowed.** The host activity returns, for a `fail` only, a bounded summary: up to 10 failing test names (200 characters each) and one assertion line each (300 characters each, first line, colour codes and control characters removed), plus the number of failing tests left out and the number of fields cut (BR-0006: a cap says so). It goes into the activity's result, so into workflow history, and from there into the remote fixer's brief as escaped data in a `<host-failure-data>` block. It never goes into a comment, a commit status or a log: the status and the stop comment keep the counts. BR-0001 as narrowed in #669 and #685 allows this only for a run on the committed fixture graph, whose every value is fictional. So the activity makes the proof itself, in this order, and a run that fails any step has **counts only and no summary**: `scripts/logseq-instance.ts start` exited 0 in that run, the suite's environment holds no `LOGSEQ_MCP_CONFIG` (the allowlist drops it, so `connectFixture()` can only read the config `start` wrote in that worktree), and that config's API address is loopback on a port in the fixture instance's range 12320 to 12399 (never 12315). The check is not a flag or a field of the input. **Limit:** the activity proves which instance the suite was pointed at, not that the suite called `connectFixture()`: it relies on the suite's global setup doing so, as `tests/integration/setup.md` says. Also, `scripts/logseq-instance.ts` and `tests/integration/` come from the PR head under test, so a PR that edits them could write a config in the fixture range that points elsewhere: the summary is only as trustworthy as that PR's author (the remote fixer is barred from `scripts/` and `tests/guards/`, an implementer is not). The suite also refuses port 12315 by itself. The sanitiser (line, length and count bounds) is `summariseHostFailures` in `src/host-integration-policy.ts`.
+
+**What the workflow does.** `fix` in `src/workflows/host-integration.ts` calls the review loop (`reviewLoop` with `hostFailure`): one remote fixer round (`runRemoteFixerSession`, the same keyed replies comment, `guardRemoteBranch` on the fetched tip), then the review of the new head as after any fix. The round counts against `maxFixRounds` together with the rounds the review loop used. The new head is then checked once, when a review is on it and no thread is open, as for any head. A second failure may use another round if one is left, so the number of host fixer rounds is bounded by `maxFixRounds` and not by this feature.
+
+**What still stops for a person.** `error` (a run that did not finish), `conflict`, `setup_error` and `fixture_dirty`; a `fail` with no summary (not proved to be a fixture run, or a report with no failing test to name); a `fail` with no fix round left; a fixer that pushed nothing (`IntegrationFailed`, one comment, counts only); a guard refusal of the fixer's push (`FixerPushRejected`); and every `fail` with `executor: local`, which is unchanged. **UNVERIFIED:** a real remote fixer round on a real host failure was not run; the tests use fakes for the host and the sessions.
+
+## Resuming a stopped gate (#747)
+
+A run that stopped at `host_integration` (or in the fix round that comes with it) leaves an open PR and an issue In review. A restart cannot reach the gate again: it reads In review at the claim and ends `skipped`. `--resume` is the entry point that does: it re-gates the PR's **current head** with the same gate, the same host check and the same statement as the full run, and starts no implementer, reviewer or fixer and opens no PR.
+
+**Use it.** Mend the PR by hand (push the fix), get the new head reviewed, then `npm run run-issue -- --issue 123 --resume [--host-integration] [--repo-dir <abs>] [--wait]`. Add `--host-integration` if the stopped run had it (the flag is the run's input and is not stored anywhere). `--base`, `--worktree-dir`, `--attempt` and `--executor` are refused as a bad input before any connection: the base is the PR's own, and no session of any kind runs. A queue watcher's skip for a stopped `host_integration` or `fix_*` run names this command in `instead`.
+
+**What the command does, in order.**
+
+1. Refuses with `run_open` when the issue's own run (`issue-<n>`) is still open: it holds the gate and the signal, and a second gate would race it.
+2. Reads GitHub (reads only, `resolveResume` in `src/activities/github.ts`): the issue is open and from a trusted author, its board item is In review, and it has exactly one open PR (found as the claim finds it, by branch `claude/<n>` or a `Closes #<n>` line of a trusted author). Then it reads that PR's head and base. Anything else is a refusal with one of the words below, printed as `{"status":"refused","reason":"..."}` with exit code 1, and nothing is started. A failed read is an error, never a refusal (BR-0003). The command runs these reads in its own process, so a GitHub rate limit is waited out with a plain timer (the activities' own wait needs an activity context), and a wait over the limit fails the command loudly (`GitHubRateLimitTooLong`).
+3. Starts `issueWorkflow` with the PR, head and base in its input, under the ID `issue-<n>-resume-<first 12 of the head>`. The workflow reads the PR again first and ends `refused` / `pr_changed` if the PR, head or base is not what the command read (a push in between), so a stale head is never gated under a run named for it. The run keeps that check for as long as it lives (step 4).
+4. The run goes straight to the maintainer's decision stage (`decisionStage` in `src/workflows/decision.ts`): it holds until the gate is clear (a review on the head, no open thread; a head nobody has reviewed holds, as in a full run, for the decision timeout at most (7 days by default, and the run holds a watcher slot all that time), then ends `decision_timeout`; a resume cannot make the review, a person does), runs the host check for the head once the gate settles (`hostIntegration: 'auto'`), and posts the gate-clear statement for the head. **It then ends** with the result `resumed_gate_clear` (`{ issueNumber, pr, headSha, reviewsOnHead }`). It never waits for a decision: no signal can reach it (`npm run signal` addresses `issue-<n>`), so the statement says that the maintainer decides on GitHub and that this run ends. It never merges and never labels, as in the full run. **The run stays on its head.** If the PR shows another head while it holds (a push), it ends `refused` / `pr_changed` at once and checks and states nothing for the new head; start `--resume` again for that head. If the PR is merged while it holds, it ends `refused` / `no_open_pr` and writes nothing: no comment, no board write, the issue is not closed. After a merge those belong to the maintainer, since this run is not the one that waited for the decision.
+
+**Refusal words** (the command's `reason`, and the workflow's result `{ outcome: 'refused', reason }` when the issue changed after the command's read):
+
+| Word | Meaning | What to do |
+|---|---|---|
+| `issue_closed` | The issue is closed | Nothing to gate |
+| `issue_not_in_review` | The board item is not In review (or the issue is not on the board) | The run did not get as far as a PR, or the PR is done. Read "Recovering a stuck run" |
+| `no_open_pr` | No open PR names the issue, or the PR was closed or merged after the list | Nothing to gate. A merged PR needs no resume |
+| `several_open_prs` | More than one open PR names the issue | Close the extra one: the PR to gate is not decided here |
+| `run_open` | `issue-<n>` is still running | Let it finish, or stop it first |
+| `pr_changed` | (Workflow only) the PR, its head or its base is not what the command read | Run the command again |
+
+**One run per head, and idempotent.** The ID carries the head, so the same head cannot have two runs: a second `--resume` for it prints `already_running` or `already_finished` and starts nothing, as `run-issue` does. After another push the head is new, so the next `--resume` is a new run with its own ID. The older run for the previous head, if it is still holding, is not looked for at the start: it sees the new head on its next poll (at most one poll, `decisionPollMs`) and ends `pr_changed` itself, so two runs never check one head, and at most one poll apart two runs are open. To start the same head again (after a refusal at the run, say), delete the closed run first (`temporal workflow delete --workflow-id issue-<n>-resume-<head12>`). Even then nothing repeats that GitHub already holds, because the effects are keyed on the head and not on the run: a head with a `host/integration` `success` is not run again, a `pending` or `failure` post of the same text is not posted twice, and the statement's comment key is `gate-clear-<pr>-<head>`, the full run's, so one head has one statement. The stop comments carry a `-resume-<head12>` suffix on their key, so a resume run that stops at `host_integration` is not silenced by the first stop's comment, and does not post on top of its own.
+
+**What a stop looks like.** A resume that stops (the host check fails again, or GitHub fails after its retries) leaves the usual stop comment on the issue and the PR, names its own workflow ID, and closes Failed under `issue-<n>-resume-<head12>`. The `STOP_STEP_RECOVERY` entry of a stop at `resume` (the read of the PR) or `host_integration` is `resume`, so the advice is again this command after the cause is mended. A failed check never goes to a fixer in a resume run: the fixer works on `claude/<n>`, and the PR re-gated may be on another branch, so the stop is for a person.
+
+**The queue watcher.** Nothing about what the watcher reports changes. A resume run is an `issueWorkflow` execution that is not closed, so it holds a slot while it waits at the gate and counts toward the cap as an unrelated ID (`otherRuns`), like any run that is not `issue-<n>`. Its closed runs are not named by "Closed runs outside Ready", which passes over IDs that are not `issue-<n>`. Only the fixed `instead` text for the steps `host_integration`, `fix_session`, `fix_guard`, `fix_push`, `fix_reply`, `resume` and `decision_comment` changed (it was "carry on by hand"). Because a resume run that stops leaves a closed run for its head, the sentence also says to delete that closed run before resuming the same head again.
+
+**What it does not do.** Run a reviewer, a fixer or an implementer, claim the issue, open a PR, touch the board, merge, label or resolve a thread. Resume the review loop: a stop at `review_session`, `review_post`, `gate`, `threads`, `review_loop`, `decision_gate` (shared with a PR closed unmerged, where a resume is refused) or a merge step is still by hand ("Recovering: a stopped review loop is finished by hand"). Wait for a decision (the full run's signal). Gate a PR no run ever stopped on: any In review issue with one open PR can be re-gated, which is its use for a hand-made PR. **Replay:** the new branch is entered only when the input has `resume`, which no existing run's history has, so no `patched()` marker is needed and the commands of a full run keep their order.
+
+## Remote sessions (#672)
+
+`runRemoteSession` (`src/activities/remote-session.ts`) runs one implementer, reviewer or fixer as a **remote Claude Code session**, started by firing a routine (`POST /v1/claude_code/routines/{id}/fire`, a bearer token per routine, one routine per role, `src/routine-fire.ts`). The brief built by `brief.ts` goes in the per-run `text` (at most 65,536 characters; a longer brief is refused, never cut) and is data to the session. The review loop calls it for the reviewer when a run has `executor: 'remote'` ("The remote reviewer" below), and the implementer step of a `remote` run calls it (#673, through `runRemoteImplementerSession`); and the fix step of the loop calls it for the fixer (#675, "The remote fixer" below). It is registered only when the six `REMOTE_ROUTINE_*` variables are set, so a worker without them is exactly as before.
+
+A remote session cannot be stopped or messaged from the workflow, and the fire call is not idempotent (each success makes a session). So the activity, in order:
+
+1. **Parses** `{ role, issue, pr?, branch, base, headSha?, brief, attempt? }` (`src/remote-session-policy.ts`). The reviewer and the fixer need `pr` and `headSha`.
+2. **Reads its marker** in the repo's git config, `orchestratorremote.<issue>-<role>-<head>[-a<attempt>].state` (`<head>` is `none` for the implementer; the `-a<attempt>` part is absent for attempt 1, the default, so it is the key of #672). `fired <id> <ms>` means the session exists: nothing is launched, the call waits for it again and returns the same `sessionId`. `firing` means an earlier attempt may have made a session whose id was lost: GitHub is watched for up to 10 minutes for its work before another is fired.
+3. **Claims.** The implementer launches only when the issue has no open PR and no `claude/<n>` branch. The fixer and reviewer launch only when the one open PR is theirs, the one branch is theirs and its tip is `headSha` (the reviewer also only when that head has no review yet). Otherwise the result is `failed` with `claim` set (`open_pr`, `branch_exists`, `branch_moved`, `already_reviewed`) and nothing is launched.
+4. **Writes `firing`, fires, records `fired <id> <ms>`** before the wait begins.
+5. **Waits** by reading GitHub every 30 seconds, with a heartbeat and a one hour cap counted from the recorded start (a restart does not extend it). The implementer and fixer are done when the branch tip differs from where they started, has not moved for 3 minutes and has no check pending. The reviewer is done at the first of two end signals, both read on the same 30 second schedule: a trusted review with a body on `headSha`, or (when the input carries `findingsMarker`, #682) a comment of a trusted author on the PR whose first line is that marker, the keyed findings comment of "The remote reviewer". The marker is checked against `findingsMarker` in `src/findings-comment.ts`, and the same trusted-author and first-line rule decides which comments count (`hasFindingsComment`), so a forged comment from anyone else never ends the wait. The wait reads and never posts. Nothing the session says is read, and the comment's text is not parsed here: it only ends the wait, and the reviewer step parses it afterwards. The implementer has one more end signal (#697, "The needs-input comment"), and so does the fixer (#699, "The wait" under "The remote fixer"). A cap returns `timed_out`. For the reviewer, `finished` means one of those two signals is present, not that the session posted a review: the session posts as the maintainer's account, so a human review on that head ends the wait early too (the claim already refuses a head that was reviewed before the call).
+
+**The session id** in the fire answer and in the marker starts with `session_` or `cse_` (a real fire answers `cse_<id>` and `https://claude.ai/code/cse_<id>`), then 1 to 100 letters and digits; anything else is `malformed`.
+
+**Result:** `{ outcome: 'finished' | 'timed_out' | 'failed' | 'needs_input', sessionId?, headSha?, claim?, failure?, commentId? }`. `sessionId` is absent when none is known (a claim, a failed launch, work found after a lost id).
+
+**Fire errors.** Every fire call carries the header `anthropic-beta: experimental-cc-routine-2026-04-01` (`FIRE_BETA_HEADER` in `src/routine-fire.ts`); the docs promise dated versions, so a retired one is a one-line change there. A 400 on every fire, for every routine and brief, is the sign of a retired beta version. 400 and 404 stop for a person (`RoutineRejected`, not retried, marker cleared). 401 and 403 are a token problem (`RoutineAuth`, same). 429 waits for `Retry-After` when it is at most 2 minutes and the budget of 3 calls per attempt allows, else returns `failed` with `failure: 'rate_limited'` (no session was made, marker cleared). 5xx retries with a 2 s then 4 s backoff within the budget, then `failed` with `server_error`. A timeout or an unreadable answer is not retried (a session may exist), returns `failed` with `network`, and leaves `firing` behind, so the next call watches GitHub first.
+
+**The real ceiling on fire calls.** 3 per activity attempt, and the activity retries at most twice in all (`maximumAttempts: 2`), so at most 6 calls for one issue, role and head. Reaching it takes a crash, or a 5xx that came after a session was made (the in-attempt retry does not watch GitHub first).
+
+**Setup (maintainer, once).** Create three routines (implementer, reviewer, fixer) at claude.ai/code/routines whose saved prompt says to read the routine-fire payload and do exactly the task it describes, following the repo skills. Add an API trigger to each, generate a token, and put the three ids and three tokens in the worker's environment. Tokens are shown once. Generating a new one revokes the old one. The fire endpoint is experimental. Limits: 30 fires per hour per routine and 100 per hour per account.
+
+**The PR body comment (#705).** The remote implementer's brief (rule 12) tells the session to read `.github/pull_request_template.md` and the PR handoff section of `docs/architecture-foundations.md` at the base (by path, never quoted here), write the PR body, and post it as one issue comment whose first line is exactly `<!-- orchestrator-pr-body issue=<n> attempt=<a> -->` (`prBodyMarker` in `src/findings-comment.ts`), followed by a blank line and the body. The exact command is `prBodyCommentCommand` in `src/brief.ts` (no backticks, dollar signs or quotation marks in the body), and a test pins that its first line is the marker. The activity `prBodyRead` returns the text after the marker of the newest comment of an OWNER, MEMBER or COLLABORATOR with that marker on its first line (`findPrBody`); a comment of anyone else, or a marker on a later line, is not read. The text is data: it is bounded (a comment over 60000 characters is refused, not cut) and never executed. `openPr` uses it ("The PR body" below).
+
+**The needs-input comment (#697).** When the implementer's premise is wrong or its scope is ambiguous (brief rule 10), the session makes no commit and posts, as its last act, one comment on the issue whose first line is exactly `<!-- orchestrator-needs-input issue=<n> attempt=<a> -->` (`needsInputMarker` in `src/findings-comment.ts`), followed by its question and options under the same rules as the status comment (identifiers and counts, no backticks or quotation marks). The wait reads the issue's comments on its existing 30 second schedule, with the same trusted-author and first-line rule as the findings comment (`findKeyedComment`): the marker is rebuilt from the issue and the attempt and compared, never taken from the comment, and a comment of an author who is not OWNER, MEMBER or COLLABORATOR never counts. The signal ends the wait only while the branch tip has not moved: a moved tip keeps the settle path, marker or not. The result is `{ outcome: 'needs_input', commentId }`, and the workflow parks the run ("The park" below). A result with no `commentId`, or a third needs-input in one run, stops the run at `session` with `NeedsInput` and the keyed stop comment. The comment's text is never read here. The brief gives the session the exact command (`needsInputCommentCommand` in `src/brief.ts`: `gh issue comment <n> --body "<marker>" + blank line + the question`), and a test pins that the body's first line is `needsInputMarker`. Only the implementer wait looks; the reviewer and fixer waits do not. The one hour cap stays.
+
+**The park (#698).** A `needs_input` result with a comment id does not end the run; it parks it, in `src/workflows/remote-implementer.ts`:
+1. One keyed comment on the issue (`needs-input-park-<attempt>`, fixed words and identifiers) says the run is waiting and that a comment answers it.
+2. The board item moves *In progress* to *Needs Input* through `setStatus` (the move table in `src/activities/github.ts` allows *In progress* to *Needs Input* and back, and *Needs Input* to *In review*, for an issue only, and nothing into or out of *Backlog* or *Ready*; the option is looked up by name on the board). A missing item or option is skipped with one structured log line (`park board move skipped`) and never fails or unparks the run.
+3. The wait is the activity `waitForNeedsInputAnswer`, called in chunks of at most one hour so the workflow history stays short. Each call reads the issue's comments every 5 minutes (it heartbeats, retries at most 3 times and only reads, so a restart re-reads and fires nothing). The answer is the first comment by an OWNER, MEMBER or COLLABORATOR that is newer than the needs-input comment (a larger REST id) and carries no `<!-- orchestrator-` marker anywhere, so the park comment, a stop comment, a status comment and a findings comment never count. The workflow holds no clock: the chunks add up to the limit by arithmetic.
+4. On an answer the item moves back to *In progress* (a fault is skipped as above) and attempt n+1 fires, which is a new session key, so a replay or a restart cannot fire it twice. The run goes on into the guard and the PR as before. A run whose move back was skipped and whose item still shows *Needs Input* carries on: `board_issue` moves it from *Needs Input* straight to *In review*, the one other move out of *Needs Input* (the maintainer's OK on #698). Nothing else moves out of it.
+
+Bounds: the limit is the run input `needsInputTimeoutMs` (default 7 days, from 1 second to 14 days; small values are for tests), a run parks at most twice, and a third needs-input stops it as `NeedsInput`. No answer by the limit stops the run at `park` as `NeedsInputTimeout`. The limit is a lower bound on the wait: a wait chunk that is retried (a worker death, a heartbeat timeout, at most 3 attempts) restarts from its full length, so the park can run up to an hour per lost chunk longer, still bounded by the chunk's 6 hour schedule-to-close and the run timeout. The park runs while the workflow shows as running, not failed. It does not spend the no-push retry. The *Needs Input* option on the board is the maintainer's; the flow line in CLAUDE.md and in the `work-the-queue` skill gains it in a separate change.
+
+**Recovering from a stopped or stuck remote session.** A session cannot be stopped from here: open it at claude.ai/code (the id is in the worker's log line `remote session <id> fired ...`) and stop or delete it by hand.
+- *A new attempt for the same issue, role and head.* A `fired` marker is never cleared, and nothing clears it. The maintainer's decision (2026-10-18): the key carries an **attempt number**, `(issue, role, head, attempt)`. The same attempt, repeated, re-attaches to its session (a retry of one call never fires twice); a higher attempt is a new key and fires a new session. Attempt 1 is the default and has the key of #672. The workflow owns the counter and passes it (the remote implementer does, "The remote implementer" above); for a manual call, give `attempt`. A past attempt's marker stays: it records which session that attempt launched.
+- *The session ended with no push.* The wait returns `timed_out` after the cap. The workflow's second attempt fires a new session by itself. To fire one by hand, unset the marker (`git config --local --unset orchestratorremote.<issue>-<role>-<head>.state`, with the `-a<attempt>` part when it is not attempt 1) or call again with the next `attempt`.
+- *A parked run (needs input).* Nothing to restart: answer the question in a comment on the issue and the run carries on by itself ("The park" below).
+- *`NeedsInput`.* The session posted a needs-input comment a third time in one run (or the result had no comment id), and the run stopped at `session` with the keyed stop comment. Read the question on the issue and answer it there (or fix the issue text). Then delete the stopped run and start it again with the next attempt number (`npm run run-issue -- --issue <n> --executor remote --attempt <n+1>`): the marker of attempt n does not match the new attempt, so the old comment cannot end the new wait.
+- *`NeedsInputTimeout`.* No answer came within the limit. Answer on the issue, then delete the stopped run and start it again with the next attempt number, as for `NeedsInput`. The board item was left in *Needs Input*.
+- *A `firing` marker and no session exists* (the call failed after the marker). The next call watches GitHub for 10 minutes and then fires again; or unset the marker to fire at once.
+- *A session you do not want to continue.* Stop it at claude.ai/code first. A push it makes later moves the head, which the head checks of the workflow already handle.
+- *`MalformedMarker`.* Something other than this code wrote the key. Look at it with `git config --local --get-regexp '^orchestratorremote\.'` and unset it.
+
+**Not verified.** No real fire has been made: the first acceptance item of #672 is a live no-op fire by the maintainer once the tokens exist, and the result is recorded on the issue. Until then the activity is tested against a fake fire client and fake GitHub reads only.
+
+## The remote reviewer (#674)
+
+With `executor: 'remote'` the review step of the loop (`src/workflows/review-loop.ts`) runs the reviewer as a **remote session** through `runRemoteSession` (role `reviewer`, used as it is) and posts the review itself. A remote session cannot hand text to the worker, and a review it posted itself would skip the sanitiser, so it writes its findings as JSON into **one keyed comment**, and the worker parses, cleans and posts them (plan #643, open question 3, option b). The local path (`executor: 'local'`, the default) is untouched. The implementer (#673) and the fixer (#675) are remote too.
+
+**Per round, in order** (`runRemoteReviewerSession`, `postRemoteSessionReview`, `minimizeFindingsComment` in `src/activities/review.ts`):
+
+1. The activity builds the brief (`buildRemoteReviewerBrief`, `src/brief.ts`: the issue and threads as data, the marker, the one-comment rule; a brief over 65,536 characters is `BriefTooLarge`) and calls `runRemoteSession` with the PR, the branch and the head. A launch that failed or a claim that refuses (`open_pr`, `branch_exists`, `branch_moved`) stops the run as `RemoteSessionFailed` with the fixed word in the message. `already_reviewed` is not a stop: the comment is what counts.
+2. It reads the PR's comments and `parseFindingsComment` (`src/findings-comment.ts`) picks the findings. **The findings comment** starts with this line alone, naming the PR, the exact head and the round, then holds exactly one fenced `json` block of the shape the local reviewer's file has (`summary`, `findings` of `path`, `line`, `body`, `acceptedThreadIds`):
+
+   ```
+   <!-- orchestrator-findings pr=<pr> head=<40 hex> round=<n> -->
+
+   ```json
+   {"summary": "...", "findings": [{"path": "a.ts", "line": 12, "body": "..."}], "acceptedThreadIds": []}
+   ```
+   ```
+
+   A reviewer that finds nothing writes `"findings": []`, which is accepted.
+3. The parsed findings are staged (a file in the repo's git directory, `orchestrator-remote-review-<pr>-r<round>-<head12>.json`) and the round's marker `orchestrator.remote-reviewer-<pr>-r<round>-<head12>` is set to `success`. Only counts, thread ids and the comment's node id reach the workflow history.
+4. `postRemoteSessionReview` posts the staged findings through the same `postFindings` the local path uses: placed against the diff of the head, cleaned by `sanitiseText`, one `COMMENT` review bound to the reviewed head, keyed so a retry posts once.
+5. `minimizeFindingsComment` hides the raw comment (`minimizeComment` with the classifier `OUTDATED`, idempotent). It runs after the review is posted, with the GitHub activity timeouts and attempts. If it fails the run goes on: it is counted in the result (`rawCommentsNotHidden`, present only for `remote`) and said once on the issue (key `findings-not-hidden-<pr>-r<round>`, identifiers only).
+
+**Trust.** The comment is untrusted input. Only a comment whose author association is `OWNER`, `MEMBER` or `COLLABORATOR` is read: the listing leaves an other author's body empty, and the parser ignores such a candidate again. Marker text from anyone else is data, including a copy of the marker in a longer comment or a marker for another head or round.
+
+**Stop reasons** (one comment on the issue, keyed by step and reason, a Failed run, nothing posted; counts only, never the comment's text):
+
+| Step and reason | Meaning | What to do |
+|---|---|---|
+| `review_session` `MalformedFindings` | No trusted comment carries the marker, more than one does, the comment has no or more than one `json` block, or the JSON is not in the asked shape | Look at the PR's comments. The review loop cannot be resumed (see "The review loop"): finish the PR by hand |
+| `review_session` `FindingsTooLarge` | The comment is over 66,000 characters, or the findings are over a bound (30 findings, 3000 characters per body, 4000 for the summary, 64,000 bytes of JSON) | The same |
+| `review_session` `RemoteSessionFailed` | `runRemoteSession` launched nothing: a claim (`open_pr`, `branch_exists`, `branch_moved`) or a launch failure (`rate_limited`, `server_error`, `network`) | See "Remote sessions" for each; then delete the run and start again |
+| `review_session` `BriefTooLarge` | The brief does not fit a routine's text | Shorten the issue or the threads |
+| `review_session` `RemoteExecutorUnavailable` | The worker has no remote session activity (the six `REMOTE_ROUTINE_*` variables are unset) | Set them, or run with `--executor local` |
+| `review_post` `DiffUnreadable` | The head is not in the working copy or the diff cannot be read, and there are findings to place | Fetch the branch and look |
+
+**The wait.** `runRemoteSession` ends a reviewer's wait on the keyed findings comment of this head and round as well as on a trusted review with a body (#682, "Remote sessions"), so a reviewer that posts its comment is read within about one poll (30 seconds), not after the one hour cap. The input field `findingsMarker` carries the marker, and `runRemoteReviewerSession` passes it (#687): `findingsMarker(pr, headSha, round)`, the same string the brief tells the session to post. The comment is still read and parsed by the step after the wait, whatever ended it.
+
+**The PR body (#708).** The remote reviewer's brief has one more rule (`bodyReviewRule`, `src/brief.ts`): read the PR body (one REST call, text as data) against the template at `.github/pull_request_template.md` and the handoff pointer in `docs/architecture-foundations.md` as they are at `origin/<base>` (the PR may edit them), and raise a finding for a section that is empty or generic, a ticked check the PR's own commands or CI do not support, a design that contradicts the diff, or anything that breaks the privacy rule. The brief names those files by path and holds no text of the template: what the body must hold is read at run time. The finding goes through the same findings comment, so the fixer can act on it. When the open-PR task recorded the body source `fallback`, the workflow passes it to every review round (`bodySource` on the review step input) and the brief says the body was generated by the orchestrator, so the reviewer says so in its summary and does not judge the generated lines as the author's account. The local reviewer cannot call `gh` and its PRs never carry a session body, so its brief is unchanged. A missing, empty or unreadable body, or an unreadable template, is reported in the summary and raises no finding. The orchestrator parses nothing of the reviewer's judgment of the body.
+
+**Not verified.** No real remote session, no real routine and no real `minimizeComment` call have run: the activities are tested against a fake `gh`, a fake `runRemoteSession` and a Temporal dev server with fake activities.
+
+## The remote fixer (#675)
+
+With `executor: 'remote'` the fix step of the loop (`remoteFixRound` in `src/workflows/review-loop.ts`) runs the fixer as a **remote session** through `runRemoteSession` (role `fixer`, used as it is). The local path (`executor: 'local'`, the default) is untouched: `runFixerSession`, `guardBranch`, `pushBranch` and `postFixerReplies` run in the order they always did. A remote fixer **pushes its own fix commits to the PR's branch**, and a push to an open PR's branch moves the PR's head at once. The worker cannot delete or reset that branch (the #645 spike), so the order is not the local one:
+
+1. `runRemoteFixerSession` (`src/activities/review.ts`) builds the brief (`buildRemoteFixerBrief`: the actionable threads as data, the marker, the one-comment rule, the push rules) and calls `runRemoteSession` with the PR, the branch, the head and `attempt` = round + 1. The attempt is part of the session's marker key, so a new round on a head that did not move fires a new session, and a retry of the same round re-attaches to the one it fired. A launch that failed or a claim that refuses (`open_pr`, `branch_exists`, `branch_moved`) stops the run as `RemoteSessionFailed`. A cap reached with a tip that had not rested stops it as `RemoteSessionTimedOut`: the session may still push.
+2. It reads the PR's comments and `parseFixerRepliesComment` (`src/findings-comment.ts`, the parser the reviewer's findings use) picks the replies. **The replies comment** starts with `<!-- orchestrator-fixer-replies pr=<pr> head=<40 hex> round=<n> -->` alone on the first line (the head the round started from), then holds exactly one fenced `json` block of the shape the local fixer's file has (`{"replies": [{"threadId": "...", "body": "..."}]}`, at most 50 replies of 3000 characters). The replies are staged in the repo's git directory (`orchestrator-remote-fixer-<pr>-r<round>.json`) and the marker `orchestrator.remote-fixer-<pr>-r<round>` is set to `success`. Only the tip, a count and the comment's node id reach the workflow.
+3. If the tip moved, **`guardRemoteBranch` runs on the fetched tip** (the same fetch-then-guard as the remote implementer: HISTORY and NET ranges, the tip must be the one the session reported before and after). A pass makes the tip the loop's head.
+4. `postRemoteFixerReplies` posts the staged replies through the same code as the local replies (same keys: `reply-r<round>-<thread>`, each once, only in a thread that is open, trusted and not accepted), then `minimizeFindingsComment` hides the raw comment (best effort, counted in `rawCommentsNotHidden`).
+5. The loop goes back to the review, which reviews the new head with a fresh session. That review is the closing review the gate needs, as for a local fix.
+
+**A guard refusal cannot un-push.** A protected path, an empty or oversized diff or a special file in the fix commits stops the run with the new stop reason **`FixerPushRejected`** at `fix_guard`: one keyed comment on the issue (`stopped-fix_guard-FixerPushRejected`) with the reason class and the counts line only, never a path. Nothing else is posted for that head: no review, no reply. The worker deletes nothing and resets nothing; the raw comment is hidden. **The branch is left as the session pushed it** (the PR shows the new commits) for a person to look at and to reset to the last reviewed head. A guard failure that is not a refusal (`BranchMoved`: the branch moved again after the session reported its tip, or `BranchMissing`, or a failed read) says nothing about the diff, so it stops with its own reason at `fix_guard` and is not called a rejection.
+
+**No progress.** A fixer that pushed nothing (the wait ends at its replies comment, #699, or else runs to its cap and returns `timed_out` with no tip), or pushed only to a branch other than the PR's, leaves the head where it was. That is handled as a local fixer that made no commit: no guard, the replies are posted, the round counts, and the loop reviews the same head again with a new round. `maxFixRounds` and the loop timer count every remote round, so a fixer that never makes progress ends the run as `MaxRoundsReached`. The replies comment is required even then: a fixer that pushed nothing and posted no comment stops the run as `MalformedFindings` at `fix_session` (an empty `replies` list is a valid comment). The guard checks the pushed commits against the base, not that the old head is an ancestor of the new tip; the brief forbids force-pushes and the next review sees the new head (a possible follow-up). A branch other than `claude/<n>` that the fixer made is a claim against the next round (`branch_exists`, so `RemoteSessionFailed`).
+
+**The wait.** The fixer wait has a second end signal (#699): a comment of a trusted author on the PR whose first line is the replies marker of this round, `fixerRepliesMarker(pr, headSha, round)`, the same string the brief tells the session to post. The input field `repliesMarker` (fixer only) carries it, and the step passes it. It is read on the same 30 second schedule, checked against the marker itself with the first-line, trusted-author rule of `hasFindingsComment`, and it ends the wait only while the branch tip has not moved: the result is `finished` with no tip, which is the no-progress path above, so a fixer that pushes nothing is read within about one poll, not after the one hour cap. A moved tip keeps the settle rule, comment or not. A comment of another round or head, or of an author who is not OWNER, MEMBER or COLLABORATOR, never ends the wait. The wait reads and never posts, and the comment's text is not parsed there: the step after the wait parses it.
+
+**Trust.** As for the reviewer: only a comment by an OWNER, MEMBER or COLLABORATOR is read, and the marker has to be the comment's whole first line. A forged comment is ignored and cannot stop the real one; two trusted comments with the marker, none, a missing or second `json` block, a bad shape or a bound passed stop the run (`MalformedFindings`, `FindingsTooLarge`) with counts only. The replies are cleaned by the same sanitiser before they are posted.
+
+| Step and reason | Meaning | What to do |
+|---|---|---|
+| `fix_guard` `FixerPushRejected` | The guard refused the fixer's pushed commits (protected path, empty or oversized diff, special file). The branch holds them | Read the PR's new commits, reset `claude/<n>` to the last reviewed head (the maintainer does it; the worker does not), then finish by hand: the loop cannot be resumed |
+| `fix_guard` `BranchMoved`, `BranchMissing` | The branch is not at the tip the session reported, or is gone | Look at the branch; as above |
+| `fix_session` `MalformedFindings`, `FindingsTooLarge` | The replies comment is missing, duplicated, malformed or over a bound. A fix may already be pushed and has **not** been guarded | Look at the PR's comments and new commits before anything else; as above |
+| `fix_session` `RemoteSessionFailed`, `RemoteSessionTimedOut`, `BriefTooLarge` | No session ran, the cap passed with an unsettled push, or the brief does not fit a routine | See "Remote sessions"; as above |
+
+**Not verified.** No real remote fixer, real routine or real push to GitHub has run. The tests (`test/remote-fixer.test.ts`) use the real review and branch activities over real git in throwaway repos with a local bare `origin`, a fake `runRemoteSession` that pushes from a second clone, fake GitHub reads and a Temporal dev server.
+
+## The queue watcher (#723)
+
+A Temporal Schedule starts `queueWatcher` (`src/workflows/queue-watcher.ts`) every few minutes (plan #721). One tick reads which Ready issues may start, counts the runs in flight and starts `issueWorkflow` for the lowest-numbered eligible issues, up to a cap. The run still stops at "gate clear" and waits for the maintainer's decision, as a hand-started one does. The maintainer's Backlog to Ready move is still the only way an issue enters the queue.
+
+**What a tick does**, in order. Every step is an activity with a 2 minute start-to-close timeout and at most 3 attempts (`QUEUE_ACTIVITY_OPTIONS`, `src/queue-types.ts`).
+
+1. `listReadyIssues`: the Ready column and each issue's open blockers (more than 50 Ready items fails the tick).
+2. `listTakenIssues`: open PRs and `claude/<n>` branches (a list longer than its page bound fails the tick).
+3. `listRunningIssues` (`src/activities/queue.ts`, a worker-side Temporal client activity): the `issueWorkflow` executions that are not closed, by workflow ID `issue-<n>`, numbers only. Their IDs join `taken`, and their count is **in flight**. A run held for the maintainer's decision or for a Needs Input answer is still open, so it keeps its slot. An open `issueWorkflow` with any other ID counts toward the cap too and names no issue. More than 200 open runs fails the call (`TooManyRuns`): an undercount would let the cap be exceeded.
+4. `checkTrustedIssues`, asked about the Ready numbers that are neither blocked nor taken, ascending, so the lowest are read first. A number it did not read (`notRead`, more than 50) is not trusted this tick: it is skipped as `untrusted` and counted in `trustNotRead`.
+5. The pure `eligibleIssues` (`src/queue-policy.ts`) gives the eligible numbers, ascending. For each one while a slot is free, `startQueuedRun` starts `issue-<n>` through `startIssueRun`, the call `npm run run-issue` makes, with the input `buildRunInput` makes from the same flags. It answers what it found: `started` (a new run), `already_running` (the ID is open) or `already_finished` (the ID is closed). A run the tick started and a run the start found already open both use a slot, so the free slots are `cap - inFlight` minus both; a closed one uses none.
+6. `readRunStatuses` (#724), for the closed runs step 5 found, after every start: how each ended, so the report says why the issue did not start ("Closed runs" below). At most 20 are read per tick.
+7. `listClosedRuns` (#733), last: the closed runs whose issue is **not** in Ready, which no step above meets ("Closed runs outside Ready" below). Read-only, bounded, and on by default.
+
+A failed read (steps 1 to 4) fails the tick and starts nothing: the report says `outcome: "failed"` and `failure: { step, reason }`, where `reason` is the failure's type word (`TooLarge`, `GitHubRateLimitExhausted`, ...) and never its message (BR-0003: a read that failed is never an empty or partial queue). A start that fails after its retries ends the tick there: the starts before it stay reported, the issues after it are not attempted, and the next tick reads again.
+
+**The tick bounds itself.** The retry bounds of the activities add up to far more than the tick's 10 minute execution timeout (one failing read can take about 6 minutes 15 seconds, a tick makes 4 reads, then a start per eligible issue, then 2 more reads, the closed-run status read and the closed-run list, each describing up to 20 runs one after another inside one activity), and Temporal kills a workflow at its execution timeout with no report. So the workflow gives up first: at 8 minutes (`QUEUE_TICK_DEADLINE_MS`) it returns `outcome: "failed"` with `failure: { step, reason: "TickDeadline" }`, the step it was in, and the issues it had already started. Two minutes of margin sit between the deadline and the execution timeout (`QUEUE_TICK_TIMEOUT_MS`), and a test pins that relation. A start cut off by the deadline may still have happened; the next tick finds the run open and counts it. The input's `tickDeadlineMs` (1 second to 8 minutes) shortens the deadline, for tests.
+
+**The tick report** is the workflow's result: `{ outcome, cap, inFlight, started, skipped, skippedNotReported, trustNotRead, closedRuns?, closedNotReady?, failure? }`. `inFlight` is what the tick read before it started anything. `skipped` names each issue that did not start, with a reason: `blocked`, `taken` (an open PR, a `claude/<n>` branch or a running workflow), `untrusted`, `over_cap`, `already_running` (an open run the start found: it holds a slot) and, for a closed run, `failed`, `parked`, `terminated`, `timed_out`, `cancelled`, `completed_but_open` or `id_already_ran` ("Closed runs" below). It names at most 100; the rest are counted in `skippedNotReported`. The history holds issue numbers, counts and fixed words only: no title, label or any text from an issue.
+
+**The workflow ID is the claim.** `issue-<n>` is started with `REJECT_DUPLICATE` and `FAIL` (`src/issue-client.ts`), so a repeat tick, an overlapping start or a crashed watcher cannot launch an issue twice. A start of an ID that already exists is a skip, not a failure: an open run is `already_running` and uses a slot, a closed one uses none and is reported by how it ended ("Closed runs"). If the visibility list is slow to show a run, or a start's result was lost and the activity retried, the server's refusal answers `already_running` and that run holds a slot, so the open runs do not pass the cap. The run still shows in `inFlight` once the list catches up.
+
+**Closed runs (#724).** A Ready issue whose `issue-<n>` run has closed cannot start again under that ID, and the watcher never restarts it: not a failed run, not a parked one. It says why instead. After the starts, one activity (`readRunStatuses`, on the worker's client connection, like the other two) describes each closed run the tick found, the lowest 20 numbers (`MAX_RUN_STATUS_LOOKUPS`), and reads the failure of a Failed one. The skip then carries a fixed word in place of `id_already_ran`:
+
+| Reason | The run | What a person does |
+|---|---|---|
+| `failed` | Ended Failed. `stopReason` is the reason it recorded, when that is one of the orchestrator's own words (`SessionError`, `ProtectedPath`, `MaxRoundsReached`, ...: the list in `src/run-status.ts`). A failure of any other kind has none. A stop at the park step with any reason but `NeedsInputTimeout` is a fault of the park comment or the wait (GitHub failed after its retries): no question was asked, so it is `failed` | The reason says which row of "Recovering a stuck run" to read. The skip's `restart` is two commands to run in order, each fixed text and the issue number: `temporal workflow delete --workflow-id issue-<n>`, then `npm run run-issue -- --issue <n>` (add the flags the schedule was created with, and `--attempt` after a remote session as that row says). **The step decides, not the reason**, because reason words are shared (`SessionError` is a stop at `session` and at `review_session`). A stop at any step after `board_issue` (`review_session`, `review_post`, `gate`, `threads`, `fix_session`, `fix_guard`, `fix_push`, `fix_reply`, `host_integration`, `review_loop`, `decision_gate`, `decision_comment`, `merge_wait`, `board_done`, `issue_close`) has the PR open and the issue In review, so a restart would end `skipped` at the claim: there is no `restart`, and the skip's `instead` says to carry on by hand ("Recovering a stuck run", "Recovering: a stopped review loop is finished by hand"). For `fix_session`, `fix_guard`, `fix_push`, `fix_reply`, `host_integration`, `decision_comment` and `resume` the `instead` says to fix the PR by hand, have its new head reviewed, and re-gate it with `npm run run-issue -- --issue <n> --resume` ("Resuming a stopped gate", #747). A stop at an earlier step (`check` to `board_issue`, `guard` included) gets `restart`. A run whose failure is not a stop has no step and gets `restart` |
+| `parked` | Ended Failed with `NeedsInputTimeout` at the park step, or `NeedsInput` at `session`: it asked a question and no trusted comment answered. A parked run is a remote run. One still waiting is open, holds its slot and is not in this list | Answer on the issue. `restart` is `temporal workflow delete --workflow-id issue-<n>`, then `npm run run-issue -- --issue <n> --executor remote --attempt <k>`, where `<k>` is one more than the attempt number in the question comment's marker line (`attempt=<a>`; the report does not hold it). Add the other flags the schedule was created with |
+| `terminated`, `timed_out`, `cancelled` | Closed by a person or the server, or ran past its 50 day limit | As `failed`: the same two commands |
+| `completed_but_open` | Ended on its own and the issue is still open and still Ready (the Ready list holds only those). A run completes with a merged PR, but also as `skipped`, `changes_requested`, `decision_timeout` or `merge_timeout` with no merge, and the report does not say which | No command. Look at the run (`temporal workflow show --workflow-id issue-<n>`): close the issue if its PR merged, or follow the `skipped` row of "Recovering a stuck run", then move the item or delete the run |
+| `id_already_ran` | Closed, and the tick did not read how: more than 20 closed runs (the rest are in `closedRuns.notLookedUp`), the status read failed, the run was deleted or started again between the start and the read, or between the read's two calls | Look at it with `temporal workflow describe --workflow-id issue-<n>`, or wait for the next tick |
+
+A closed run does not use a slot, so these skips never hold back a start. `--attempt` on its own does not start a closed run: the ID is held by `REJECT_DUPLICATE`, so the run is deleted first and `--attempt` only sets the remote implementer's first attempt number ("The remote implementer"). The report only says the commands; nothing in the watcher runs them. A test reads the workflows for every literal `stop('<step>', '<Reason>')` and `failureReason` word and fails if one is not in the list of `src/run-status.ts`; a reason passed as a constant or a variable is not scanned (today's are in the list by import), and a word missing from the list only drops the reason from a report, never leaks text. The advice is keyed on the step by `STOP_STEP_RECOVERY` in `src/queue-types.ts`, a `Record` over `IssueStep`, so a new step does not compile until it is marked `restart`, `by_hand` or `resume`. A second test reads the workflows for every step they name (`stop`, `step`, `confirmStatus`, `onExecutor`) and fails if one is not in the table, if the table and the `IssueStep` type differ, or if the order of the type no longer puts every `by_hand` and `resume` step after `board_issue`. The activity reports a step only when it is one of those, and the workflow drops any other.
+
+`closedRuns` is `{ counts, notLookedUp }`: the count per reason (only the reasons that occurred, in the order above) and how many closed runs the tick did not ask about. It is absent when there are none. The report stays bounded: at most 20 issue numbers carry a status, the whole `skipped` list is still capped at 100, and the counts do not depend on either. A status read that fails after its retries fails the tick at `run_status` (BR-0003), after the starts, so the runs it started stay in `started`, and the closed runs stay `id_already_ran`. The read is on the same options as every tick activity (2 minutes, 3 attempts) and inside the tick deadline. What the read returns is the status as a fixed word and a stop reason checked against the list; a failure's message, the run's input and result, and any comment or issue text are never read into the report or the history (BR-0001).
+
+**Closed runs outside Ready (#733).** A run that closed after it claimed its issue leaves the board item In progress, In review or Needs Input, so the Ready column never lists it and "Closed runs (#724)" never meets it. The last step of the tick, `listClosedRuns`, finds those runs. It lists the closed `issueWorkflow` runs that ended Failed, Terminated, TimedOut or Canceled (a Completed run is the normal end and is not looked for), passes over the IDs of every Ready number the tick read (blocked ones too, which the Ready column already names) and over any ID that is not `issue-<n>`, and reads the status of the 20 newest of the rest with the same `readRunStatus` the Ready case uses. The order is made by the activity: it reads up to 200 visibility rows, sorts them by close time, newest first, and takes the first 20, so which 20 are named does not depend on the order the store answers in. If more than 200 such closed runs exist, the rows past the 200th are not read and the server's count says how many; a store that answers oldest first then hands over its oldest 200, and the newest runs can be among the unread ones, which only `notLookedUp` tells you. What it left unread is counted and never dropped silently (BR-0006). The result is the report's `closedNotReady`:
+
+```json
+"closedNotReady": {
+  "counts": { "failed": 1 },
+  "runs": [
+    { "number": 21, "reason": "failed", "stopReason": "SessionError",
+      "restart": ["temporal workflow delete --workflow-id issue-21", "npm run run-issue -- --issue 21"] }
+  ],
+  "notLookedUp": 0
+}
+```
+
+`runs` holds at most 20 entries, newest first. Each has the same fixed words and advice as the skip of a closed run in the Ready column: `reason` is `failed`, `parked`, `terminated`, `timed_out` or `cancelled` (the table above), `stopReason` is one of the orchestrator's own words, and `restart` (two commands) or `instead` (the PR is open, carry on by hand) come from the same `restartAdvice` and `STOP_STEP_RECOVERY`. `counts` is per reason for the runs in `runs`, in a fixed order. `notLookedUp` is the number of closed runs the tick did not look at. It is the runs of an `issue-<n>` ID it read and did not name (more than 20 qualified; that part is exact), plus, only when the list went past the 200 rows, the server's count of the rows beyond them (at least 1; it can include a run of a Ready issue or an ID that is not `issue-<n>`, so that part is an upper bound). A list that ran out asks for no count, so a tick with nothing unread never shows a number. The field is absent when there is nothing to name and nothing unread, so a tick with no such runs has the report it had before. The field is information only: the watcher never restarts, deletes or signals a run and never changes the issue's board status. The read is on the same options as every tick activity (2 minutes, 3 attempts), after the starts and inside the tick deadline. A failed read fails the tick at `list_closed` (BR-0003), with the starts and the Ready skips already in the report, and is never an empty list. A tick that already failed at `start` or `run_status` does not make it. The report holds issue numbers and fixed words only (BR-0001).
+
+A run stays in this list until someone deletes it. That includes a run whose issue a person finished by hand (the `instead` case) and whose PR has since merged: it keeps being named, newest first, until `temporal workflow delete --workflow-id issue-<n>` removes it, or it falls past the 20 and is counted in `notLookedUp`. The watcher does not know whether the issue is still open, because that would be a GitHub read for every run.
+
+
+**Run it.** "Running the queue" below has the commands, every flag, how to read a tick and what each skip means. The watcher needs the worker (`npm run worker`) and the server, and it does nothing until a schedule exists (`npm run queue -- create`). The schedule is `queue-watcher` with **overlap policy skip**: a tick still running when the next is due is skipped, never queued, and a tick has a 10 minute execution timeout (above its own 8 minute deadline, see above) so a stuck one cannot hold the skip for long. After an outage the schedule takes only a tick at most a minute late. The default tick is 1 minute, the shortest allowed. The board read is the filtered Ready query, a handful of GraphQL points a tick, but a tick also makes REST calls that grow with the Ready column (blocker and trust reads for up to 50 issues, the taken-issue lists and run-status reads), so a shorter interval costs more GitHub rate limit. In the drill (#725) the hourly GraphQL bucket ran out while full board listings were run by hand alongside one-minute ticks. Pass `--every` for a longer interval.
+
+**Never.** The watcher and its script do not merge, approve, apply a label, resolve a thread, move a board item or send the maintainer's decision signal. They read GitHub and start runs. `test/queue-watcher.test.ts` scans their source for those forms (the invariant scan of `test/invariants.ts`), and drills the cap, the held runs, the second tick and the script against a dev server.
+
+## Running the queue (#725)
+
+How a person runs the watcher. "The queue watcher" above says what one tick does; this says how to create, steer and read it. The script outputs quoted here were printed against a throwaway dev server. Every issue number in an example is made up.
+
+### The schedule
+
+```bash
+cd orchestrator
+npm run queue -- create [--cap N] [--every 5m] [--base <branch>] [--repo-dir <path>] [--host-integration] [--executor local|remote]
+npm run queue -- pause
+npm run queue -- resume
+npm run queue -- delete
+```
+
+Run it from `orchestrator/`. It reads `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE` and `TASK_QUEUE` like the worker does, so give both the same values ("Configuration"). Nothing creates the schedule for you, and there is only ever one, `queue-watcher`.
+
+| Command | Prints (one JSON line) | Notes |
+|---|---|---|
+| `create` | `{"status":"created","scheduleId":"queue-watcher","everyMs":300000,"cap":3}` | Running, not paused. `everyMs` and `cap` are what you asked for or the defaults |
+| `create` again | `{"status":"already_exists",...}`, and a line on stderr | Nothing changed, exit 0. To change a flag, `delete` and then `create` |
+| `pause` | `{"status":"paused",...}` | Stops new ticks and keeps the schedule and its flags. A tick already running finishes |
+| `resume` | `{"status":"resumed",...}` | Ticks go on from the next one due |
+| `delete` | `{"status":"deleted",...}` | A tick already running finishes, and the runs it started are not touched. The watcher has no way to stop a run |
+| `pause`, `resume` or `delete` with no schedule | `{"status":"not_found",...}`, and a line on stderr | Nothing changed, exit 0. Each command is safe to repeat |
+
+A bad flag prints one line on stderr and exits 1 before it connects (`cap must be a whole number from 1 to 10`, `--every must be a whole number of minutes or hours, like 5m, from 1m to 1h`, `--executor must be local or remote`, `base must be a plain branch name`). `pause`, `resume` and `delete` refuse any flag (`pause takes no flags: create sets them`): the flags belong to `create`. With no server listening the script prints `Failed to connect before the deadline` after 10 seconds and exits 1.
+
+**The flags** (all optional, `create` only). Each run the watcher starts is built from them, as `npm run run-issue` builds one from its own flags.
+
+| Flag | Default | Bounds | What it does |
+|---|---|---|---|
+| `--cap <n>` | `3` | a whole number, 1 to 10 | The most runs in flight ("The cap" below) |
+| `--every <n>m` or `<n>h` | `1m` | 1 minute to 1 hour; a bare number such as `5` is refused, the unit is required | The tick interval. Each tick makes a filtered Ready read through `gh` (GraphQL, a handful of points) plus REST reads that grow with the Ready column, so a shorter interval costs more rate limit and a longer one only delays starts. Don't list the whole board by hand while ticking |
+| `--base <branch>` | `main` | a plain branch name: starts with a letter or digit, then letters, digits, `.`, `_`, `-` and `/`, at most 100 characters, no `..`, no `//`, no trailing `/` or `.lock` | The branch each run's PR targets. Set it when the work lands on a feature branch |
+| `--repo-dir <path>` | the parent of the directory you run it from, which is the main checkout when you run it from `orchestrator/` | any path; a relative one is made absolute | The checkout the runs' worktrees are made from (`<repo-dir>/.claude/worktrees/issue-<n>`) |
+| `--host-integration` | off | takes no value (`--host-integration=false` is an error) | Every run does the host integration check at the gate ("The host integration check at the gate") |
+| `--executor <local\|remote>` | `local` | those two words | Where the model sessions run ("The executor flag"). `remote` needs the six `REMOTE_ROUTINE_*` variables on the worker, or each run stops at its first remote step as `RemoteExecutorUnavailable` |
+
+`run-issue` has three flags the watcher does not take: `--worktree-dir`, `--wait` and `--attempt`. The flags are stored in the schedule, so a run you start by hand gets only the flags you give `run-issue`. Add them to the commands a skip's `restart` gives you.
+
+**When ticks happen.** Ticks fall on the clock, on multiples of the interval: a `10m` schedule ticks at :00, :10, :20 and so on, so the first tick comes within one interval of `create`, not after a full one. `temporal schedule describe --schedule-id queue-watcher` shows the state, the overlap policy and the next times. The flags are in it only as base64 `Args`. To read them back: `temporal schedule describe --schedule-id queue-watcher --output json | grep '"data"' | sed 's/.*: "//; s/".*//' | base64 -d` prints `{"cap":2,"repoDir":"<dir>","base":"main"}` (`cap`, `hostIntegration` and `executor` appear only when you set them). And `temporal schedule trigger --schedule-id queue-watcher` runs one tick now. The `temporal` CLI reads `TEMPORAL_ADDRESS` too. A tick with no worker running waits for one, up to its 10 minute execution timeout.
+
+### First time
+
+1. **Look at the Ready column first.** Every eligible Ready issue starts a run within one interval, up to the cap. Moving an item to Ready is the maintainer's, and from now on it is also the step that starts the work.
+2. **Start the server.** `npm run start-server` for the dev server on `127.0.0.1:7233`, or set `TEMPORAL_ADDRESS` (and `TEMPORAL_NAMESPACE`) to a real one, the same for the worker and the script.
+3. **Sign `gh` in on the machine the worker runs on**, with the `project` scope (`gh auth refresh -s project`): a tick reads the board, issues, pull requests and branches through it.
+4. **Start the worker** (`npm run worker`) and leave it running: it runs the watcher and every run it starts. For `--executor remote`, set the six `REMOTE_ROUTINE_*` variables first. For `--host-integration`, the same worker also needs `HOST_TASK_QUEUE=host` (and `HOST_REPO_DIR`) on the Mac that has LogSeq ("Host integration"); without it the check waits and the run stops with `IntegrationTimeout` after 2 hours.
+5. **Create the schedule small:** `npm run queue -- create --cap 1`, with the flags you want every run to have. Raise the cap later with `delete` and `create`.
+6. **Watch the first ticks** ("Reading a tick" below). `temporal schedule trigger --schedule-id queue-watcher` gives one at once.
+7. **Delete the schedule when you are done:** `npm run queue -- delete`. Runs it started go on without it.
+
+### The cap
+
+The cap is the most `issueWorkflow` runs in flight, and it is counted from the server, not from the board. **In flight is every `issueWorkflow` execution that is not closed**: a run you started by hand with `run-issue`, one held for the maintainer's decision, one parked on a Needs Input answer, and one with an unrelated ID all count. A tick starts at most `cap - inFlight` runs, the lowest issue numbers first, and reports the rest as `over_cap`. A run leaves the count only when it closes (merged, stopped for a person, timed out), so a PR waiting for the maintainer keeps its slot: with the cap at 3 and three runs waiting for a decision, nothing new starts until one is decided. The decision wait is at most 7 days, then the merge wait up to 7 days more ("The maintainer's decision"). A closed run holds no slot.
+
+### Reading a tick
+
+Each tick is a workflow named `queue-watcher-<time>`, and its result is the report. The `temporal` CLI prints an empty list as `null`.
+
+```bash
+temporal workflow list --query "WorkflowType='queueWatcher'" --limit 5
+temporal workflow result --workflow-id queue-watcher-2026-01-01T10:00:00Z
+```
+
+A report (made-up numbers: cap 2, one run in flight):
+
+```json
+{
+  "outcome": "ok",
+  "cap": 2,
+  "inFlight": 1,
+  "started": [12],
+  "skipped": [
+    { "number": 11, "reason": "blocked" },
+    { "number": 13, "reason": "over_cap" },
+    { "number": 14, "reason": "taken" },
+    { "number": 15, "reason": "untrusted" },
+    { "number": 16, "reason": "timed_out",
+      "restart": ["temporal workflow delete --workflow-id issue-16", "npm run run-issue -- --issue 16"] }
+  ],
+  "skippedNotReported": 0,
+  "trustNotRead": 0,
+  "closedRuns": { "counts": { "timed_out": 1 }, "notLookedUp": 0 }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `outcome` | `ok`, or `failed` when a read or a start failed after its retries (see `failure`; "A failed tick" below) |
+| `cap` | The cap the schedule was created with |
+| `inFlight` | Open runs the tick counted before it started any ("The cap") |
+| `started` | The issues this tick started a run for, ascending. Empty is normal |
+| `skipped` | Each Ready issue that did not start, with a `reason` ("Skip reasons" below). At most 100 are named. Only a closed run's skip has `stopReason`, `restart` or `instead` |
+| `skippedNotReported` | How many skips the list left out because of that bound |
+| `trustNotRead` | Ready issues whose author the tick did not read (more than 50 candidates). They are skipped as `untrusted` and counted here |
+| `closedRuns` | Present when a Ready issue's `issue-<n>` run has closed: `counts` per reason, and `notLookedUp`, the closed runs the tick did not read: past the 20 it reads, or all of them when the tick failed at `start` or `run_status`. Absent otherwise |
+| `closedNotReady` | Present when a closed run (Failed, Terminated, TimedOut or Canceled) belongs to an issue that is not in Ready, or the tick left such runs unread: `counts` per reason, `runs` (at most 20, newest first, each with `number`, `reason`, and `stopReason`, `restart` or `instead` as in `skipped`) and `notLookedUp`. Absent otherwise ("What the report shows beyond Ready") |
+| `failure` | Present when `outcome` is `failed`: `{ "step", "reason" }` |
+
+The report holds issue numbers, counts and fixed words only. It never holds a title, a label or a line of an issue.
+
+**What the report shows beyond Ready.** `skipped` names a closed run only for an issue that is in Ready (and otherwise eligible). A run that closed after it claimed the issue leaves the item In progress, In review or Needs Input; those runs are in `closedNotReady` (#733), with the same words and the same `restart` or `instead` as a skip. Example, with made-up numbers: issue 21 failed at the session step and its item is In progress:
+
+```json
+"closedNotReady": {
+  "counts": { "failed": 1, "timed_out": 1 },
+  "runs": [
+    { "number": 30, "reason": "timed_out",
+      "restart": ["temporal workflow delete --workflow-id issue-30", "npm run run-issue -- --issue 30"] },
+    { "number": 21, "reason": "failed", "stopReason": "SessionError",
+      "restart": ["temporal workflow delete --workflow-id issue-21", "npm run run-issue -- --issue 21"] }
+  ],
+  "notLookedUp": 0
+}
+```
+
+It is bounded: at most 20 runs, newest close first (sorted by the activity from up to 200 rows it reads), and `notLookedUp` counts the closed runs the tick did not look at: the qualifying runs past the 20 it read, and the rows past the 200 it did not read. It names a run again every tick until the run is deleted, because the watcher does not read the issue's state. It never lists a run that completed. To list closed runs yourself, including completed ones, from Temporal:
+
+```bash
+temporal workflow list --query "WorkflowType='issueWorkflow' AND ExecutionStatus!='Running'"
+```
+
+That lists every closed `issueWorkflow` run, old ones included: Completed (most of them), Failed, Terminated, TimedOut or Canceled. Add `AND ExecutionStatus='Failed'` for the stops. Read a hit with `temporal workflow show --workflow-id issue-<n>` and "Recovering a stuck run".
+
+### Skip reasons
+
+| Reason | Why the issue did not start | What a person does |
+|---|---|---|
+| `blocked` | An open blocked-by issue | Nothing. It starts on the first tick after the blocker's issue is closed. A merged PR closes the issue only when it merged into the default branch; for any other base, close the issue |
+| `taken` | An open PR for the issue (its head is `claude/<n>`, or it says `Closes #<n>`), a `claude/<n>` branch, or an open `issue-<n>` run | Nothing while a run or a PR is working on it. If nothing is: a leftover branch keeps the issue out until it is gone ("Recovering from an orphan remote branch", "Recovering a stuck branch") |
+| `untrusted` | The author is not an OWNER, MEMBER or COLLABORATOR, or the tick did not read the author (`trustNotRead`) | The watcher never starts it. Re-file it under a trusted account. A not-read number clears as lower numbers start or leave Ready |
+| `over_cap` | Eligible, but no slot was free | Nothing. The lowest numbers go first on a later tick when a run closes. Or raise the cap (`delete`, then `create`) |
+| `already_running` | The start found the `issue-<n>` run already open (a start whose answer was lost and was retried, or a run the list had not shown yet) | Nothing. It holds a slot |
+| `failed` | The run closed Failed. `stopReason` is the reason it recorded | `restart` is two commands to run in order, or `instead` says the PR is already open and to carry on by hand (for a stop at the host check or its fix round, to re-gate it with `--resume`). Read "Closed runs (#724)" for which, and "Recovering a stuck run" for the reason |
+| `parked` | The run asked a question on the issue and no trusted comment answered in time | Answer on the issue, then run the `restart` commands. `<k>` is one more than the `attempt=` in the question comment's first line |
+| `terminated`, `timed_out`, `cancelled` | A person or the server closed the run, or it passed its 50 day limit | The `restart` commands, or `instead` |
+| `completed_but_open` | The run finished and its issue is still open and Ready | No command. `temporal workflow show --workflow-id issue-<n>`: close the issue if its PR merged, or read the `skipped` row of "Recovering a stuck run" |
+| `id_already_ran` | A closed run the tick did not read: past the 20 it reads, the tick failed at `start` or `run_status` before or at the read, or the read answered nothing for it | `temporal workflow describe --workflow-id issue-<n>`, or wait for the next tick |
+
+The watcher never runs a `restart` command, and `--attempt` alone does not start a closed run: delete it first. A closed run's skip appears only for an issue that is in Ready and otherwise eligible. A run that stopped after it claimed the issue leaves the item In progress, In review or Needs Input, so it is not a skip: it is in `closedNotReady`, with the same words ("What the report shows beyond Ready").
+
+### A failed tick
+
+A failed tick is a missed tick. A failed read (`list_ready`, `list_taken`, `list_running`, `check_trusted`) starts nothing and the next tick reads again, so one failure in a row needs nothing. A failed `start` keeps the starts before it in `started` and does not try the issues after it. A failed `run_status` or `list_closed` comes after the starts, so they stand. The `reason` is the failure's type word, never its message. When the same one repeats, the worker's log has the rest:
+
+| Reason | What it says |
+|---|---|
+| `GitHubRateLimitExhausted`, `GitHubRateLimitTooLong` | `gh` is rate limited. Wait, or use a longer `--every` (`delete`, then `create`) |
+| `TooLarge` | At `list_ready`: more than 50 Ready items. Trim the Ready column. At `list_taken`: more open PRs or `claude/` branches than its 5 pages of each list. Close the stale PRs and delete the stale `claude/` branches |
+| `TooManyRuns` (`list_running`) | More than 200 open `issueWorkflow` runs, and a partial count would break the cap |
+| `TickDeadline` | The tick ran 8 minutes without finishing. `step` is where it was. A start it cut off may still have happened, and the next tick finds that run open |
+
+The 8 minute deadline sits 2 minutes under the tick's 10 minute execution timeout, so the report arrives instead of the server killing the tick with none.
+
+### With held runs, Needs Input and the board
+
+- **A run held for a decision** (the gate is clear and the run waits for `npm run signal`, or waits for the merge): open, so it keeps its slot. Its issue is In review, so the report does not name it. A `changes_requested` decision, or the merge (or the end of the merge wait), frees the slot. An `approved` decision does not: the run then waits for the merge and keeps the slot until the PR merges or closes, or that wait ends.
+- **A run parked on Needs Input**: open, so it keeps its slot for as long as it waits (7 days by default). Its board item is in Needs Input, not Ready, so the watcher does not name it. An answer on the issue lets the run go on. With no answer the run closes as `parked`, and the next tick names it in `closedNotReady` (and in `skipped` instead, once a person moves the item back to Ready).
+- **Backlog to Ready** is still the maintainer's. The watcher reads Ready and nothing else, so an issue enters the queue only when someone moves it there. The watcher never moves a board item.
+- **Putting an issue back in Ready after a run** starts nothing while its `issue-<n>` run exists, open or closed. The report says why ("Skip reasons").
+
+The watcher and the script never merge, approve, apply a label, resolve a thread or move a board item. They read GitHub and start runs, and a run stops at "gate clear" for the maintainer as one started by hand does.
+
+## GitHub activities (#628)
+
+`src/activities/github.ts` holds the activities the workflow calls, built by `createGithubActivities(config)`: `listReadyIssues`, `readIssue`, `checkIssue`, `commentIssue`, `claimIssue`, `addToBoard`, `getBoardStatus`, `setStatus`, `openPr`, `postReview`, `getGateStatus` and, for the maintainer's decision (#631), `getPrState` (open, closed, merged: flags and the head SHA), `getPrChanges` (counts of golden, ceiling, ADR and business-rule files a PR changes, no paths) and `closeIssue` (closes an open issue of a trusted author as completed and reads it back). `checkIssue` is `readIssue` answered as numbers and flags (`{ number, open, trustedComments, droppedUntrustedComments }`), so the workflow can gate on an issue without the issue's text entering the stored history. `commentIssue({ issue, key, body })` posts one comment and a retry finds it by a hidden `<!-- orchestrator-comment:<key> -->` marker, looking only at comments of trusted authors (the same rule as `postReview`; it assumes this account's own comments count as trusted). Each is a thin wrapper over `gh` (`src/gh.ts`): one process per call, an argv array and never a shell string, a timeout (30 s) and an output cap, and an answer parsed at the boundary (`src/github-parse.ts`). A malformed answer fails with the path of the first mismatch, never a value and never a partial result.
+
+- **Trust.** `readIssue` drops, while listing, every comment whose `author_association` is not `OWNER`, `MEMBER` or `COLLABORATOR`, and refuses an issue written by anyone else. The same filter applies to the PRs and reviews the claim and review activities scan. A session never receives the text of a stranger.
+- **Idempotent writes.** `claimIssue` and `setStatus` read the item's Status and write only when it differs. `openPr` looks for an open PR with the same head and base first. `postReview` looks for its idempotency key (a hidden comment in the body) first. A repeat changes nothing. `setStatus` makes only the forward steps In progress to In review and In review to Done for an issue (it refuses a Ready item, which is `claimIssue`'s, a Backlog item, and any move out of Done), plus a PR's own first move, Backlog to In review; it reads the board back after a write and fails if the board disagrees (see "Board items for PRs (#635)" below).
+- **Gate.** `getGateStatus` runs the query of CLAUDE.md "Code review" step 5 and counts only submitted reviews (COMMENTED, APPROVED or CHANGES_REQUESTED, not a PENDING draft or a DISMISSED one) with a non-empty body, by a trusted author, on the head commit. The step 5 query itself counts a review of any state; the activity is stricter. A PR with more than 100 reviews or threads fails rather than being counted from part of its list.
+- **Rate limits.** A primary limit waits until the reset time. A secondary limit waits `Retry-After`, or at least 60 seconds, doubling on each repeat. Three waits at most per call, and a wait longer than 10 minutes fails the activity (`GitHubRateLimitTooLong`, non-retryable) instead of sleeping. The workflow must give these activities a start-to-close timeout above the longest wait.
+- **Which Ready issues may start (#722, plan #721).** Three pieces, numbers only (no title, label or other text from an issue's author is in any result). `listReadyIssues` reads the Ready column and the open blocked-by edges (`{ ready, blocked }`; more than 50 Ready items is a failure, never a cut list). `checkTrustedIssues(issues)` answers `{ trusted, untrusted, notRead }` for up to 200 issue numbers, reading at most 50 per call (one `issues/<n>` request each) and naming the rest in `notRead`; it reads only the author association, and a failed read fails the call instead of answering "untrusted". `listTakenIssues()` answers `{ taken, untrustedPullRequests }`: the issues with an open PR whose head is `claude/<n>` (or `claude/<n>-<slug>`) or that closes them (`Closes #N`) on any branch, or a remote branch of that name (the same rule as `claimIssue`). It reads at most 5 pages of each list and fails with `output_too_large` when a list is longer, because a `taken` list with entries missing would make issues look eligible (BR-0003: an incomplete read must not look like an empty answer); a PR from an untrusted author is counted and neither its branch nor its `Closes #N` is read. It does not read Temporal: the running `issue-<n>` workflows and the in-flight count are the watcher's (#723). The pure rule is `eligibleIssues(listed, taken, trusted)` in `src/queue-policy.ts` (no Node imports, so workflow code may import it): eligible means listed Ready, not blocked, not taken and trusted, returned ascending, with a reason (`blocked`, `taken`, `untrusted`, in that order) for each other listed issue, at most 100 named and the rest counted. An issue with no trust answer is not trusted. The queue watcher (#723, "The queue watcher" below) wires these to a workflow and a schedule.
+- **Never.** It cannot merge, apply a label (`golden-change` included), resolve a thread, or move an item into Ready or out of Backlog. `setStatus` accepts only In progress, In review and Done. `addToBoard` only adds an item to the board.
+
+### The PR template check (#706)
+
+The structure of a PR body comes from the repo's template at run time, never from code. `readPrTemplate(baseRef)` (in `src/activities/github.ts`) makes one contents read of `.github/pull_request_template.md` at the PR's base ref and returns `found` with the text, `missing` (a 404) or `too_large` (over 64 KiB); a ref that is not a branch name is `InvalidInput`, an answer of the wrong shape is a `malformed` failure. The pure part is `src/pr-template.ts`:
+
+- **Derived:** `parsePrTemplate(text)` lists the level-2 headings in order. HTML comments and fenced blocks are ignored, so are level-3 headings and checkbox lines. A template with none is `no_sections`, a typed result. `checkPrBody(template, body)` returns `present`, `missing` and `empty` section names, whether a guidance comment is left in the body (`guidanceLeft`) and in which sections, and `ok`.
+- **Not checked:** wording, order, checkbox content, links. Extra sections in a body are fine. A comment ends at a `-->` that is not part of a diagram arrow (`-->>`, or one with a word character before it), because the template's own guidance holds a diagram.
+- **Guard:** `test/pr-template-guard.test.ts` reads the real template and fails if any of its level-2 headings is written in `src/` as a whole string literal or as `## Name` (even inside a one-line string). It is a tripwire for the obvious copy, not proof: concatenation, interpolation, `join` and regex literals are not seen. The guard has no exceptions (#707 removed the last hand-written copy, the old `pullRequestBody`). A setext heading (`A` over `---`) is not a section.
+
+**The PR body (#707).** `openPr({ head, base, title, issue, attempt? })` chooses the body when it creates a PR, inside the activity, so the text never enters the workflow's history. `attempt` is the remote session attempt that pushed (a local session posts no body and has none). The steps, in `choosePrBody` (`src/pr-template.ts`):
+1. If an open PR for the head and base exists, return it. Nothing is read and nothing is rewritten, so re-running changes nothing. The source is read from the body the PR has (the fallback's fixed line means `fallback`, other text `session`, an empty body `unknown`), so a retry after a lost result still says which body it opened with.
+2. Read the template at the base (`readPrTemplate`) and the newest trusted body comment for that issue and attempt (`findPrBody`). The comment is data: orchestrator marker comments in it are removed, and it is never executed.
+3. If `checkPrBody` passes, the PR opens with the session's body, plus `Closes #<n>` when the body does not already close that issue. Source `session`.
+4. Otherwise (no comment, a section missing, empty or still holding guidance, a comment over its bound, a template that is missing, too large or has no sections) the PR opens with a body generated from the template: each section heading kept in order, each with one line saying the session did not provide it, then one line naming the sections not met and pointing at the issue and the status comment, then `Closes #<n>`. Source `fallback`, with a reason (`no_comment`, `check_failed`, `comment_too_large`, `template_unavailable`). Nothing of the failed body is copied, and the fallback names no section of its own, so a changed template changes it with no code change. It lists at most 40 sections and repeats at most 200 characters of a heading, and says how many it left out, so it stays far under GitHub's body limit. A bad body never blocks the PR.
+The workflow logs one structured line (`pr body`: the issue, the PR, the source, the count of sections not met and the reason) and the run's result carries `prBody: { source, unmet, reason? }` on `gate_clear` and `waiting_for_threads` (not yet on the results of the decision stage). The orchestrator ticks no checkbox and adds no text the session did not write, beyond the `Closes` line and the fallback's fixed lines. A body edited after a fixer round is out of scope.
+- **Comments:** one that opens and closes on the same line ends at its first `-->`; the diagram-arrow rule applies only to a comment that spans lines. Using the result to open a PR is a later task.
+
+### What the workflow does with them (#629)
+
+- **The workflow ID is the claim.** `claimIssue` is read, then write, so two concurrent claims can both answer `claimed: true`, and an activity cannot see whether another workflow runs for the issue. `IssueWorkflow` runs under the deterministic ID `issue-<number>` and the client starts it with a conflict policy of FAIL and a reuse policy of REJECT_DUPLICATE (`src/issue-client.ts`). That, not the board, keeps two runs off one issue.
+- **Act on `proceed`, never on `claimed` alone.** If the worker dies after `claimIssue` moved the item and before its answer was recorded, the retry reads In progress and answers `claimed: false, reason: already_in_progress, proceed: true`. That means carry on. `proceed: false` (an open PR, a `claude/` branch, or an item already In review or Done) means stop.
+- **Timeouts.** Every GitHub activity gets `GITHUB_ACTIVITY_TIMEOUTS` from `src/github-policy.ts` (a file workflow code can import; `gh-config.ts` re-exports it): a start-to-close of 45 minutes and a heartbeat timeout of 2 minutes. One attempt can wait out three rate limits of up to ten minutes each (the waits are counted over the whole attempt, not per request), which is 30 minutes before the requests' own time. The wait heartbeats every 5 seconds and stops when the activity is cancelled. The non-board activities have at most `GITHUB_ACTIVITY_MAX_ATTEMPTS` (3) attempts, the board ones `BOARD_ACTIVITY_MAX_ATTEMPTS`.
+
+### Board items for PRs (#635): what #629 and #631 call
+
+A PR is not on the board until something adds it, and the board puts a new item in Backlog. Three activities cover that, and none of them assumes a board write happened (foundations 4.10).
+
+| Activity | Input | Does | Answer |
+|---|---|---|---|
+| `addToBoard(target)` | an issue or PR URL of the configured repo, `{ kind: 'issue' \| 'pr', number }`, or a bare number (an issue) | Reads the board first. Adds the item only when it is not there, then reads the board again | `{ kind, number, itemId, added, status }`. `added: false` means it was already there and nothing was written, its Status included. `status` is what the board shows now (`null` for none) |
+| `getBoardStatus(target)` | the same | One read | `{ kind, number, onBoard, status }`, `status: null` when off the board or without one |
+| `setStatus(target, status)` | the same, plus In progress, In review or Done | Reads, writes only if the Status differs and the move is allowed, then reads the board again | `{ changed, status }`. Fails if the board does not show `status` afterwards |
+
+**The calls, in order.**
+
+- **After `openPr` (#629, `IssueWorkflow`):** `addToBoard({ kind: 'pr', number })`, then `setStatus` to In review, then `getBoardStatus` and compare it with In review. `setStatus` already fails when its own read-back disagrees, and the extra `getBoardStatus` is the workflow's independent check (up to 3 reads, 5 s apart, as a workflow timer). Then the same two calls for the issue (In progress to In review).
+- **On merge (#631):** `setStatus(pr.url, 'Done')` and `setStatus(issueNumber, 'Done')`, then `getBoardStatus` for each. Closing the issue, if the merge did not, is #631's own step and not in these activities.
+- **Every call is safe to run again.** A repeat of the whole sequence adds and writes nothing.
+
+**Re-reads and retries are bounded by constants, not by prose.** `src/board-policy.ts` holds them and imports nothing from Node or `config.ts`, so workflow code can import it. After a write, `addToBoard` and `setStatus` re-read the board up to `BOARD_RE_READS` (3) more times, waiting `BOARD_RE_READ_DELAY_MS` (2 s) before each; the wait heartbeats and stops when the activity is cancelled. GitHub Projects can show a stale Status for a moment after a write, so one stale read does not fail the step. If the board still disagrees, the attempt fails as `BoardReadbackMismatch`, which is retryable on purpose: the retry reads first and writes only what is missing. Give the three board activities `BOARD_ACTIVITY_OPTIONS` (or at least `retry.maximumAttempts: BOARD_ACTIVITY_MAX_ATTEMPTS`, 3), because Temporal's default is unlimited attempts and a board that never shows the change would loop. The message says what the board shows (a Status name or "no item", never a raw answer). Do not catch `BoardReadbackMismatch` and carry on.
+
+**Which moves are allowed.** `setStatus` keys its moves by the item's current Status, once for an issue and once for a PR.
+
+| Current Status | Issue may go to | PR may go to |
+|---|---|---|
+| Backlog | nothing (Backlog to Ready is the maintainer's) | In review (the PR's own first move) |
+| Ready | nothing (`claimIssue` claims a Ready item) | nothing |
+| In progress | In review | In review |
+| In review | Done | Done |
+| Done, or no Status | nothing | nothing |
+
+The one difference is Backlog to In review, and it is for a PR only: a PR is added in Backlog and never passes through Ready or In progress, while for an issue that move would skip the maintainer's gate. Everything else is the issue rule for both: a repeat is a no-op, a skipped step (Backlog to Done), a move back and anything out of Done are refused (`InvalidState`, non-retryable), and Ready and Backlog are never a target (`InvalidInput`).
+
+**A missing item is `NotFound`, not a retry.** GitHub answers a missing issue or PR as a `null` item plus a `NOT_FOUND` error, and `gh` exits 1 on it. `gh.graphql` returns that answer's data when every error is `NOT_FOUND`, so the activity fails as `NotFound` (non-retryable, no GitHub text in the message). A PR number looked up as an issue (a bare number is an issue) gets the same answer from GitHub and fails the same way, so name a PR by URL or `{ kind: 'pr', number }`.
+
+**Trust.** `addToBoard` checks the item's `author_association` before it adds: an item by anyone but an OWNER, MEMBER or COLLABORATOR, or with no `author_association` at all (missing or null), is refused as `UntrustedAuthor` and none of its text is read. An item that is already on the board is not checked, since nothing is written for it. `setStatus` and `getBoardStatus` never add an item: a PR that is off the board fails `setStatus` as `InvalidState`, so call `addToBoard` first.
+
+**A new item's Status arrives a moment after the add.** `addToBoard` does not set a Status: the Backlog a new PR shows is set by a board workflow that runs after the add, and this code only reads it. `addToBoard` waits (the same bounded re-reads) for it and answers `status: null` if it never shows; `setStatus` waits the same way, and an item that is on the board but still shows no Status then fails as the retryable `BoardReadbackMismatch` (#629), so the retry policy's three attempts cover about 40 seconds (6 s of re-reads each, 5 s and 10 s between attempts) before the step fails visibly. Every other refusal of `setStatus` (a move it does not allow) stays non-retryable `InvalidState`. `claimIssue` still does not read back after its write; only `setStatus` and `addToBoard` do.
+
+Settings (all optional, read once in `src/gh-config.ts`): `ORCHESTRATOR_GH_PATH` (default `gh`), `ORCHESTRATOR_GITHUB_REPO` (`eborden/logseq-mcp-server`), `ORCHESTRATOR_PROJECT_OWNER` (`eborden`), `ORCHESTRATOR_PROJECT_NUMBER` (`1`), `ORCHESTRATOR_GH_TIMEOUT_MS` (`30000`). `npm run test:github` runs the tests against a fake `gh` (`test/fake-gh.mjs`), so it makes no GitHub call. The GitHub token is whatever `gh auth` holds, and it needs the `repo` and `project` scopes.
+
+## Files
+
+| File | Role |
+|---|---|
+| `src/workflows/hello.ts` | `helloWorkflow`: `greet`, then `farewell` |
+| `src/activities/hello.ts` | The two activities |
+| `src/worker.ts`, `src/client.ts` | The worker (it registers every activity set) and the `hello` run starter |
+| `src/workflows/issue.ts` | `issueWorkflow`: the steps of "IssueWorkflow" above |
+| `src/issue-types.ts` | Its input, result, workflow ID, branch name, bounds and the fixed text of the stop comment and the PR (importable from workflow code) |
+| `src/issue-client.ts`, `src/run-issue.ts` | Starts a run for one issue (the claim policy), `startResumeRun` (#747: the resume start and its refusals), and the `npm run run-issue` script |
+| `src/brief.ts` | `buildBrief`: the implementer's brief, a pure function, and `briefCommands`, the commands it tells the session to run (checked against the tool lists by a test). Also `buildReviewerBrief` and `buildFixerBrief` (#630) |
+| `src/workflows/review-loop.ts`, `src/gate.ts`, `src/review-policy.ts` | The review loop, the pure `gateClear`, and the loop's bounds (importable from workflow code) |
+| `src/workflows/decision.ts`, `src/approval-types.ts`, `src/signal.ts` | The maintainer's decision (#631): the signal inbox, the wait and the merge watch; the payload, bounds, classifier and comment texts (importable from workflow code); the `npm run signal` CLI |
+| `src/activities/review.ts`, `src/review-types.ts` | The reviewer, fixer and posting activities, and the parsing, bounds and sanitising of what the sessions write |
+| `src/activities/branch.ts`, `src/branch-types.ts`, `src/diff-guard.ts` | `guardBranch` and `pushBranch` (the only push), their input parsing and bounds, and the pure diff guard |
+| `src/activities/implementer.ts` | `runImplementerSession`: reads the issue, builds the brief and runs the session in one activity, so issue text stays out of the history |
+| `src/activities/host-integration.ts`, `src/host-integration-policy.ts` | `runHostIntegration` (#647): the integration suite on a PR head, on the host only; its input, result, queue name and bounds (importable from workflow code) |
+| `src/workflows/queue-watcher.ts`, `src/queue-types.ts`, `src/queue-policy.ts` | The queue watcher's tick (#723), its input, tick report, cap and interval bounds (importable from workflow code), and the pure eligibility rule (#722) |
+| `src/activities/queue.ts` | `listRunningIssues`, `startQueuedRun` (#723) and `readRunStatuses` (#724): the Temporal-side reads and starts of the watcher, on the worker's own client connection |
+| `src/run-status.ts` | How a closed run ended (#724): the fixed list of stop reasons a report may name, and the status words |
+| `src/queue-schedule.ts`, `src/queue.ts` | The watcher's Schedule (create, pause, resume, delete; overlap policy skip) and the `npm run queue` script |
+| `src/run-issue-input.ts` | `buildRunInput` (#671) and `buildResumeInput` (#747): the run input from the `run-issue` flags, testable apart from the script |
+| `src/workflows/executor.ts` | `onExecutor` (#671): the one place the workflow chooses `local` or `remote` for a session |
+| `src/workflows/host-integration.ts`, `src/integration-policy.ts` | The host integration check at the gate (#648): once per head, run, record, stop; the rule for when it is needed and the commit status (#646, importable from workflow code) |
+| `src/workflows/remote-implementer.ts` | The implementer step of a `remote` run (#673): session, the park for a person's answer (#698), guard on the fetched branch, delete on refusal, the attempt counter |
+| `src/activities/remote-session.ts`, `src/remote-session-policy.ts`, `src/routine-fire.ts` | `runRemoteSession` (#672): claim, marker, fire and bounded wait for a remote session; its input, result and bounds (importable from workflow code); the routine fire client |
+| `src/findings-comment.ts` | `parseFindingsComment` (#674) and `parseFixerRepliesComment` (#675): the remote reviewer's and fixer's keyed comments turned into the local sessions' typed output |
+| `src/workflows/failure-reason.ts` | The type word of a failed activity and the counts line of a guard refusal, shared by `issue.ts` and the review loop |
+| `src/start-server.ts`, `src/dev-server.ts` | The dev server launcher |
+| `src/activities/claude-session.ts` | `runClaudeSession`: one worktree, one branch, one `claude -p` session |
+| `src/claude-session-policy.ts` | Its timeouts, heartbeat and retry bounds (importable from workflow code) |
+| `src/config.ts`, `src/hello-types.ts`, `src/types.ts` | Typed config and input and output parsing |
+| `src/gh.ts`, `src/gh-config.ts`, `src/github-parse.ts`, `src/activities/github.ts` | The `gh` wrapper, its config, the parsers and the GitHub activities |
+| `src/pr-template.ts` | The PR template read's answer, `parsePrTemplate` and `checkPrBody` (#706): pure, derived from the template file |
+| `src/board-policy.ts`, `src/github-policy.ts` | The re-read and retry bounds of the board activities, and the timeouts and attempts of the other GitHub activities (importable from workflow code) |
+| `test/` | The crash test, the server-free unit tests, and `fake-claude.sh` (a stand-in for `claude`, so no test calls the model) and `fake-gh.mjs` (a stand-in for `gh`) |
+
+## Dependencies
+
+All pinned to exact versions in `package.json`: the Temporal TypeScript SDK 1.24.0 (`@temporalio/client`, `worker`, `workflow`, `activity`, `testing`; MIT, maintained by the Temporal SDK team), plus `typescript`, `@types/node` and `tsx` for the toolchain. `@temporalio/testing` is a runtime dependency here because it is the SDK's launcher for the dev server.
+
+## The Claude session activity
+
+`runClaudeSession` (`src/activities/claude-session.ts`, #627) creates a git worktree on a named branch, runs `claude -p` in it and returns `{ branch, headSha, exitStatus }`. It is built with `createClaudeSessionActivities(loadClaudeConfig(process.env))`, so the executable comes from config and tests substitute a fake.
+
+- **One branch, one session.** The branch is created with `git worktree add -b`, which fails if it exists, so overlapping attempts cannot both start. An attempt that finds the branch locally, or on `origin`, returns that state and starts nothing. "An open PR exists" is implemented as "the branch exists on `origin`", because a PR's branch is pushed and this activity makes no GitHub call (#628 does). So a pushed branch with no PR also counts as taken. An unreachable `origin` is an error, never "no branch".
+- **`exitStatus`** says what it found. The session marker is `branch.<name>.orchestratorsession` in the repo's config (`started`, then `success` or `error`), and the claim is `branch.<name>.orchestratorclaimed`, written before the branch exists.
+
+| `exitStatus` | Meaning | Session started now? |
+|---|---|---|
+| `success`, `error` | A session of ours finished (`error` also covers a non-zero exit, `is_error`, a timeout and malformed output) | No |
+| `interrupted` | A session started and never finished; it may still be running | No |
+| `claimed` | An attempt created the branch and died before recording a start (or is doing so right now). The marker is written before the spawn, so no session ran. Nothing can tell a dead attempt from a live one | No |
+| `existing` | The branch exists and has no claim: not made by this activity, or only on `origin` | No |
+
+- **The prompt is one argv element**, after `--`, spawned without a shell. Only `type` and `is_error` are read from the JSON on stdout. A session's text is never returned, logged or put in an error message. Exit 0 with output that is not a result document fails the activity as `MalformedResult` (non-retryable, and the branch is marked `error` so a retry cannot start another session).
+- **Bounded.** 30 minute session timeout enforced by the activity, a heartbeat every 5 seconds from the start of the activity to its end (the git phase included, so a slow `git ls-remote` cannot look like a dead worker; the heartbeat timeout is 30 seconds), 1 MB output cap, 20 second timeout on each git command, and a retry maximum of 3 for infrastructure failures only (`src/claude-session-policy.ts`). A timeout fails as `SessionTimeout` (non-retryable). A timeout or a cancel sends SIGTERM to the child's whole process group and SIGKILL after 5 seconds. However the child ends, the group then gets a final SIGKILL, so a descendant that ignores SIGTERM and holds no pipe does not outlive the activity.
+- **Known gap.** A worker that is itself SIGKILLed cannot stop its child. The next attempt reports `interrupted` and starts nothing.
+
+### Permission modes
+
+`CLAUDE_PERMISSION_MODE` is a closed set, the choices `claude --help` lists for `--permission-mode` in CLI 2.1.302: `acceptEdits`, `auto`, `manual`, `dontAsk`, `plan`, `bypassPermissions`. Re-check `claude --help` when the CLI is upgraded, since a value the CLI does not know makes every session exit non-zero (recorded as `error`). The activity passes a flag only when the config has a value for it; `loadClaudeConfig` gives the unattended defaults below when nothing is set.
+
+- `plan` only plans; a session cannot finish an issue in it.
+- `acceptEdits` lets file edits through; other tools may still ask.
+- `dontAsk` and `auto` decide without asking. Read the CLI's own help for exactly what each allows before using them unattended.
+- `bypassPermissions` skips every permission check and can do anything the OS user can. It is refused unless `ORCHESTRATOR_ALLOW_BYPASS_PERMISSIONS=yes-skip-all-permission-checks` is also set. The CLI itself recommends it only for sandboxes with no internet access.
+
+**An unattended session can stall on a permission prompt.** In `-p` mode, `claude --help` says prompts go to `--permission-prompts host` by default, and with no host nobody answers. Such a session may sit until the 30 minute session timeout, fail as `SessionTimeout` and mark the branch `error`.
+
+**The decision for the implementer session (#629), pending the maintainer's confirmation before the first real run.** Not `bypassPermissions`, and the workflow never sets `ORCHESTRATOR_ALLOW_BYPASS_PERMISSIONS`. The default is the least permissive configuration `claude --help` (CLI 2.1.302) documents that lets an implementer edit files, commit and run the repo's checks:
+
+- `--permission-mode acceptEdits`: file edits go through without a prompt.
+- `--permission-prompts none`: anything that would prompt is denied at once instead of waiting for nobody, so a session cannot sit on a prompt until the timeout. A denied tool call is the session's to work around, or to report in its status comment; the run then stops at the `session` step with a comment if it ends without success.
+- `--allowedTools=<comma list>` (`DEFAULT_ALLOWED_TOOLS` in `src/config.ts`): Read, Glob, Grep, Edit and Write; git in the worktree only by verb (`status`, `diff`, `log`, `show`, `rev-parse`, `add`, `rm`, `mv`, `commit -m *`); `npm ci` and the exact scripts `npm run typecheck`, `test:unit`, `test:github`, `test:workflow`, `test:server`, `test:crash`; `cargo build`, `test`, `fmt` and `clippy`; `shellcheck`; and `gh issue comment * --body *`. **No push of any kind**, no `git rebase` (`--exec`), no `git fetch` (`--upload-pack`), no `node`, no `npx`, no `npm exec`, no `gh issue view` or `gh pr view` (they would show the comments the brief left out), no `gh pr`, no `gh api`. It is passed as one `--allowedTools=...` argument so the variadic option cannot swallow the prompt that follows `--`.
+- `--disallowedTools=<comma list>` (`DEFAULT_DISALLOWED_TOOLS`): deny beats allow, so these hold even when a settings file allows them: `gh api`, `gh pr`, `git push`, `gh issue comment` with `--body-file` or `-F`, WebFetch, WebSearch, **`git * --output*`** (`git diff`, `git log` and `git show` are allowed, and `--output=<file>` makes any of them write to any path; I read `git help diff` for it and the other allowed verbs for a write-anywhere or run-a-program option, and found only this one), **`git diff --no-index`** (it reads any two files into the session), and Edit and Write of the whole protected set below, generated from the same constants as the guard (`protectedDenyRules`), including **any `.git` directory** (hooks and config the worker's own git would run) and **`.mcp.json`**. The path syntax of those rules is unverified (see below), which is why `guardBranch` checks the same paths after the session and does not depend on them.
+- `--setting-sources project`: the host user's own settings, allow rules and hooks do not load. The project's `.claude/settings.json` in the worktree does, and the session cannot edit it (denied above, and refused by the guard).
+- `--strict-mcp-config` with no `--mcp-config`: no MCP server loads.
+
+**This is risk reduction, not a sandbox.** The commands that run the repo's tests (`npm run test:*`, `cargo test`, `cargo build`) run whatever the repo's files say, as the worker's OS user, so a session that can run the tests can run arbitrary code. No pattern prevents that. `npm ci` runs the install scripts of the locked dependencies. `git diff --output=<file>` and `git log --output=<file>` write where they are told. Patterns for `Bash` rules are matched by the CLI in ways the maintainer has to confirm (see "Before the first real run"). So the boundary that actually holds is the account the worker runs as:
+
+- **Run the worker as a dedicated OS user** that has no access to personal files, no other repositories, no SSH keys, no cloud credentials and no browser profile. Its home directory holds only what the worker needs.
+- **Give that user a narrowly scoped `gh` token**: this repository only, with the `repo` and `project` scopes the activities need (a fine-grained token for one repository where the board's scope allows it), never the maintainer's own login. Nothing in the workflow merges or labels, but a session that escapes its rules can do whatever the token can.
+- Change the settings with `CLAUDE_PERMISSION_MODE`, `CLAUDE_PERMISSION_PROMPTS`, `CLAUDE_ALLOWED_TOOLS` (a list replaces the default), `CLAUDE_DISALLOWED_TOOLS` (added to the default) and `CLAUDE_SETTING_SOURCES`.
+
+### The protected set
+
+The principle (`src/diff-guard.ts` has it in full, and `protectedDenyRules` turns it into the file-tool deny rules): a session may change the feature, meaning the source, the tests and the docs it was asked to change. It may not change anything that decides how code is built, run, tested, released or permitted, because the next command executes it with more reach than the session has. A path is protected when it is
+
+1. **executed by an allowed command, the worker or CI**: `package.json`, `package-lock.json` and `npm-shrinkwrap.json` at any depth (the allowed `npm run` and `npm ci` run them), `build.rs`, `scripts/`, `.husky/`, `.githooks/`, `.pre-commit-config.yaml`, and `vitest`, `vite`, `jest`, `webpack`, `rollup` and `esbuild` configs (JavaScript that runs);
+2. **a configuration for git, npm, cargo, node or claude**: `.npmrc`, `.cargo/`, `Cargo.toml` and `Cargo.lock`, `rust-toolchain*`, `.gitattributes`, `.gitmodules`, `.gitignore` (it decides what `git add` skips), `.mcp.json`, `.claude/`, `CLAUDE.md` and `CLAUDE.local.md` at any depth, anything under a `.git` directory, `.env*`, `.eslintrc*`, `.babelrc*`, `.mocharc*`, `.devcontainer/`, `.vscode/`, and keys and databases (`.pem`, `.key`, `.p12`, `.sqlite`);
+3. **CI, release or a rule CI enforces**: `.github/`, `CODEOWNERS`, `.claude-plugin/` (its entry runs the launcher for users), `pypi/` (release packaging), `about.toml`, `about.hbs`, `Makefile`, `Dockerfile*`, `docker-compose*`, `docs/adr/`, `docs/business-rules/`, `tests/guards/`, `tests/rust-guards/`;
+4. **the orchestrator itself**: all of `orchestrator/src/` (it decides what the next session may do), and its `package.json`, lockfile and `.npmrc` by the rules above.
+
+Paths are normalised before they are compared (`docs/./adr/x`, `docs//adr/x`, `src/../.github/x`, a backslash as a separator), and compared in lower case. A path outside the work tree is refused. A branch is also refused as `SpecialFile` when any commit adds, changes or removes a symlink, a submodule or a file mode (anything but a plain `100644` file, so a new executable or a flipped executable bit too): a link can point a later write into a protected place.
+
+**What this means, stated plainly: an issue that must change `package.json` or another manifest, a lockfile, a build file, a script, CI, the ADRs or business rules, `CLAUDE.md`, or the orchestrator itself (so #630 and #631 too) cannot be implemented by the orchestrator, and needs a human. That is by design for now.** Dependencies are on the list because foundations 7 asks for a verified, maintained dependency, and a person does that. The list can be narrowed once the first runs behave; a change to it is a change to `src/diff-guard.ts`, which is itself protected.
+
+The commands that run the tests still execute the session's feature code: no path list prevents that. That is the dedicated OS user's job.
+
+### Verify before relying on it
+
+The prompt is passed as `claude -p --output-format json --permission-mode m --permission-prompts p --allowedTools=<list> --disallowedTools=<list> --setting-sources project --strict-mcp-config -- <prompt>`.
+
+- **Checked by the maintainer on Claude Code 2.1.302 (recorded for #627):** `claude -p -- "reply with ok"` answered `ok`, and `claude -p -- "--version"` treated the text as the prompt and did not parse it as a flag. So `--` ends option parsing, and a prompt that starts with a dash is safe.
+- **Checked for #629, without calling the model:** `claude --help` lists `--permission-mode`, `--permission-prompts` (`host` or `none`), `--allowedTools`, `--disallowedTools`, `--setting-sources <sources>` (comma-separated, `user`, `project`, `local`), `--strict-mcp-config` ("only use MCP servers from `--mcp-config`") and `--mcp-config`. The exact argv the activity builds from the default config (13 arguments, with no prompt and no stdin) was accepted by the option parser and stopped at "Input must be provided" before any model call.
+- **Not established from `claude --help` alone:**
+  - how the comma-joined `--allowedTools=...` and `--disallowedTools=...` values are split into rules, patterns with spaces, `*` and `**` included;
+  - how a `Bash(...)` pattern matches a command: whether `Bash(git status)` and `Bash(git status *)` are both needed, whether `*` crosses a quote or a `&&`, and whether a command chained with `;`, `&&` or `$(...)` is matched as a whole or by its parts;
+  - the path syntax of `Edit(...)` and `Write(...)` deny rules (`.github/**`, `CLAUDE.md`, `.env*`), and whether they apply to every file tool;
+  - whether `--setting-sources project` really leaves out the host user's allow rules and hooks, and whether `--strict-mcp-config` with no config loads no server;
+  - what a denial looks like to the session, and whether `--permission-prompts none` denies at once or ends the session;
+  - **whether the bare `Edit` and `Write` allow rules reach outside the worktree.** Under `acceptEdits` a write outside the working directory should not be approved without a prompt, but that was not checked. If it does reach out, a session could write the main checkout's `.git/config` or `.git/hooks`, and so redirect or run code in the worker's own git calls (the push turns hooks off for itself, but `git diff`, `git log` and `git rev-parse` in the guard do not). The drill tests it (step 3, last item), and the deny rule for any `.git` directory is a second line, not a proof;
+  - whether `Bash(git * --output*)` also matches `git log --output=x` with the option anywhere on the line, and whether a bare `*` between `git` and `--output` matches a verb;
+  - **that every command the brief names is matched by its allowed rule in a real session.** A test checks the brief and the lists against a model of the rules, and that is all it proves. Until the maintainer's permission drill below, real-session matching of these patterns is UNVERIFIED.
+- No real session was run with these flags.
+
+### Before the first real run
+
+A checklist for the maintainer, by hand, in a scratch repository with a local bare origin, never in this repository and never with a real `gh` token. Nothing here needs the model unless it says so.
+
+1. **Make the scratch repo.** `git init --bare origin.git`, `git clone origin.git scratch`, one commit on `main`, `git push origin main`, `git checkout -b claude/1`. Run the rest from `scratch`. Use the OS user the worker will run as.
+2. **Start an interactive `claude` there with the exact flags the activity builds.** `--permission-mode acceptEdits --permission-prompts none --allowedTools=<DEFAULT_ALLOWED_TOOLS joined with commas> --disallowedTools=<DEFAULT_DISALLOWED_TOOLS joined with commas> --setting-sources project --strict-mcp-config` (without `-p`; print the lists with `node --import tsx -e` against `src/config.ts`, or copy them from the source). Open `/permissions` and check how the two lists were split into rules: each rule on its own, patterns with spaces intact. Note what `/permissions` shows and what it does not. This is the one check that needs no model call.
+3. **Try these, and expect each to be denied** (this calls the model, and the denial is what you are looking for): `git push origin claude/x:main`, `git push --delete origin claude/1`, a Write of a file outside the scratch repo, an Edit of `.github/x`, an Edit of `package.json` and of `.mcp.json`, `git log --output=/tmp/out.txt`, `git diff --no-index /etc/hosts /dev/null`, `node -e "1"`, `npx cowsay hi`, `gh api user`, `gh pr merge 1`, a Skill invocation, a read of an issue with `gh issue view 1`. For each, write down what the denial looks like in the output and whether the session carried on or stopped. **Then test whether a write reaches outside the worktree**, because everything above assumed it does not: from a worktree of the scratch repo (`git worktree add ../wt -b claude/1`), start the session in `../wt` and ask it, one request each, to Write `../outside.txt`, to Write `<scratch>/.git/hooks/pre-commit` and `<scratch>/.git/config` (the main checkout's, which a worktree shares), and to Edit `<scratch>/README.md` from the worktree. Every one of those must be denied. If any succeeds, the bare `Edit` and `Write` allow rules are too wide: replace them with path-scoped rules (`Edit(src/**)`, `Edit(tests/**)`, `Edit(docs/**)`) in `CLAUDE_ALLOWED_TOOLS` before any real run, and treat the `.git` deny rule as unproven.
+4. **Confirm the forms the brief uses work:** `git add <path>` then `git commit -m "subject" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"` (no heredoc, no command substitution), and `gh issue comment 1 --body "text"` (point `gh` at a throwaway repo, or put a fake `gh` first on PATH that records its argv), `npm run typecheck` and `cargo test --locked` in a repo that has them. Check that a commit with quotes, a `$` or a backtick in the message is handled the way the brief says (it tells the session to avoid them).
+5. **Check the protected paths twice:** the deny rules (step 3 shows whether `Edit(.github/**)` and `Edit(**/package.json)` are refused) and the guard. For the guard, make two commits on `claude/1`, the FIRST touching `package.json` and the second an ordinary file, and run `guardBranch` against it with `node --import tsx` (it must refuse as `ProtectedPath`, with a count and no path); then a branch whose first commit adds `.env` and whose second removes it (still refused); then a clean branch of two commits (it must pass). `test/branch.test.ts` does the same on throwaway repos.
+6. **Kill the worker mid-session.** Start the dev server, the worker with `CLAUDE_BIN=<repo>/orchestrator/test/fake-claude.sh` and `FAKE_CLAUDE_MODE=slow FAKE_CLAUDE_SLOW_SECONDS=60`, and a fake `gh` (`ORCHESTRATOR_GH_PATH`) from the tests, then `npm run run-issue -- --issue <n>`. While the fake session sleeps, `kill -9` the worker, start it again, and watch: the run must stop at the `session` step with the reason `SessionInterrupted` and one comment, with one line in the fake's invocation log, never a second session.
+7. **The review sessions (#630).** In the same scratch repo, with a `claude/1` worktree and a detached worktree: start the reviewer with its flags (`reviewerAllowedTools` in `src/activities/review.ts` instead of the default allowed list) and check that `Write(/review-findings.json)` lets it write that one file and nothing else, that it cannot commit, run `npm`, or call `gh`, and what a denial looks like. Check that the fixer's `fixer-replies.json` does not show in `git status` (`.git/info/exclude` of the shared repo) and that it is not picked up by `git add <path>`. Check that a committed `review-findings.json`, or a link of that name, in the PR's tree does not survive into the session (the activity removes it after `git worktree add`), and whether `Write(/review-findings.json)` writes through a link.
+8. **A real run, watched, on a throwaway issue** in a throwaway repository, with a fine-grained token for that repository only: read the status comment and the denied calls it reports, then widen or narrow `CLAUDE_ALLOWED_TOOLS` from what you saw.
+
+9. **The host integration activity (#647), once by hand on a small PR.** On the Mac, with LogSeq installed: start `HOST_TASK_QUEUE=host npm run worker`, start `runHostIntegration` on the `host` queue for a small open PR (`temporal workflow start` of a one-activity workflow, or a throwaway client), and wait for the result. Check that it is `pass` with plausible counts, and that `git status` in your working copy is clean (and that the worktree under the temp directory and the instance are gone). Then kill the worker with `kill -9` while the suite runs, start it again, run the same PR once more, and check that the stale instance and worktree were cleared first. Last, send `SIGTERM` (Ctrl-C) while the suite runs and note whether the instance and worktree were cleaned up before the process exited; write the result here. If creating the host worker fails (for example a bad namespace), the worker closes its connection and reports that error; this path has no test, since it needs a live server.
+
+### Recovering a stuck branch
+
+By design nothing retries `interrupted`, `claimed` or `existing`, so a person (or a workflow step) clears them. Run these in the repo the activity used (`<repo>`), with the `branch` and worktree directory of the step.
+
+1. For `interrupted` (and `claimed`, to be sure), make sure no session is still running: `pgrep -fl "claude -p"` and stop the one working in that worktree.
+2. Remove the worktree, then the branch. Deleting the branch also deletes its `orchestratorsession` and `orchestratorclaimed` config:
+
+   ```bash
+   git -C <repo> worktree remove --force <worktreeDir>
+   git -C <repo> branch -D <branch>
+   git -C <repo> worktree prune
+   ```
+3. If the branch is on `origin` and should go too: `git -C <repo> push origin --delete <branch>`. Skip this when a PR is open on it and you want to keep that work.
+4. Run the step again. `existing` for a branch you want to keep needs no recovery: it is the activity doing its job.
+
+A claim left with no branch (a crash before `git worktree add`) needs nothing: the next attempt starts fresh. To drop it anyway: `git -C <repo> config --local --unset branch.<branch>.orchestratorclaimed`.
