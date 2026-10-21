@@ -1418,6 +1418,16 @@ mod tests {
     }
 
     #[test]
+    fn an_alias_group_puts_the_page_asked_about_first_and_each_page_in_document_order() {
+        let on_alias = |id: i64, parent: i64, left: i64| json!({"id": id, "uuid": format!("u{id}"), "page": {"id": 11}, "parent": {"id": parent}, "left": {"id": left}});
+        let mut fetched = shuffled_page();
+        // page 11: 21 has the child 22, then 23; fetched with the later ones first
+        fetched.splice(0..0, [on_alias(23, 11, 21), on_alias(22, 21, 21), on_alias(21, 11, 11)]);
+        let ids = blocks_of(fetched, true, Some(10)).iter().map(|b| b["id"].as_i64().unwrap()).collect::<Vec<_>>();
+        assert_eq!(ids, [1, 3, 4, 7, 6, 21, 22, 23]);
+    }
+
+    #[test]
     fn max_blocks_keeps_the_first_blocks_of_the_page_and_the_cursor_reads_on_in_that_order() {
         let mut list = list_of(0, 0, 0, 1);
         list.blocks = blocks_of(shuffled_page(), false, Some(10));
