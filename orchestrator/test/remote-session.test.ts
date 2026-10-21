@@ -314,6 +314,17 @@ test('a later round does not end on a review on the head, nor on a comment of an
   assert.equal(scenario.fire.calls.length, 1);
 });
 
+test('a later round with no findingsCommented read fires, and its wait ends at the cap, not on the review on the head (#753)', async () => {
+  reviewerScenario();
+  scenario.github.reviewed.add(`77:${SHA_A}`);
+  delete (scenario.github as { findingsCommented?: unknown }).findingsCommented;
+  const result = await run({ ...markedReviewerInput, attempt: 2 });
+  assert.equal(result.outcome, 'timed_out');
+  assert.equal(result.claim, undefined);
+  assert.equal(scenario.fire.calls.length, 1, 'no claim without the read');
+  assert.equal(scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0), LIMITS.capMs);
+});
+
 test('a round 0 reviewer with a marker is still claimed when a review is on the head (an earlier attempt of the round)', async () => {
   reviewerScenario();
   scenario.github.reviewed.add(`77:${SHA_A}`);
