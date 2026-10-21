@@ -360,6 +360,12 @@ mod tests {
             Value::Object(with_fetched_children(&block)).to_string(),
             r#"{"id":1,"uuid":"a","content":"p","children":[{"id":3,"uuid":"c","content":"kid","children":[],"childrenTruncated":true}],"childrenTruncated":true}"#
         );
+        // a parent whose children are all fetched gets no marker, at either depth
+        let whole = object(json!({"id": 1, "children": [{"id": 3, "content": "kid", "children": [{"id": 4, "content": "leaf"}]}], "content": "p"}));
+        assert_eq!(
+            Value::Object(with_fetched_children(&whole)).to_string(),
+            r#"{"id":1,"content":"p","children":[{"id":3,"content":"kid","children":[{"id":4,"content":"leaf"}]}]}"#
+        );
         // children that are not a list are left as they came
         let odd = object(json!({"id": 1, "children": {"id": 2}}));
         assert_eq!(with_fetched_children(&odd), odd);
