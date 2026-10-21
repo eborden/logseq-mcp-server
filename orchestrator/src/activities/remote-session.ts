@@ -23,7 +23,7 @@
 // Never in a log, a result, the workflow history or an error message: the token, the brief, or a response body.
 
 import { ApplicationFailure, Context } from '@temporalio/activity';
-import { isFindingsMarker, isFixerRepliesMarker, needsInputMarker } from '../findings-comment.ts';
+import { findingsMarkerRound, isFindingsMarker, isFixerRepliesMarker, needsInputMarker } from '../findings-comment.ts';
 import { FireError } from '../routine-fire.ts';
 import type { FireClient } from '../routine-fire.ts';
 import {
@@ -118,6 +118,19 @@ async function clearMarker(repoDir: string, input: RemoteSessionInput): Promise<
 
 // ---- the claim and the wait --------------------------------------------------------------------------------------
 
+/**
+ * The marker that alone says whether a reviewer's round has run, or undefined when a review on the head says it (#753).
+ * Round 0 reviews the head for the first time, so any review on it is that round's own. A later round can follow a fixer that
+ * pushed nothing, so the head already holds the earlier round's review; only the round's own keyed comment (the marker names
+ * the pr, the head and the round) is its signal.
+ */
+function laterRoundMarker(input: RemoteSessionInput): string | undefined {
+  if (input.role !== 'reviewer' || input.findingsMarker === undefined) {
+    return undefined;
+  }
+  return (findingsMarkerRound(input.findingsMarker) ?? 0) > 0 ? input.findingsMarker : undefined;
+}
+
 /** The first reason the work is taken, or undefined when the role may launch. Reads only. */
 async function findClaim(github: RemoteGithub, input: RemoteSessionInput): Promise<RemoteClaim | undefined> {
   const prs = await github.openPrs(input.issue);
@@ -138,8 +151,12 @@ async function findClaim(github: RemoteGithub, input: RemoteSessionInput): Promi
   if ((await github.branchTip(input.branch)) !== input.headSha) {
     return 'branch_moved';
   }
-  if (input.role === 'reviewer' && input.pr !== undefined && input.headSha !== undefined && (await github.reviewedOnHead(input.pr, input.headSha))) {
-    return 'already_reviewed';
+  if (input.role === 'reviewer' && input.pr !== undefined && input.headSha !== undefined) {
+    const later = laterRoundMarker(input);
+    const reviewed = later === undefined ? await github.reviewedOnHead(input.pr, input.headSha) : github.findingsCommented !== undefined && (await github.findingsCommented(input.pr, later));
+    if (reviewed) {
+      return 'already_reviewed';
+    }
   }
   return undefined;
 }
@@ -186,6 +203,7 @@ export function createRemoteSessionActivities(deps: RemoteSessionDeps) {
    *   has not moved. It ends the wait as `finished` with no tip, the no-progress path. A moved tip keeps the settle path.
    * - reviewer: a trusted review with a body exists on `headSha`, or (when the input has `findingsMarker`) a trusted
    *   comment on the PR carries that marker. The first of the two ends the wait. Both are reads on the same schedule.
+   *   A marker of a round after the first (#753) is the only signal: the head may already hold the earlier round's review.
    */
   async function waitForEnd(input: RemoteSessionInput, since: number, capMs: number): Promise<WaitEnd> {
     const context = Context.current();
@@ -194,7 +212,7 @@ export function createRemoteSessionActivities(deps: RemoteSessionDeps) {
     for (;;) {
       context.heartbeat();
       if (input.role === 'reviewer') {
-        if (input.pr !== undefined && input.headSha !== undefined && (await deps.github.reviewedOnHead(input.pr, input.headSha))) {
+        if (laterRoundMarker(input) === undefined && input.pr !== undefined && input.headSha !== undefined && (await deps.github.reviewedOnHead(input.pr, input.headSha))) {
           return { outcome: 'finished', headSha: input.headSha };
         }
         if (

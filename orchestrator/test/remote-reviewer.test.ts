@@ -375,6 +375,10 @@ interface Waited {
   readonly sleeps: number[];
   readonly markersAsked: string[];
   fired(): number;
+  /** From now on a trusted review with a body is on the head (the earlier round's). */
+  reviewOnHead(): void;
+  /** Replaces the rule for which marker has a comment on the PR. */
+  commentsVisible(rule: (marker: string) => boolean): void;
 }
 
 /**
@@ -382,15 +386,17 @@ interface Waited {
  * read whose comment list fills `appearsAfter` ms into the wait (never when undefined). The findings the step parses
  * afterwards come from the fake `gh`, so the round succeeds whatever the wait did; the wait is what is measured.
  */
-async function waitScenario(appearsAfter: number | undefined): Promise<Waited> {
+async function waitScenario(appearsAfter: number | undefined, withRound1Comment = false): Promise<Waited> {
   let t = 1_000_000;
   let fired = 0;
   let head = '';
   const sleeps: number[] = [];
   const markersAsked: string[] = [];
   const start = t;
+  let reviewed = false;
+  let visible: ((marker: string) => boolean) | undefined;
   const r = await remoteScenario(
-    (h) => [rawFindings(h, GOOD)],
+    (h) => [rawFindings(h, GOOD), ...(withRound1Comment ? [rawFindings(h, GOOD, { round: 1, id: 802, nodeId: 'IC_802' })] : [])],
     () => undefined,
     true,
     async (raw, repoDir) => {
@@ -408,9 +414,12 @@ async function waitScenario(appearsAfter: number | undefined): Promise<Waited> {
           claudeBranches: async () => ['claude/123'],
           branchTip: async () => head,
           checksPending: async () => false,
-          reviewedOnHead: async () => false,
+          reviewedOnHead: async () => reviewed,
           findingsCommented: async (_pr, marker) => {
             markersAsked.push(marker);
+            if (visible !== undefined) {
+              return visible(marker);
+            }
             const body = `${findingsMarker(77, head, 0)}\n\n\`\`\`json\n{}\n\`\`\``;
             return appearsAfter !== undefined && t >= start + appearsAfter && hasFindingsComment([{ id: 801, nodeId: 'IC_801', trusted: true, body }], marker);
           },
@@ -426,7 +435,18 @@ async function waitScenario(appearsAfter: number | undefined): Promise<Waited> {
     },
   );
   head = r.head;
-  return { r, sleeps, markersAsked, fired: () => fired };
+  return {
+    r,
+    sleeps,
+    markersAsked,
+    fired: () => fired,
+    reviewOnHead: () => {
+      reviewed = true;
+    },
+    commentsVisible: (rule) => {
+      visible = rule;
+    },
+  };
 }
 
 const total = (sleeps: readonly number[]): number => sleeps.reduce((sum, ms) => sum + ms, 0);
@@ -458,6 +478,28 @@ test('a later round on the SAME head fires its own session: a fixer that pushed 
   // along, this round found the round 0 session marker, fired nothing and stopped with MalformedFindings (the live drill, #677).
   await failureOf(w.r.run(w.r.activities.runRemoteReviewerSession, { round: 1 }));
   assert.equal(w.fired(), 2, 'round 1 started a session of its own');
+});
+
+test('round 1 after a fixer that pushed nothing fires a session and reads the round 1 comment (#753)', async () => {
+  const w = await waitScenario(0, true);
+  assert.equal((await w.r.run(w.r.activities.runRemoteReviewerSession)).findings, 1);
+  assert.equal(w.fired(), 1);
+  // The fixer pushed nothing: the head is the same, and the round 0 review is on it. The round 1 comment shows only once its session ran.
+  w.reviewOnHead();
+  w.commentsVisible((marker) => !marker.includes('round=1') || w.fired() >= 2);
+  const round = await w.r.run(w.r.activities.runRemoteReviewerSession, { round: 1 });
+  assert.equal(round.commentNodeId, 'IC_802', 'the round 1 comment is the one read');
+  assert.equal(w.fired(), 2, 'round 1 fired its own session');
+});
+
+test('a replay of round 1 whose comment already exists fires nothing (#753)', async () => {
+  const w = await waitScenario(0, true);
+  await w.r.run(w.r.activities.runRemoteReviewerSession);
+  w.reviewOnHead();
+  w.commentsVisible(() => true);
+  const round = await w.r.run(w.r.activities.runRemoteReviewerSession, { round: 1 });
+  assert.equal(round.commentNodeId, 'IC_802');
+  assert.equal(w.fired(), 1, 'the comment of the round is there, so no second session is launched');
 });
 
 test('a findings comment that appears mid-wait ends it within one poll, long before the cap', async () => {

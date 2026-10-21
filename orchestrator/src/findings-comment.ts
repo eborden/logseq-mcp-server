@@ -131,6 +131,15 @@ export function isFindingsMarker(value: string): boolean {
   return /^<!-- orchestrator-findings pr=[1-9]\d{0,9} head=[0-9a-f]{40} round=(?:0|[1-9]\d{0,5}) -->$/.test(value);
 }
 
+/** The round a findings marker names, or undefined when `value` is not a marker `findingsMarker` could have made (#753). */
+export function findingsMarkerRound(value: string): number | undefined {
+  if (!isFindingsMarker(value)) {
+    return undefined;
+  }
+  const match = /round=(\d+) -->$/.exec(value);
+  return match?.[1] === undefined ? undefined : Number(match[1]);
+}
+
 /** The JSON text of the one trusted comment that carries `marker`, with the ids of that comment. Refusals are as `parseFindingsComment`'s. */
 function keyedJson(candidates: readonly FindingsCandidate[], marker: string, what: string): { readonly json: string; readonly id: number; readonly nodeId: string } {
   const ours = keyedComments(candidates, marker);

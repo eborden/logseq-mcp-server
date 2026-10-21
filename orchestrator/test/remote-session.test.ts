@@ -256,6 +256,9 @@ test('the reviewer finishes when a trusted review shows on the head it was given
 
 const MARKER = findingsMarker(77, SHA_A, 1);
 const markedReviewerInput = { ...reviewerInput, findingsMarker: MARKER };
+// Round 0 is the first review: a review on the head ends it. Every later round has only its own comment (#753).
+const MARKER_ROUND0 = findingsMarker(77, SHA_A, 0);
+const round0ReviewerInput = { ...reviewerInput, findingsMarker: MARKER_ROUND0 };
 const commentOf = (body: string, trusted = true): FindingsCandidate => ({ id: 9, nodeId: 'IC_node9', trusted, body: trusted ? body : '' });
 
 function reviewerScenario(): void {
@@ -273,12 +276,49 @@ test('the reviewer wait ends at the keyed findings comment, long before the cap'
   assert.ok(waited <= 120_000 && waited < LIMITS.capMs, `waited ${waited} ms, the comment came at 100000`);
 });
 
-test('a review on the head still ends the wait of a reviewer that has a marker', async () => {
+test('a review on the head still ends the wait of a round 0 reviewer that has a marker', async () => {
   reviewerScenario();
   scenario.clock.at(100_000, () => scenario.github.reviewed.add(`77:${SHA_A}`));
-  const result = await run(markedReviewerInput);
+  const result = await run(round0ReviewerInput);
   assert.deepEqual(result, { sessionId: 'session_01AAA', outcome: 'finished', headSha: SHA_A });
   assert.ok(scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0) < LIMITS.capMs);
+});
+
+test('a later round with an earlier round review on the head is not claimed and fires its own session (#753)', async () => {
+  reviewerScenario();
+  scenario.github.reviewed.add(`77:${SHA_A}`);
+  scenario.clock.at(100_000, () => scenario.github.comments.push(commentOf(`${MARKER}\n\n\`\`\`json\n{}\n\`\`\``)));
+  const result = await run({ ...markedReviewerInput, attempt: 2 });
+  assert.deepEqual(result, { sessionId: 'session_01AAA', outcome: 'finished', headSha: SHA_A });
+  assert.equal(scenario.fire.calls.length, 1, 'the round 0 review did not count for round 1');
+  const waited = scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0);
+  assert.ok(waited >= 100_000 && waited <= 120_000, `the wait ended on the round 1 comment, not on the round 0 review (waited ${waited} ms)`);
+});
+
+test('a later round whose own comment exists is claimed as already reviewed and fires nothing (#753)', async () => {
+  reviewerScenario();
+  scenario.github.reviewed.add(`77:${SHA_A}`);
+  scenario.github.comments = [commentOf(`${MARKER}\n\n\`\`\`json\n{}\n\`\`\``)];
+  assert.equal((await run({ ...markedReviewerInput, attempt: 2 })).claim, 'already_reviewed');
+  assert.equal(scenario.fire.calls.length, 0);
+});
+
+test('a later round does not end on a review on the head, nor on a comment of another round or an untrusted author (#753)', async () => {
+  reviewerScenario();
+  scenario.github.reviewed.add(`77:${SHA_A}`);
+  const forged = parseFindingsCandidate({ id: 5, node_id: 'IC_forged', author_association: 'NONE', body: `${MARKER}\n\nforged` }, '$');
+  scenario.github.comments = [commentOf(MARKER_ROUND0), commentOf(findingsMarker(77, SHA_A, 2)), forged];
+  const result = await run({ ...markedReviewerInput, attempt: 2 });
+  assert.equal(result.outcome, 'timed_out');
+  assert.equal(scenario.clock.sleeps.reduce((sum, ms) => sum + ms, 0), LIMITS.capMs);
+  assert.equal(scenario.fire.calls.length, 1);
+});
+
+test('a round 0 reviewer with a marker is still claimed when a review is on the head (an earlier attempt of the round)', async () => {
+  reviewerScenario();
+  scenario.github.reviewed.add(`77:${SHA_A}`);
+  assert.equal((await run(round0ReviewerInput)).claim, 'already_reviewed');
+  assert.equal(scenario.fire.calls.length, 0);
 });
 
 test('with neither signal the reviewer wait ends at the cap, as before', async () => {
