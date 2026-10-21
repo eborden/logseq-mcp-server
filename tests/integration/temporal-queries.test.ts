@@ -188,9 +188,9 @@ describe('Temporal Queries Integration Tests', () => {
     it('should join mentions by week', async () => {
       const result = await exploreTimeline(client, { page: 'Bob', groupBy: 'week' });
 
-      // Weeks count 7-day blocks from January 1st, not ISO weeks: Jan 6th and 7th are week 1
+      // ISO weeks, Monday to Sunday (#660): Jan 6th, 7th and 10th are week 2
       expect(result.entries.map(t => [t.period ?? t.date, t.blocks.length])).toEqual([
-        ['2025-W01', 3], ['2025-W02', 1], ['2025-W03', 1], [null, 11],
+        ['2025-W02', 4], ['2025-W03', 1], [null, 11],
       ]);
     });
 
