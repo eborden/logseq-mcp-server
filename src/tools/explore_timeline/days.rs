@@ -34,11 +34,23 @@ pub fn day_of(block: &Value) -> Option<i64> {
 }
 
 /// The blocks once each, by `id`: a later block with the same id is dropped, so a block on the page
-/// that also links it stays the tree's block, with its children, and not the Datalog pull of it.
+/// that also links it stays the tree's block, with its children, and not the Datalog pull of it. That holds for a
+/// nested block too (#653): a block that is a descendant of any block in the list is dropped as its own entry.
 pub fn unique_by_id(blocks: Vec<Value>) -> Vec<Value> {
-    let mut seen: HashSet<i64> = HashSet::new();
     // the `Block` shape (`entity/shape.rs`) made the id a whole number
-    blocks.into_iter().filter(|block| seen.insert(block.get("id").and_then(crate::wire::whole_number).unwrap_or_default())).collect()
+    fn id_of(block: &Value) -> i64 {
+        block.get("id").and_then(crate::wire::whole_number).unwrap_or_default()
+    }
+    fn nested_ids(blocks: &[Value], out: &mut HashSet<i64>) {
+        for block in blocks {
+            let children = block.get("children").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+            out.extend(children.iter().map(id_of));
+            nested_ids(children, out);
+        }
+    }
+    let mut seen: HashSet<i64> = HashSet::new();
+    nested_ids(&blocks, &mut seen);
+    blocks.into_iter().filter(|block| seen.insert(id_of(block))).collect()
 }
 
 /// The blocks inside the period. With no period every block stays. With one, a block stays when its day is in it,
@@ -162,6 +174,14 @@ mod tests {
         let second = json!({"id": 2, "uuid": "other"});
         let again = json!({"id": 1, "uuid": "pull"});
         assert_eq!(unique_by_id(vec![first.clone(), second.clone(), again]), [first, second]);
+    }
+
+    #[test]
+    fn a_mention_that_is_nested_in_a_tree_block_is_dropped_at_any_depth() {
+        // #653: the child links its own page, so the mentions query returns it again
+        let tree = json!({"id": 1, "children": [{"id": 2, "children": [{"id": 3, "children": []}]}]});
+        let (child, grandchild, other) = (json!({"id": 2}), json!({"id": 3}), json!({"id": 4}));
+        assert_eq!(unique_by_id(vec![tree.clone(), child, grandchild, other.clone()]), [tree, other]);
     }
 
     #[test]
