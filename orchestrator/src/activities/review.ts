@@ -535,6 +535,8 @@ export function createReviewActivities(deps: ReviewDeps) {
       // `attempt` = round + 1, as the remote fixer's: a round that follows a fixer that pushed nothing reviews the same head, and
       // the session key has the head but no round, so without it the round re-attaches to the last round's finished session,
       // fires nothing, and finds no comment under the new round's marker (`MalformedFindings`). Round 0 is attempt 1, the old key.
+      // The claim and the wait of `runRemoteSession` also key a round after the first on its own marker comment, not on a review
+      // on the head, which the earlier round already left there (#753). `already_reviewed` below is then the round's own comment.
       const session = await remote.runRemoteSession({ role: 'reviewer', issue: input.issue, pr: input.pr, branch: issueBranch(input.issue), base: input.base, headSha: input.headSha, brief, findingsMarker: marker, attempt: input.round + 1 });
       if (session.outcome === 'failed' && session.claim !== 'already_reviewed') {
         // A fixed word only: the claim or the launch failure the session activity reported.
