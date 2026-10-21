@@ -80,6 +80,22 @@ async fn a_range_costs_two_calls_whatever_its_length() {
     assert!(result.get("page").is_none());
 }
 
+/// #659: `summary.totalBlocks` counts the same list as `totals.blocks` (nested blocks included with the content).
+#[tokio::test]
+async fn the_summary_counts_nested_blocks_as_the_totals_do() {
+    let child = json!([{"id": 12, "uuid": uuid(12), "content": "b", "page": {"id": 1}, "parent": {"id": 11}, "left": {"id": 11}}]);
+    let answers = vec![json!([journal(1, 20250101)]), json!([block(11, 1, "a"), child])];
+    let logseq = mock_logseq(answers.clone()).await;
+    let found = explore_timeline(&client(&logseq), &range(20250101, 20250107), TODAY).await.unwrap();
+    let result = result_of(&found.json);
+    assert_eq!(result["entries"][0]["blocks"].as_array().unwrap().len(), 1);
+    assert_eq!(result["summary"]["totalBlocks"], 2);
+    // without the content the blocks are the top-level ones alone, and so is the summary
+    let logseq = mock_logseq(answers).await;
+    let found = explore_timeline(&client(&logseq), &Args { include_content: false, ..range(20250101, 20250107) }, TODAY).await.unwrap();
+    assert_eq!(result_of(&found.json)["summary"]["totalBlocks"], 1);
+}
+
 #[tokio::test]
 async fn a_range_with_no_journal_makes_one_call_and_never_asks_for_blocks() {
     let logseq = mock_logseq(vec![json!([])]).await;
