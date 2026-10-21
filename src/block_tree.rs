@@ -204,10 +204,81 @@ pub fn build_block_trees_ordered(blocks: Vec<Map<String, Value>>, page_ids: &[i6
         .collect()
 }
 
+/// Flat Datalog blocks in document order (#652): each page's blocks as a pre-order walk of its tree, siblings in the
+/// `:block/left` chain's order, so any prefix holds a block's parent before the block. Pages keep the order their first
+/// block came in. A block whose parent is not among `blocks` is a root of its page; one with no page is a root of its own
+/// group. Nothing is dropped or changed, only moved.
+pub fn in_document_order(blocks: Vec<Value>) -> Vec<Value> {
+    let ids: Vec<i64> = blocks.iter().map(|block| block.as_object().and_then(|b| number_id(b.get("id"))).unwrap_or(0)).collect();
+    let lefts: Vec<Option<i64>> = blocks.iter().map(|block| block.as_object().and_then(|b| reference_id(b, "left"))).collect();
+    let node_ids: HashSet<i64> = ids.iter().copied().collect();
+
+    let mut children_of: HashMap<i64, Vec<usize>> = HashMap::new();
+    let mut roots_of: HashMap<Option<i64>, Vec<usize>> = HashMap::new();
+    let mut page_order: Vec<Option<i64>> = Vec::new();
+    for (i, block) in blocks.iter().enumerate() {
+        let object = block.as_object();
+        let parent = object.and_then(|b| reference_id(b, "parent"));
+        match parent {
+            Some(parent) if node_ids.contains(&parent) && parent != ids[i] => children_of.entry(parent).or_default().push(i),
+            _ => {
+                let page = object.and_then(|b| reference_id(b, "page")).or(parent);
+                if !roots_of.contains_key(&page) {
+                    page_order.push(page);
+                }
+                roots_of.entry(page).or_default().push(i);
+            }
+        }
+    }
+
+    fn walk(siblings: Vec<usize>, ids: &[i64], lefts: &[Option<i64>], children_of: &mut HashMap<i64, Vec<usize>>, out: &mut Vec<usize>) {
+        for i in order_siblings(siblings, |&i| ids[i], |&i| lefts[i]) {
+            out.push(i);
+            if let Some(below) = children_of.remove(&ids[i]) {
+                walk(below, ids, lefts, children_of, out);
+            }
+        }
+    }
+
+    let mut order: Vec<usize> = Vec::with_capacity(blocks.len());
+    for page in page_order {
+        walk(roots_of.remove(&page).unwrap_or_default(), &ids, &lefts, &mut children_of, &mut order);
+    }
+    // A parent cycle is reachable from no root: keep those blocks, in their given order, after the rest
+    if order.len() < blocks.len() {
+        let mut placed = vec![false; blocks.len()];
+        for &i in &order {
+            placed[i] = true;
+        }
+        order.extend((0..blocks.len()).filter(|&i| !placed[i]));
+    }
+    let mut slots: Vec<Option<Value>> = blocks.into_iter().map(Some).collect();
+    order.into_iter().map(|i| slots[i].take().expect("each block is placed once")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn linked(id: i64, parent: i64, left: i64) -> Value {
+        json!({"id": id, "parent": {"id": parent}, "left": {"id": left}, "page": {"id": 1}})
+    }
+
+    #[test]
+    fn blocks_come_in_document_order_with_each_parent_before_its_children() {
+        // page 1; 10 -> 11 -> 12 are top-level siblings; 20 and 21 are children of 10 (21 after 20); 30 is under 20
+        let shuffled = vec![linked(21, 10, 20), linked(12, 1, 11), linked(30, 20, 20), linked(11, 1, 10), linked(20, 10, 10), linked(10, 1, 1)];
+        let ids: Vec<i64> = in_document_order(shuffled).iter().map(|b| b["id"].as_i64().unwrap()).collect();
+        assert_eq!(ids, [10, 20, 30, 21, 11, 12]);
+    }
+
+    #[test]
+    fn a_parent_cycle_is_kept_after_the_rest() {
+        let blocks = vec![linked(2, 3, 3), linked(3, 2, 2), linked(1, 9, 9)];
+        let ids: Vec<i64> = in_document_order(blocks).iter().map(|b| b["id"].as_i64().unwrap()).collect();
+        assert_eq!(ids, [1, 2, 3]);
+    }
 
     fn object(value: Value) -> Map<String, Value> {
         value.as_object().cloned().unwrap()
