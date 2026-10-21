@@ -151,7 +151,8 @@ fn is_block_entity(entity: &Map<String, Value>) -> bool {
 
 /// Without `includeChildren`, the Editor API gives a block's `children` as
 /// unfetched `["uuid", "<id>"]` tuples rather than blocks. Keep only the children that are blocks
-/// with text, so slimming has nothing to choke on; `logseq_get_block` fetches the rest.
+/// with text, so slimming has nothing to choke on; `logseq_get_block` fetches the rest. A block that lost
+/// children this way gains `childrenTruncated: true` (#655, BR-0006), so it does not read as a leaf.
 fn with_fetched_children(block: &Map<String, Value>) -> Map<String, Value> {
     let Some(Value::Array(children)) = block.get("children") else { return block.clone() };
     let mut rest: Map<String, Value> = block.iter().filter(|(key, _)| key.as_str() != "children").map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -161,7 +162,11 @@ fn with_fetched_children(block: &Map<String, Value>) -> Map<String, Value> {
         .filter(|child| child.get("content").is_some_and(Value::is_string))
         .map(|child| Value::Object(with_fetched_children(child)))
         .collect();
+    let dropped = fetched.len() < children.len();
     rest.insert("children".into(), Value::Array(fetched));
+    if dropped {
+        rest.insert("childrenTruncated".into(), Value::Bool(true));
+    }
     rest
 }
 
@@ -353,7 +358,7 @@ mod tests {
         }));
         assert_eq!(
             Value::Object(with_fetched_children(&block)).to_string(),
-            r#"{"id":1,"uuid":"a","content":"p","children":[{"id":3,"uuid":"c","content":"kid","children":[]}]}"#
+            r#"{"id":1,"uuid":"a","content":"p","children":[{"id":3,"uuid":"c","content":"kid","children":[],"childrenTruncated":true}],"childrenTruncated":true}"#
         );
         // children that are not a list are left as they came
         let odd = object(json!({"id": 1, "children": {"id": 2}}));
