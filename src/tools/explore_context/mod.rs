@@ -53,6 +53,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::args::parse_args;
+use crate::block_tree::in_document_order;
 use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::compact::compact_topic_context;
@@ -752,14 +753,14 @@ pub fn resolved_from(input: &str, resolved: &ResolvedPage) -> Option<Value> {
 }
 
 /// The blocks of the page, or of every page of its alias group. For a group the page asked about
-/// comes first, so a cap keeps its own blocks before the aliases' (the order inside each part is the
-/// query's).
+/// comes first, so a cap keeps its own blocks before the aliases'. Each page's blocks are in document order (#652), so a
+/// cap keeps the start of the page, with every block's parent before it.
 fn blocks_of(fetched: Vec<Value>, aliased: bool, main_page_id: Option<i64>) -> Vec<Value> {
     if !aliased {
-        return fetched;
+        return in_document_order(fetched);
     }
     let (own, others): (Vec<Value>, Vec<Value>) = fetched.into_iter().partition(|block| id_of(block.get("page")) == main_page_id);
-    own.into_iter().chain(others).collect()
+    in_document_order(own.into_iter().chain(others).collect())
 }
 
 /// The page a linking block sits on: the tuple's page, else the block's own. None for a block with neither, which is
@@ -1394,8 +1395,9 @@ mod tests {
     fn an_alias_group_shows_the_page_asked_about_first() {
         let fetched = vec![block(1, 11), block(2, 10), block(3, 11), block(4, 10)];
         let ids = |blocks: Vec<Value>| blocks.iter().map(|b| b["id"].as_i64().unwrap()).collect::<Vec<_>>();
-        assert_eq!(ids(blocks_of(fetched.clone(), true, Some(10))), [2, 4, 1, 3]);
-        assert_eq!(ids(blocks_of(fetched, false, Some(10))), [1, 2, 3, 4]);
+        assert_eq!(ids(blocks_of(fetched, true, Some(10))), [2, 4, 1, 3]);
+        let one_page = vec![block(1, 10), block(2, 10), block(3, 10), block(4, 10)];
+        assert_eq!(ids(blocks_of(one_page, false, Some(10))), [1, 2, 3, 4]);
     }
 
     fn tuples() -> Vec<Backlink> {
