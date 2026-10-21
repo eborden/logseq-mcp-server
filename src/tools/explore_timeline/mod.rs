@@ -485,7 +485,9 @@ async fn read_timeline(client: &LogseqClient, args: &Args, period: Option<Period
     let range = period.map(|Period { start, end }| (start, end)).or(span);
     let date_range = range.map(|(start, end)| object_of(vec![("start", Value::from(start)), ("end", Value::from(end))]));
 
-    let total_blocks: usize = entries.iter().map(|entry| entry.blocks.len()).sum();
+    // The same list `totals.blocks` counts (#659): nested blocks included when the content is
+    let keys = keys_of(&entries, args.include_content);
+    let total_blocks = keys.len();
     let mut summary = Map::new();
     summary.insert("totalDays".to_owned(), Value::from(day_count(&entries)));
     summary.insert("totalBlocks".to_owned(), Value::from(total_blocks));
@@ -500,7 +502,6 @@ async fn read_timeline(client: &LogseqClient, args: &Args, period: Option<Period
         Vec::new()
     };
     let top_concept = top.first().map(|concept| concept.name.clone());
-    let keys = keys_of(&entries, args.include_content);
     Ok(Timeline { entries, keys, warnings, answered, date_range, summary: Value::Object(summary), top_concept })
 }
 
