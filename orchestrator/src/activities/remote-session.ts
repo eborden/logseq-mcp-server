@@ -128,7 +128,9 @@ function laterRoundMarker(input: RemoteSessionInput): string | undefined {
   if (input.role !== 'reviewer' || input.findingsMarker === undefined) {
     return undefined;
   }
-  return (findingsMarkerRound(input.findingsMarker) ?? 0) > 0 ? input.findingsMarker : undefined;
+  // Fail closed: only a marker that parses as round 0 may use the review on the head. A marker that does not parse (the
+  // boundary rejects those, so this is defense in depth) is treated as a later round, where only its own comment counts.
+  return findingsMarkerRound(input.findingsMarker) === 0 ? undefined : input.findingsMarker;
 }
 
 /** The first reason the work is taken, or undefined when the role may launch. Reads only. */
