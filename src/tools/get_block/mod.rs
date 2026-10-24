@@ -154,7 +154,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, snapshots: &Snapsh
     Ok(success_result(sent.into_iter().map(ContentBlock::text).collect()))
 }
 
-/// `BlockNotFoundError`, which shows the uuid as the caller wrote it.
+/// `BlockNotFoundError`, which shows the uuid it was asked for: for a call, the normalised one (#664).
 fn not_found(uuid: &str) -> ToolError {
     ToolError::Failed(format!(
         "Block not found: \"{uuid}\"\n\nTip: Block UUIDs come from search results or page queries. Verify the UUID is correct."
