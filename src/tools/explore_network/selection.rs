@@ -86,6 +86,13 @@ pub fn select_candidates(candidates: &HashMap<i64, Candidate>, frontier: &[i64],
     }
 }
 
+/// How many of this depth's candidates the selection left out that no earlier depth left out too. A page cut at
+/// one depth stays outside the network and can be offered again at the next, and counts once (#666).
+pub fn newly_dropped(candidates: &HashMap<i64, Candidate>, selection: &Selection, already_dropped: &mut HashSet<i64>) -> usize {
+    let admitted: HashSet<i64> = selection.admitted.iter().map(|c| c.id).collect();
+    candidates.keys().filter(|id| !admitted.contains(id)).filter(|id| already_dropped.insert(**id)).count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,6 +142,18 @@ mod tests {
         // page 1 keeps 10 (3 references), page 2 keeps 12 (5 references)
         assert_eq!(ids(&selection), [12, 10]);
         assert_eq!((selection.dropped_by_fanout, selection.dropped_by_budget), (2, 0));
+    }
+
+    #[test]
+    fn a_page_cut_at_two_depths_is_counted_once() {
+        let mut seen = HashSet::new();
+        let first = pool(vec![candidate(10, false, &[(1, 3)]), candidate(11, false, &[(1, 1)])]);
+        let selection = select_candidates(&first, &[1], 1, 10);
+        assert_eq!(newly_dropped(&first, &selection, &mut seen), 1);
+        // page 11 is offered again at the next depth and cut again, beside a new page 12
+        let second = pool(vec![candidate(11, false, &[(2, 1)]), candidate(12, false, &[(2, 1)]), candidate(13, false, &[(2, 5)])]);
+        let selection = select_candidates(&second, &[2], 1, 10);
+        assert_eq!(newly_dropped(&second, &selection, &mut seen), 1);
     }
 
     #[test]

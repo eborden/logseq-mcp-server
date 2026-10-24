@@ -75,7 +75,7 @@ use crate::tools::explore_context::resolved_from;
 use self::graph::{Edge, Links, Node, Nodes, build_edges, relabel_depths};
 use self::pages::{Resume, Token, View, stored_arguments};
 use self::queries::{Extras, connected_pages, connected_pages_grouped};
-use self::selection::{Candidate, select_candidates};
+use self::selection::{Candidate, newly_dropped, select_candidates};
 use self::warning::{HubPage, TruncationFacts, hub_pages_not_expanded, network_truncated_warning};
 use self::wire::{Link, connected_rows, connected_rows_with_snippets};
 
@@ -371,6 +371,8 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
     let with_snippets = options.with_snippets;
     let mut truncated = false;
     let mut dropped = 0usize;
+    // A page cut at one depth can come back as a candidate at the next: `dropped` counts it once (#666)
+    let mut dropped_ids: HashSet<i64> = HashSet::new();
     // Which rule dropped them (#132): `max_fanout` leaves a page's extra neighbours out, the walk's limit
     // leaves out what the walk can't hold.
     let mut dropped_by_fanout = 0usize;
@@ -482,7 +484,7 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
         if selection.admitted.len() < candidates.len() {
             truncated = true;
             first_drop_depth.get_or_insert(depth);
-            dropped += candidates.len() - selection.admitted.len();
+            dropped += newly_dropped(&candidates, &selection, &mut dropped_ids);
             dropped_by_fanout += selection.dropped_by_fanout;
             dropped_by_budget += selection.dropped_by_budget;
         }
