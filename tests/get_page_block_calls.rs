@@ -57,6 +57,15 @@ async fn a_block_costs_one_call_and_is_returned_as_sent() {
 }
 
 #[tokio::test]
+async fn a_pasted_ref_with_whitespace_and_capitals_asks_for_the_plain_lowercase_uuid() {
+    // #664: it was sent to LogSeq as written, and the block was not found
+    let logseq = mock_logseq(vec![editor_block(5, "Kickoff")]).await;
+    let pasted = format!(" (({}))\n", uuid(5).to_uppercase());
+    get_block::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"uuid": pasted}))).await.unwrap();
+    assert_eq!(args_of(&logseq, 0), [json!(uuid(5))]);
+}
+
+#[tokio::test]
 async fn children_are_asked_for_with_the_include_children_option() {
     let logseq = mock_logseq(vec![editor_block(5, "Parent")]).await;
     get_block::get_block(&client(&logseq), &uuid(5), true, false).await.unwrap();
