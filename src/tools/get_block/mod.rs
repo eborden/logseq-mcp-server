@@ -34,6 +34,7 @@ use serde_json::{Map, Value, json};
 
 use crate::args::parse_args;
 use crate::client::LogseqClient;
+use crate::edn::BlockUuid;
 use crate::errors::{InvalidParameter, ToolError};
 use crate::markdown::{FooterMeta, render_block, with_footer};
 use crate::output_format::OutputFormat;
@@ -100,6 +101,14 @@ fn stored_arguments(args: &Args, uuid: &str) -> Map<String, Value> {
     stored
 }
 
+/// The uuid a caller meant (#664): surrounding whitespace and one `((` `))` pair, as pasted from a ref, are dropped, and a
+/// uuid is lowercased. Text that is still not a uuid goes on as the caller wrote it, and LogSeq says whether it is a block.
+fn normalised_uuid(written: &str) -> String {
+    let trimmed = written.trim();
+    let inner = trimmed.strip_prefix("((").and_then(|rest| rest.strip_suffix("))")).map_or(trimmed, str::trim);
+    BlockUuid::parse(inner).map_or_else(|_| inner.to_owned(), |uuid| uuid.as_str().to_owned())
+}
+
 /// The refusal of a call with neither a uuid nor a cursor, before any LogSeq call (BR-0008).
 fn needs_uuid() -> ToolError {
     ToolError::InvalidParameter(InvalidParameter {
@@ -126,7 +135,9 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, snapshots: &Snapsh
         }
         None => (asked, None),
     };
-    let Some(uuid) = args.uuid.as_deref() else { return Err(needs_uuid()) };
+    let Some(written) = args.uuid.as_deref() else { return Err(needs_uuid()) };
+    let uuid = normalised_uuid(written);
+    let uuid = uuid.as_str();
     // The text the call sends for a block, which the character budget measures (#507)
     let markdown = args.format == Some(OutputFormat::Markdown);
     let text = |block: &Value| if markdown { with_footer(render_block(block), &FooterMeta::of_result(block, &[])) } else { block.to_string() };
@@ -143,7 +154,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, snapshots: &Snapsh
     Ok(success_result(sent.into_iter().map(ContentBlock::text).collect()))
 }
 
-/// `BlockNotFoundError`, which shows the uuid as the caller wrote it.
+/// `BlockNotFoundError`, which shows the uuid it was asked for: for a call, the normalised one (#664).
 fn not_found(uuid: &str) -> ToolError {
     ToolError::Failed(format!(
         "Block not found: \"{uuid}\"\n\nTip: Block UUIDs come from search results or page queries. Verify the UUID is correct."
@@ -280,6 +291,18 @@ mod tests {
         assert_eq!((again.uuid.as_deref(), again.include_children, again.resolve_refs, again.format), (Some("U1"), true, true, Some(OutputFormat::Markdown)));
         let plain = parse_args::<Args>(json!({"uuid": "u", "include_children": true}).as_object()).unwrap();
         assert_eq!(Value::Object(stored_arguments(&plain, "u")).to_string(), r#"{"uuid":"u","include_children":true}"#);
+    }
+
+    #[test]
+    fn a_pasted_ref_or_an_uppercase_uuid_is_read_as_the_uuid_it_stands_for() {
+        let plain = "00000000-0000-0000-0000-00000000abcd";
+        for written in [plain, "((00000000-0000-0000-0000-00000000abcd))", "  (( 00000000-0000-0000-0000-00000000ABCD ))\n", "00000000-0000-0000-0000-00000000ABCD"] {
+            assert_eq!(normalised_uuid(written), plain, "{written:?}");
+        }
+        // what is not a uuid goes on as written, brackets of a half pair included
+        for written in ["no such block", "((00000000-0000-0000-0000-00000000abcd)", "u1"] {
+            assert_eq!(normalised_uuid(written), written.trim(), "{written:?}");
+        }
     }
 
     #[test]
