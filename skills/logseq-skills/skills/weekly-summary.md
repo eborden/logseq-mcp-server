@@ -88,11 +88,9 @@ When the result has `summary.topConcepts` (`[{ name, count, days }]`, the pages 
 
 Confirm which TODOs remain genuinely open, and check for expired item text, per the Unresolved Items section of the reference:
 
-```bash
-grep -nE "^\s*-\s+(TODO|DOING|NOW|LATER) " <graph>/journals/YYYY_MM_*.md
-```
+Call `logseq_find_blocks` with `text` set to the marker (`"TODO "`, then `"DOING "`, `"NOW "` and `"LATER "`, one call each), `start_date` the first day of the week and `end_date` today. Each hit carries its `marker`, its UUID and its page, so the `## Unresolved` refs come from the same call. Ending at today also covers the check past the end of the period.
 
-This `grep` reads marker state only. It doesn't replace Step 4: it can't tell you what the week held, and it shows nothing of a day that has no open item.
+This call reads marker state only. It doesn't replace Step 4: it can't tell you what the week held, and it shows nothing of a day that has no open item. A journal `grep` is for a failed tool call only ("Reading the Period" in the reference).
 
 ### Step 6: Write and Verify the Page
 

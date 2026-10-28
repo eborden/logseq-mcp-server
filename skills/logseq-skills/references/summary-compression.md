@@ -135,17 +135,13 @@ If a call did fail:
 
 Include only items that are genuinely still open. Verify current marker state rather than trusting a prior summary's list — items get completed without anyone updating the summary that referenced them, so a previous `## Unresolved` section is a *candidate* list, not an answer.
 
-Verify against the journal source directly:
+Verify against the graph with `logseq_find_blocks`: `text` is the marker (`"TODO "`, then `"DOING "`, `"NOW "` and `"LATER "`, one call each), `start_date` the first day of the period and `end_date` today. Each hit carries its `marker`, UUID and page. A journal `grep` is for a failed tool call only (see "Reading the Period").
 
-```bash
-grep -nE "^\s*-\s+(TODO|DOING|NOW|LATER) " <journals>/<period-glob>.md
-```
+This call reads marker state only. It doesn't replace the period query and can't tell you what the period held.
 
-This `grep` reads marker state only. It doesn't replace the period query and can't tell you what the period held.
+**Check past the end of the period before calling anything unresolved.** An item raised on the last Thursday of the period may have been closed the following Monday. The open-items call above ends today, so it already shows what is still open; drop anything it no longer lists. For a DONE you need to see, `logseq_find_blocks` with `text` `"DONE "` over the same dates finds it. A summary that lists closed work as open is worse than one that omits it.
 
-**Check past the end of the period before calling anything unresolved.** An item raised on the last Thursday of the period may have been closed the following Monday. Read the journals between the end of the period and today, and drop anything since marked DONE. A summary that lists closed work as open is worse than one that omits it.
-
-Block UUIDs come from the `id::` property on the block, or from the blocks the period query returned.
+Block UUIDs come from the `logseq_find_blocks` hits above, or from the blocks the period query returned.
 
 Also check whether an item's own text has expired. A TODO reading "token expires in 3 weeks", written five weeks ago, is no longer a pending task — it is a missed deadline. Surface these to the user rather than carrying them forward silently.
 
