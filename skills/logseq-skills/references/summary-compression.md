@@ -135,7 +135,7 @@ If a call did fail:
 
 Include only items that are genuinely still open. Verify current marker state rather than trusting a prior summary's list — items get completed without anyone updating the summary that referenced them, so a previous `## Unresolved` section is a *candidate* list, not an answer.
 
-Verify against the graph with `logseq_find_blocks`: `text` is the marker (`"TODO "`, then `"DOING "`, `"NOW "` and `"LATER "`, one call each), `start_date` the first day of the period and `end_date` today. Each hit carries its `marker`, UUID and page. A journal `grep` is for a failed tool call only (see "Reading the Period").
+Verify against the graph with `logseq_find_blocks`: `text` is the marker (`"TODO "`, then `"DOING "`, `"NOW "` and `"LATER "`, one call each), `start_date` the first day of the period and `end_date` today. Each hit carries its `marker`, UUID and page. `text` is an unanchored, case-insensitive substring, so a hit can be prose ("know ", "later ", a lowercase "todo ") or a DONE block: keep only hits whose `marker` equals the marker you asked for, and follow `nextCursor` while `hasMore` is true. A journal `grep` is for a failed tool call only (see "Reading the Period").
 
 This call reads marker state only. It doesn't replace the period query and can't tell you what the period held.
 

@@ -88,7 +88,7 @@ When the result has `summary.topConcepts` (`[{ name, count, days }]`, the pages 
 
 Confirm which TODOs remain genuinely open, and check for expired item text, per the Unresolved Items section of the reference:
 
-Call `logseq_find_blocks` with `text` set to the marker (`"TODO "`, then `"DOING "`, `"NOW "` and `"LATER "`, one call each), `start_date` the first day of the week and `end_date` today. Each hit carries its `marker`, its UUID and its page, so the `## Unresolved` refs come from the same call. Ending at today also covers the check past the end of the period.
+Call `logseq_find_blocks` with `text` set to the marker (`"TODO "`, then `"DOING "`, `"NOW "` and `"LATER "`, one call each), `start_date` the first day of the week and `end_date` today. Each hit carries its `marker`, its UUID and its page, so the `## Unresolved` refs come from the same call. `text` is an unanchored, case-insensitive substring, so a hit can be prose ("know ", "later ", a lowercase "todo ") or a DONE block: keep only hits whose `marker` equals the marker you asked for, and follow `nextCursor` while `hasMore` is true. Ending at today also covers the check past the end of the period.
 
 This call reads marker state only. It doesn't replace Step 4: it can't tell you what the week held, and it shows nothing of a day that has no open item. A journal `grep` is for a failed tool call only ("Reading the Period" in the reference).
 

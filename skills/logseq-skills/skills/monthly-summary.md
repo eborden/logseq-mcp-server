@@ -115,7 +115,7 @@ The `(N words)` note is a teaching aid. Do not write it into a real summary.
 
 ### Step 5: Verify Open Items Across the Whole Month
 
-Call `logseq_find_blocks` with `text` set to the marker (`"TODO "`, then `"DOING "`, `"NOW "` and `"LATER "`, one call each), `start_date` the first day of the month and `end_date` today. Each hit carries its `marker`, its UUID and its page, and ending at today covers the check past the end of the month.
+Call `logseq_find_blocks` with `text` set to the marker (`"TODO "`, then `"DOING "`, `"NOW "` and `"LATER "`, one call each), `start_date` the first day of the month and `end_date` today. Each hit carries its `marker`, its UUID and its page, and ending at today covers the check past the end of the month. `text` is an unanchored, case-insensitive substring, so a hit can be prose ("know ", "later ", a lowercase "todo ") or a DONE block: keep only hits whose `marker` equals the marker you asked for, and follow `nextCursor` while `hasMore` is true.
 
 This call reads marker state only. It doesn't replace the Step 3 queries: it can't tell you what the month held, and it shows nothing of a day that has no open item.
 
