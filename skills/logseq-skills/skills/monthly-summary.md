@@ -115,11 +115,9 @@ The `(N words)` note is a teaching aid. Do not write it into a real summary.
 
 ### Step 5: Verify Open Items Across the Whole Month
 
-```bash
-grep -nE "^\s*-\s+(TODO|DOING|NOW|LATER) " <graph>/journals/YYYY_MM_*.md
-```
+Call `logseq_find_blocks` with `text` set to the marker (`"TODO "`, then `"DOING "`, `"NOW "` and `"LATER "`, one call each), `start_date` the first day of the month and `end_date` today. Each hit carries its `marker`, its UUID and its page, and ending at today covers the check past the end of the month.
 
-This `grep` reads marker state only. It doesn't replace the Step 3 queries: it can't tell you what the month held, and it shows nothing of a day that has no open item.
+This call reads marker state only. It doesn't replace the Step 3 queries: it can't tell you what the month held, and it shows nothing of a day that has no open item.
 
 Carry forward only genuinely open items. Apply the expired-text check from the reference with extra care at this altitude — a TODO carrying a deadline in its own words has usually come due within a month.
 
